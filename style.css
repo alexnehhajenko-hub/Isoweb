@@ -1,48 +1,13 @@
-:root{
-  --violet:#7b2cff;
-  --violet2:#5b2eff;
-  --ink:#1f1f2e;
-}
-
-html,body{
-  margin:0;
-  height:100%;
-  background:#f2f3f6;
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-  overscroll-behavior:none;
-}
-
+:root { --violet:#7b2cff; --violet2:#6523ff }
+* { box-sizing: border-box; }
+html,body { margin:0; height:100%; background:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+body { overflow:hidden; touch-action:none; }
 .toolbar{
-  position:fixed;
-  left:0; right:0; top:0;
-  display:flex; gap:12px; padding:12px;
-  background:#3e0077;
-  z-index:10;
-  overflow:auto;
+  position:fixed; left:0; top:0; right:0; z-index:10;
+  display:flex; gap:10px; padding:10px; background:#3b0077;
 }
-
-.btn{
-  height:40px; padding:0 14px;
-  border:0; border-radius:12px;
-  color:#fff; font-weight:800;
-  background:linear-gradient(180deg,var(--violet),var(--violet2));
+.toolbar button{
+  height:40px; padding:0 14px; border:0; border-radius:12px;
+  background:linear-gradient(180deg,var(--violet2),var(--violet)); color:#fff; font-weight:700;
 }
-
-#cv{
-  display:block;
-  position:fixed;
-  left:0; right:0; top:64px; bottom:0;
-  width:100vw; height:calc(100vh - 64px);
-  touch-action:none; user-select:none; -webkit-user-select:none;
-  background:#fff;
-}
-
-.toast{
-  position:fixed; left:50%; bottom:14px;
-  transform:translateX(-50%);
-  background:#1f1f2e; color:#fff;
-  padding:8px 10px; border-radius:10px;
-  opacity:0; transition:.25s; z-index:20;
-  pointer-events:none;
-}
-.toast.show{ opacity:1; }
+#isoCanvas{ position:fixed; left:0; top:60px; right:0; bottom:0; width:100vw; height:calc(100vh - 60px); display:block; background:#fff; }
