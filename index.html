@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Isopipe</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="toolbar">
+    <button onclick="setMode('line')">Линия</button>
+    <button onclick="setMode('erase')">Ластик</button>
+    <button onclick="setMode('symbol')">Символ</button>
+    <button onclick="fitCanvas()">Fit</button>
+    <button onclick="undo()">Назад</button>
+    <button onclick="clearCanvas()">Очистить</button>
+  </div>
+
+  <canvas id="isoCanvas"></canvas>
+
+  <script src="script.js"></script>
+</body>
+</html>
