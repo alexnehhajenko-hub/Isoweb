@@ -2,22 +2,26 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Isopipe</title>
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>IsoPipe — чертёж труб</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="toolbar">
-    <button onclick="setMode('line')">Линия</button>
-    <button onclick="setMode('erase')">Ластик</button>
-    <button onclick="setMode('symbol')">Символ</button>
-    <button onclick="fitCanvas()">Fit</button>
-    <button onclick="undo()">Назад</button>
-    <button onclick="clearCanvas()">Очистить</button>
-  </header>
+  <div id="toolbar" class="toolbar">
+    <button class="btn" onclick="setMode('line')">Линия</button>
+    <button class="btn" onclick="setMode('erase')">Ластик</button>
+    <button class="btn" onclick="setMode('symbol')">Символ</button>
+    <button class="btn" onclick="fitView()">Fit</button>
+    <button class="btn" onclick="undo()">Назад</button>
+    <button class="btn" onclick="clearAll()">Очистить</button>
+  </div>
 
-  <canvas id="isoCanvas"></canvas>
+  <canvas id="cv"></canvas>
 
+  <div id="toast" class="toast"></div>
+
+  <script src="valve.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
