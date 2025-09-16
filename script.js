@@ -1,252 +1,323 @@
-/* ===== Isopipe — простая рабочая версия ===== */
+/* IsoPipe (минимальная веб-версия) — полностью переписано
+   Режимы: Линия (две точки), Ластик (удалить ближайший сегмент),
+           Символ (вставить вентиль в ближайшую трубу).
+   Зум: пинч и колесо, Fit, Undo, Очистить.
+*/
 
-const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+(() => {
+  // ---------- БАЗА ----------
+  const DPR = Math.min(1.5, Math.max(1, window.devicePixelRatio||1));
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d', {alpha:false});
+  const toastEl = document.getElementById('toast');
 
-// --- Canvas & ctx
-const cv = document.getElementById('isoCanvas');
-const ctx = cv.getContext('2d', { alpha: false });
+  const toast=(t,ms=900)=>{
+    toastEl.textContent=t; toastEl.classList.add('show');
+    setTimeout(()=>toastEl.classList.remove('show'),ms);
+  };
 
-// состояние
-let mode = 'idle';            // 'line' | 'erase' | 'symbol' | 'idle'
-let firstPt = null;           // первая точка для линии
-const segs   = [];            // {a:{x,y}, b:{x,y}}
-const valves = [];            // {cx,cy,ang, lenPx}
-const history = [];           // стеки для undo
-
-// вид
-const GRID_STEP = 140;        // шаг лёгкой изометрической сетки (px «на мире»)
-let scale = 1;                // масштаб мира -> экран
-let offsetX = 0, offsetY = 0; // панорамирование (не требуется в этой версии, держим 0)
-
-// helpers
-const scr = (x,y)=>({x:x*scale + offsetX, y:y*scale + offsetY});
-const wor = (sx,sy)=>({x:(sx-offsetX)/scale, y:(sy-offsetY)/scale});
-
-function resize(){
-  const w = Math.floor(window.innerWidth  * DPR);
-  const h = Math.floor((window.innerHeight - document.querySelector('.toolbar').offsetHeight) * DPR);
-  if (cv.width !== w || cv.height !== h){
-    cv.width = w; cv.height = h;
-    draw();
-  }
-}
-window.addEventListener('resize', resize, {passive:true});
-resize();
-
-// ===== Рисование =====
-function drawGrid(){
-  const s = GRID_STEP * scale * DPR / DPR;
-  if (s < 40) return;
-  ctx.save();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = '#e7e9f2';
-  const w = cv.width, h = cv.height;
-
-  // три семейства линий под 30°/90°/150°
-  const angs = [30, 90, 150].map(a=>a*Math.PI/180);
-  for (const ang of angs){
-    const vx = Math.cos(ang), vy = Math.sin(ang);
-    // нормаль
-    const nx = -vy, ny = vx;
-
-    // сколько полос нужно
-    const need = Math.ceil(Math.max(w,h)/s) + 3;
-    for (let k=-need; k<=need; k++){
-      const bx = nx * (k*GRID_STEP), by = ny * (k*GRID_STEP);
-      const A = scr(bx - vx*20000, by - vy*20000);
-      const B = scr(bx + vx*20000, by + vy*20000);
-      ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-
-function draw(){
-  // фон
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0,0,cv.width,cv.height);
-
-  // сетка
-  drawGrid();
-
-  // линии труб
-  ctx.lineCap='round'; ctx.lineJoin='round';
-  for (const s of segs){
-    const A=scr(s.a.x,s.a.y), B=scr(s.b.x,s.b.y);
-    ctx.strokeStyle = '#6b35ff'; ctx.lineWidth = 10 * DPR; ctx.globalAlpha=.8;
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-    ctx.strokeStyle = '#7f62ff'; ctx.lineWidth = 6 * DPR; ctx.globalAlpha=1;
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-  }
-
-  // вентили (EU-стиль: «бабочка» в коротком куске трубы + ручка)
-  for (const v of valves) drawValve(v);
-}
-
-function drawValve(v){
-  const len = v.lenPx;   // длина вставки по трубе в px мира
-  const half = len/2;
-
-  // локальный базис
-  const ca = Math.cos(v.ang), sa = Math.sin(v.ang);
-  const px = (t)=>({x: v.cx + ca*t, y: v.cy + sa*t});
-
-  // сам «кусок трубы» поверх основной
-  const A = scr(px(-half).x, px(-half).y);
-  const B = scr(px( half).x, px( half).y);
-  ctx.strokeStyle = '#6b35ff'; ctx.lineWidth = 10 * DPR; ctx.globalAlpha=.95;
-  ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-  ctx.strokeStyle = '#7f62ff'; ctx.lineWidth = 6 * DPR; ctx.globalAlpha=1;
-  ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-
-  // «бабочка» (две треугольные створки ISO-стиля)
-  ctx.save();
-  const C = scr(v.cx, v.cy);
-  ctx.translate(C.x, C.y);
-  ctx.rotate(v.ang);
-  const w = 7;           // «толщина трубы» символически (px экрана)
-  const t = half - 4;    // треугольники не на самом краю
-  ctx.fillStyle = '#5b2bff';
-
-  // левый треугольник
-  ctx.beginPath();
-  ctx.moveTo(-t*DPR, 0);
-  ctx.lineTo(-2*DPR, -w*DPR/2);
-  ctx.lineTo(-2*DPR,  w*DPR/2);
-  ctx.closePath(); ctx.fill();
-
-  // правый треугольник
-  ctx.beginPath();
-  ctx.moveTo( t*DPR, 0);
-  ctx.lineTo( 2*DPR, -w*DPR/2);
-  ctx.lineTo( 2*DPR,  w*DPR/2);
-  ctx.closePath(); ctx.fill();
-
-  // ручка: короткая черта «вверх» для горизонтальной трубы,
-  //       и «вперёд» (мы рисуем как поперечную короткую) для вертикальной.
-  ctx.strokeStyle = '#222'; ctx.lineWidth = 2*DPR;
-  const up = 10*DPR;
-  // ручка всегда перпендикулярна трубе
-  ctx.beginPath();
-  ctx.moveTo(0,0);
-  ctx.lineTo(0,-up);
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-// ===== Логика =====
-function setMode(m){ mode = m; firstPt = null; }
-function fitCanvas(){ scale = 1; offsetX=0; offsetY=0; draw(); }
-function undo(){
-  if (!history.length) return;
-  const act = history.pop();
-  if (act.type==='addSeg') segs.pop();
-  if (act.type==='addValve') valves.pop();
-  if (act.type==='splitSeg'){
-    // вернуть исходный сегмент
-    segs.splice(act.index, 2, act.original);
-  }
-  draw();
-}
-function clearCanvas(){
-  segs.length=0; valves.length=0; firstPt=null; history.length=0; draw();
-}
-
-// ближайший сегмент и параметр t
-function nearestSeg(sx,sy){
-  const p = wor(sx,sy);
-  let bestI=-1, bestT=0, bestD=1e9, bestA=null, bestB=null;
-  segs.forEach((s,i)=>{
-    const ax=s.a.x, ay=s.a.y, bx=s.b.x, by=s.b.y;
-    const vx=bx-ax, vy=by-ay;
-    const len2 = vx*vx+vy*vy; if(!len2) return;
-    let t = ((p.x-ax)*vx + (p.y-ay)*vy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    const px=ax+t*vx, py=ay+t*vy;
-    const d = Math.hypot(px-p.x, py-p.y);
-    if (d<bestD){ bestD=d; bestI=i; bestT=t; bestA={x:ax,y:ay}; bestB={x:bx,y:by}; }
-  });
-  return {i:bestI, t:bestT, d:bestD, A:bestA, B:bestB};
-}
-
-// разрез сегмента и вставка вентили
-function insertValveAt(sx,sy){
-  const hit = nearestSeg(sx,sy);
-  if (hit.i<0 || hit.d > 20/scale){ return false; }
-  const s = segs[hit.i];
-  const ax=s.a.x, ay=s.a.y, bx=s.b.x, by=s.b.y;
-  const vx=bx-ax, vy=by-ay;
-  const ang = Math.atan2(vy,vx);
-
-  // длина «кусочка трубы» под символ (≈40px экрана в мировых единицах)
-  const lenScreenPx = 40;       // выглядит как «10 мм»
-  const lenWorld = lenScreenPx/scale;
-
-  // центр
-  const cx = ax + vx*hit.t, cy = ay + vy*hit.t;
-
-  // точки разделения
-  const hx = (lenWorld/2) * Math.cos(ang);
-  const hy = (lenWorld/2) * Math.sin(ang);
-  const L = { a:{x:ax, y:ay}, b:{x:cx-hx, y:cy-hy} };
-  const R = { a:{x:cx+hx, y:cy+hy}, b:{x:bx, y:by} };
-
-  // заменить один сегмент на два
-  segs.splice(hit.i, 1, L, R);
-
-  // сам вентиль
-  valves.push({ cx, cy, ang, lenPx: lenWorld });
-
-  history.push({type:'splitSeg', index:hit.i, original:s});
-  history.push({type:'addValve'});
-  return true;
-}
-
-// удаление сегмента «ластиком» (тап около сегмента)
-function eraseAt(sx,sy){
-  const hit = nearestSeg(sx,sy);
-  if (hit.i<0 || hit.d > 16/scale) return false;
-  const removed = segs.splice(hit.i,1)[0];
-  history.push({type:'addSeg'}); // обратная операция для undo
-  return true;
-}
-
-// ===== Ввод =====
-cv.addEventListener('pointerdown', (e)=>{
-  const sx = e.clientX * DPR, sy = e.clientY * DPR;
-
-  if (mode==='line'){
-    if (!firstPt){
-      firstPt = wor(sx,sy);
-    } else {
-      const second = wor(sx,sy);
-      segs.push({ a:firstPt, b:second });
-      history.push({type:'addSeg'});
-      firstPt = null;
+  // ---------- ВИД ----------
+  const view = { cx:0, cy:0, s:1 };
+  function resize(){
+    const w = Math.floor((innerWidth)*DPR);
+    const h = Math.floor((innerHeight-64)*DPR);
+    if (cv.width!==w || cv.height!==h){
+      cv.width=w; cv.height=h;
       draw();
     }
-    return;
+  }
+  window.addEventListener('resize', resize);
+
+  const Mode = { idle:'idle', line:'line', erase:'erase', symbol:'symbol' };
+  let mode = Mode.idle;
+
+  // ---------- ДАННЫЕ ----------
+  const segs = [];    // {a:{x,y}, b:{x,y}}
+  const symbols = []; // {x,y,angle,size}
+  let history = [];
+
+  let firstPt = null;
+
+  // ---------- УТИЛЫ ----------
+  const screenToWorld = (sx,sy)=>({ x:(sx - view.cx)/view.s, y:(sy - view.cy)/view.s });
+  const worldToScreen = (x,y)=>({ x:view.cx + x*view.s, y:view.cy + y*view.s });
+
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function snapToNodes(raw){
+    const R = 18*DPR;
+    let best=null, bestD=Infinity;
+    for (const s of segs){
+      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
+      const dA=Math.hypot(A.x-(raw.x*view.s+view.cx), A.y-(raw.y*view.s+view.cy));
+      const dB=Math.hypot(B.x-(raw.x*view.s+view.cx), B.y-(raw.y*view.s+view.cy));
+      if(dA<bestD && dA<=R){ best={...s.a}; bestD=dA; }
+      if(dB<bestD && dB<=R){ best={...s.b}; bestD=dB; }
+    }
+    return best || raw;
   }
 
-  if (mode==='erase'){
-    if (!eraseAt(sx,sy)) ; // мимо — ничего
+  function saveHistory(){
+    history.push({
+      segs: JSON.parse(JSON.stringify(segs)),
+      symbols: JSON.parse(JSON.stringify(symbols))
+    });
+    if (history.length>100) history.shift();
+  }
+
+  // ---------- РИСОВАНИЕ ----------
+  function drawGrid(){
+    const step = 180; // «изометрическая» лёгкая
+    const alpha=.10;
+    ctx.save();
+    ctx.lineWidth=1; ctx.strokeStyle='#cfd3dc';
+
+    const s = step*view.s;
+    if (s<30){ ctx.restore(); return; }
+
+    // диагонали (30°/150°) и горизонтали
+    const lines = [
+      Math.PI/6,                  // 30°
+      Math.PI/2,                  // 90°
+      Math.PI - Math.PI/6         // 150°
+    ];
+
+    for (const ang of lines){
+      const vx=Math.cos(ang), vy=Math.sin(ang);
+      const px=-vy, py=vx;
+      const need = Math.ceil(Math.max(cv.width,cv.height)/s)+2;
+      for (let k=-need;k<=need;k++){
+        const bx=px*k*step, by=py*k*step;
+        const A=worldToScreen(bx - vx*20000, by - vy*20000);
+        const B=worldToScreen(bx + vx*20000, by + vy*20000);
+        ctx.globalAlpha=alpha;
+        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function draw(){
+    // фон
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+
+    // сетка
+    drawGrid();
+
+    // сегменты
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    for (const s of segs){
+      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
+      // обводка
+      ctx.strokeStyle='#5b2eff'; ctx.lineWidth=10; ctx.globalAlpha=.25;
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+      // сама труба
+      ctx.strokeStyle='#7b2cff'; ctx.lineWidth=8; ctx.globalAlpha=1;
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+    }
+
+    // символы
+    for (const it of symbols){
+      const S = worldToScreen(it.x,it.y);
+      drawValveSymbol(ctx, S.x, S.y, it.angle, it.size);
+    }
+  }
+
+  // ---------- ВСТАВКА СИМВОЛА В ТРУБУ ----------
+  function insertValveAtWorld(pW){
+    // найти ближайший сегмент
+    let bestI=-1, bestD=Infinity, bestT=0, bestAng=0, bestP=null;
+    const R = 24/view.s; // радиус поиска в мире
+    for (let i=0;i<segs.length;i++){
+      const s=segs[i];
+      const v={x:s.b.x-s.a.x,y:s.b.y-s.a.y};
+      const w={x:pW.x-s.a.x,y:pW.y-s.a.y};
+      const len2=v.x*v.x+v.y*v.y; if(len2===0) continue;
+      let t = (v.x*w.x+v.y*w.y)/len2; t=Math.max(0,Math.min(1,t));
+      const P={x:s.a.x+v.x*t, y:s.a.y+v.y*t};
+      const d=dist(P,pW);
+      if(d<bestD){ bestD=d; bestI=i; bestT=t; bestP=P; bestAng=Math.atan2(v.y,v.x); }
+    }
+    if (bestI===-1 || bestD>R){ toast('Нет трубы рядом'); return; }
+
+    // разрезаем сегмент и вставляем символ
+    const s = segs[bestI];
+    const v={x:s.b.x-s.a.x,y:s.b.y-s.a.y};
+    const len=Math.hypot(v.x,v.y);
+    const keep = Math.max(6/view.s, len*0.06); // вырез маленького кусочка
+
+    const dir={x:v.x/len, y:v.y/len};
+    const P0={x:bestP.x-dir.x*keep, y:bestP.y-dir.y*keep};
+    const P1={x:bestP.x+dir.x*keep, y:bestP.y+dir.y*keep};
+
+    // заменить на два куска (если есть смысл)
+    const leftLen = Math.hypot(P0.x-s.a.x, P0.y-s.a.y);
+    const rightLen= Math.hypot(s.b.x-P1.x, s.b.y-P1.y);
+    const repl=[];
+    if (leftLen>1e-4)  repl.push({a:{...s.a}, b:P0});
+    if (rightLen>1e-4) repl.push({a:P1, b:{...s.b}});
+    saveHistory();
+    segs.splice(bestI,1,...repl);
+
+    // добавить символ
+    symbols.push({ x:bestP.x, y:bestP.y, angle:bestAng, size:28 });
     draw();
-    return;
   }
 
-  if (mode==='symbol'){
-    if (!insertValveAt(sx,sy)) ; // мимо — ничего
+  // ---------- ВВОД ----------
+  const ZOOM = { min:0.4*DPR, max:8*DPR, step:1.12 };
+  let pointers=new Map();
+  let last1=null;
+
+  cv.addEventListener('pointerdown', (e)=>{
+    cv.setPointerCapture?.(e.pointerId);
+    const p={x:e.clientX*DPR,y:e.clientY*DPR};
+    pointers.set(e.pointerId,p);
+    if (pointers.size===1) last1=p;
+  }, {passive:true});
+
+  cv.addEventListener('pointermove', (e)=>{
+    if (!pointers.has(e.pointerId)) return;
+    const cur={x:e.clientX*DPR, y:e.clientY*DPR};
+    const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,cur);
+
+    if (pointers.size>=2){
+      const ids=[...pointers.keys()];
+      const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
+      const ap=(ids[0]===e.pointerId?prev:a), bp=(ids[1]===e.pointerId?prev:b);
+      const dPrev=Math.hypot(ap.x-bp.x,ap.y-bp.y), dCur=Math.hypot(a.x-b.x,a.y-b.y);
+      if (dPrev>0){
+        const cCur={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+        const f=dCur/dPrev;
+        const nx = Math.max(ZOOM.min, Math.min(view.s*f, ZOOM.max));
+        const k = nx / view.s;
+        view.cx += (cCur.x - view.cx) - (cCur.x - view.cx)*k;
+        view.cy += (cCur.y - view.cy) - (cCur.y - view.cy)*k;
+        view.s = nx;
+        draw();
+      }
+      last1=null; return;
+    }
+
+    // перетаскивание полотна (idle)
+    if (last1 && mode===Mode.idle){
+      view.cx += cur.x-last1.x;
+      view.cy += cur.y-last1.y;
+      last1=cur;
+      draw();
+    }
+  }, {passive:true});
+
+  function endPtr(e){ pointers.delete(e.pointerId); last1=(pointers.size===1)?[...pointers.values()][0]:null; }
+  cv.addEventListener('pointerup', endPtr, {passive:true});
+  cv.addEventListener('pointercancel', endPtr, {passive:true});
+
+  cv.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    const sx=e.clientX*DPR, sy=e.clientY*DPR;
+    const factor = e.deltaY<0 ? ZOOM.step : (1/ZOOM.step);
+    const nextScale = Math.max(ZOOM.min, Math.min(view.s*factor, ZOOM.max));
+    const k = nextScale / view.s;
+    view.cx += (sx - view.cx) - (sx - view.cx)*k;
+    view.cy += (sy - view.cy) - (sy - view.cy)*k;
+    view.s  = nextScale;
     draw();
-    return;
+  }, {passive:false});
+
+  // тапы/клики
+  cv.addEventListener('click', (e)=>{
+    const sx=e.clientX*DPR, sy=e.clientY*DPR;
+    const W=screenToWorld(sx,sy);
+
+    if (mode===Mode.line){
+      if (!firstPt){
+        firstPt = snapToNodes(W);
+        toast('Поставьте 2-ю точку');
+        return;
+      }
+      const a=firstPt, b=snapToNodes(W);
+      saveHistory();
+      segs.push({a,b});
+      firstPt=null;
+      draw();
+      return;
+    }
+
+    if (mode===Mode.erase){
+      // удалить ближайший сегмент
+      let bestI=-1, bestD=Infinity;
+      const R = 16/DPR; // в мире
+      for (let i=0;i<segs.length;i++){
+        const s=segs[i];
+        const A=s.a, B=s.b;
+        const vx=B.x-A.x, vy=B.y-A.y, wx=W.x-A.x, wy=W.y-A.y;
+        const c1=vx*wx+vy*wy; if(c1<=0){ var d=Math.hypot(W.x-A.x,W.y-A.y); }
+        else{
+          const c2=vx*vx+vy*vy;
+          if (c2<=c1){ d=Math.hypot(W.x-B.x,W.y-B.y); }
+          else{
+            const t=c1/c2, px=A.x+t*vx, py=A.y+t*vy;
+            d=Math.hypot(W.x-px,W.y-py);
+          }
+        }
+        if (d<bestD){ bestD=d; bestI=i; }
+      }
+      if (bestI!==-1 && bestD<=R){
+        saveHistory();
+        segs.splice(bestI,1);
+        draw();
+      } else {
+        toast('Нет линии рядом');
+      }
+      return;
+    }
+
+    if (mode===Mode.symbol){
+      insertValveAtWorld(W);
+      return;
+    }
+
+    // idle — ничего
+  });
+
+  // ---------- КНОПКИ / API ----------
+  window.setMode = (m)=>{
+    mode = (m==='line')?Mode.line : (m==='erase')?Mode.erase : (m==='symbol')?Mode.symbol : Mode.idle;
+    firstPt=null;
+    if (mode===Mode.line) toast('Режим Линия: поставьте 1-ю точку');
+    if (mode===Mode.erase) toast('Ластик: тап по трубе');
+    if (mode===Mode.symbol) toast('Символ: тап по трубе');
+  };
+
+  window.fitView = ()=>{
+    view.s = Math.min(cv.width,cv.height)/900;
+    view.s = Math.max(ZOOM.min, Math.min(ZOOM.max, view.s));
+    view.cx = cv.width/2; view.cy = cv.height/2;
+    draw();
+  };
+
+  window.undo = ()=>{
+    const h=history.pop();
+    if (!h){ toast('История пуста'); return; }
+    segs.length=0; segs.push(...h.segs);
+    symbols.length=0; symbols.push(...h.symbols);
+    draw();
+  };
+
+  window.clearAll = ()=>{
+    saveHistory();
+    segs.length=0; symbols.length=0; firstPt=null; mode=Mode.idle;
+    draw();
+  };
+
+  // ---------- СТАРТ ----------
+  function boot(){
+    resize();
+    view.cx=cv.width/2; view.cy=cv.height/2; view.s=Math.min(cv.width,cv.height)/900;
+    draw();
+    toast('Готово. Выберите режим: Линия / Ластик / Символ.');
   }
-}, {passive:true});
-
-// первичный рендер
-draw();
-
-// ——— API для кнопок ———
-window.setMode = setMode;
-window.fitCanvas = fitCanvas;
-window.undo = undo;
-window.clearCanvas = clearCanvas;
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot, {once:true});
+  else boot();
+})();
