@@ -2,22 +2,20 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
   <title>Isoweb</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-  <div class="toolbar" id="toolbar">
+  <div id="toolbar" class="toolbar">
     <button onclick="setMode('line')">Линия</button>
     <button onclick="setMode('erase')">Ластик</button>
-    <button onclick="prepareValve()">Символ</button>
-    <button onclick="fitCanvas()">Fit</button>
+    <button onclick="setMode('valve')">Символ</button>
+    <button onclick="fitView()">Fit</button>
     <button onclick="undo()">Назад</button>
-    <button onclick="clearCanvas()">Очистить</button>
+    <button onclick="clearAll()">Очистить</button>
   </div>
-
-  <canvas id="isoCanvas"></canvas>
+  <canvas id="cv"></canvas>
 
   <script src="valve.js"></script>
   <script src="script.js"></script>
