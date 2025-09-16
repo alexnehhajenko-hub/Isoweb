@@ -1,35 +1,16 @@
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #f8f9fa;
+:root{
+  --violet:#6e34ff; --violet2:#5325e6; --ink:#1b1b22; --paper:#ffffff;
 }
-
-#toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px;
-  background: #4b0082;
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#f5f6fb;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,'Inter',sans-serif}
+.toolbar{
+  position:sticky; top:0; left:0; right:0; z-index:10;
+  display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+  padding:10px; background:var(--violet2);
 }
-
-#toolbar button {
-  padding: 8px 12px;
-  border: none;
-  border-radius: 8px;
-  background: #9370db;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
+.toolbar button{
+  height:40px; padding:0 14px; font-weight:700; color:#fff;
+  border:0; border-radius:12px; background:linear-gradient(180deg,var(--violet),#7f5bff);
 }
-
-#toolbar button:hover {
-  background: #ba55d3;
-}
-
-#isoCanvas {
-  width: 100vw;
-  height: 90vh;
-  display: block;
-  background: white;
-  border: 1px solid #ccc;
-}
+.toolbar button:active{transform:translateY(1px)}
+#isoCanvas{display:block; width:100vw; height:calc(100vh - 60px); background:var(--paper)}
