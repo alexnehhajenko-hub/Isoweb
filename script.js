@@ -1,323 +1,221 @@
-/* IsoPipe (минимальная веб-версия) — полностью переписано
-   Режимы: Линия (две точки), Ластик (удалить ближайший сегмент),
-           Символ (вставить вентиль в ближайшую трубу).
-   Зум: пинч и колесо, Fit, Undo, Очистить.
-*/
+// === ПАРАМЕТРЫ ТОЧНОСТИ ===
+const SNAP_PX = 14;        // радиус снапа к узлам (px)
+const TAP_TOL_PX = 8;      // сколько «дрожания» пальца считать кликом (px)
+const LINE_WIDTH = 4;      // толщина линий (в логических px, умножится на DPR)
+const GRID_ALPHA = 0.12;   // прозрачность сетки
+// ==========================
 
-(() => {
-  // ---------- БАЗА ----------
-  const DPR = Math.min(1.5, Math.max(1, window.devicePixelRatio||1));
-  const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d', {alpha:false});
-  const toastEl = document.getElementById('toast');
+const cv = document.getElementById('isoCanvas');
+const hud = document.getElementById('toolbar');
+const ctx = cv.getContext('2d', { alpha:false });
+const DPR = Math.max(1, Math.min(devicePixelRatio||1, 2));
+let W=0,H=0;
 
-  const toast=(t,ms=900)=>{
-    toastEl.textContent=t; toastEl.classList.add('show');
-    setTimeout(()=>toastEl.classList.remove('show'),ms);
-  };
+const state = {
+  mode: 'idle',        // 'line' | 'erase' | 'idle'
+  first: null,         // первая точка линии (в экранных координатах)
+  segs: [],            // массив сегментов {a:{x,y}, b:{x,y}}
+  history: [],
+  view: { s:1*DPR, cx:0, cy:0 }, // масштаб и центр (экран)
+  placingValve: false, // флаг «поставить один вентиль»
+};
 
-  // ---------- ВИД ----------
-  const view = { cx:0, cy:0, s:1 };
-  function resize(){
-    const w = Math.floor((innerWidth)*DPR);
-    const h = Math.floor((innerHeight-64)*DPR);
-    if (cv.width!==w || cv.height!==h){
-      cv.width=w; cv.height=h;
+function resize(){
+  const r = cv.getBoundingClientRect();
+  W = Math.round(r.width*DPR);
+  H = Math.round(r.height*DPR);
+  cv.width = W; cv.height = H;
+  if(state.view.cx===0 && state.view.cy===0){ state.view.cx=W/2; state.view.cy=H/2; }
+  draw();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---- Утилиты координат (здесь всё в экранных px) ----
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function snapToNode(p){
+  let best=null, bestD=1e9;
+  for(const s of state.segs){
+    for(const n of [s.a,s.b]){
+      const d = dist(p,n);
+      if(d<bestD){ bestD=d; best=n; }
+    }
+  }
+  return (bestD <= SNAP_PX*DPR) ? {x:best.x,y:best.y} : p;
+}
+
+// ---- Рисование ----
+function drawGrid(){
+  ctx.save();
+  ctx.globalAlpha = GRID_ALPHA;
+  ctx.strokeStyle = '#cfd3dc';
+  ctx.lineWidth = 1;
+  const step = 180 * state.view.s;   // крупная изометрическая сетка не нужна, дадим лёгкие диагонали
+  const need = 3 + Math.ceil(Math.max(W,H)/step);
+  const angles = [30, 90, 150];
+  for(const deg of angles){
+    const a = deg*Math.PI/180, vx=Math.cos(a), vy=Math.sin(a);
+    for(let k=-need;k<=need;k++){
+      const bx = state.view.cx + (-vy)*k*step;
+      const by = state.view.cy + ( vx)*k*step;
+      ctx.beginPath();
+      ctx.moveTo(bx - vx*99999, by - vy*99999);
+      ctx.lineTo(bx + vx*99999, by + vy*99999);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function draw(){
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H);
+  drawGrid();
+
+  // линии
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  for(const s of state.segs){
+    ctx.strokeStyle = '#7b2cff';
+    ctx.lineWidth = LINE_WIDTH*DPR;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+  }
+
+  // предпросмотр второй точки
+  if(state.mode==='line' && state.first && state._preview){
+    ctx.setLineDash([8,8]);
+    ctx.strokeStyle='#16a34a';
+    ctx.lineWidth = Math.max(3, LINE_WIDTH*DPR-1);
+    ctx.beginPath(); ctx.moveTo(state.first.x,state.first.y); ctx.lineTo(state._preview.x,state._preview.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // маркеры
+    ctx.fillStyle='#16a34a'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+    for(const p of [state.first,state._preview]){
+      ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    }
+  }
+}
+
+// ---- История ----
+function pushHistory(){ state.history.push(JSON.stringify(state.segs)); if(state.history.length>50) state.history.shift(); }
+function undo(){ if(!state.history.length) return; state.segs = JSON.parse(state.history.pop()); state.first=null; state._preview=null; draw(); }
+window.undo = undo;
+function clearCanvas(){ pushHistory(); state.segs=[]; state.first=null; state._preview=null; draw(); }
+window.clearCanvas = clearCanvas;
+function fitCanvas(){ state.view.s=1*DPR; state.view.cx=W/2; state.view.cy=H/2; draw(); }
+window.fitCanvas = fitCanvas;
+
+// ---- Режимы ----
+function setMode(m){ state.mode=m; state.first=null; state._preview=null; state.placingValve=false; }
+window.setMode = setMode;
+function prepareValve(){ setMode('idle'); state.placingValve=true; } // поставить ОДИН вентиль
+window.prepareValve = prepareValve;
+
+// ---- Взаимодействие (тач/мышь) ----
+let pointers=new Map();
+let downInfo=null;
+
+cv.addEventListener('pointerdown', (e)=>{
+  cv.setPointerCapture?.(e.pointerId);
+  const p = {x:e.clientX*DPR, y:e.clientY*DPR};
+  pointers.set(e.pointerId,p);
+  downInfo = {id:e.pointerId, start:p, moved:false};
+});
+
+cv.addEventListener('pointermove',(e)=>{
+  if(!pointers.has(e.pointerId)) return;
+  const p = {x:e.clientX*DPR, y:e.clientY*DPR};
+  const prev = pointers.get(e.pointerId);
+  pointers.set(e.pointerId,p);
+
+  if(downInfo && e.pointerId===downInfo.id){
+    if(dist(downInfo.start,p)>TAP_TOL_PX*DPR) downInfo.moved=true;
+  }
+
+  // два пальца — пан/зум
+  if(pointers.size>=2){
+    const ids=[...pointers.keys()];
+    const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
+    const ap=(ids[0]===e.pointerId?prev:a), bp=(ids[1]===e.pointerId?prev:b);
+    const d0=Math.hypot(ap.x-bp.x, ap.y-bp.y), d1=Math.hypot(a.x-b.x, a.y-b.y);
+    if(d0>0){
+      const f=d1/d0;
+      const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2;
+      state.view.cx = cx + (state.view.cx - cx)*f;
+      state.view.cy = cy + (state.view.cy - cy)*f;
+      state.view.s  = Math.max(0.6*DPR, Math.min(state.view.s*f, 6*DPR));
+      draw();
+    }
+    return;
+  }
+
+  // предпросмотр второй точки
+  if(state.mode==='line' && state.first){
+    state._preview = snapToNode(p);
+    draw();
+  }
+});
+
+cv.addEventListener('pointerup',(e)=>{
+  const p = {x:e.clientX*DPR, y:e.clientY*DPR};
+  const wasTap = downInfo && !downInfo.moved && downInfo.id===e.pointerId;
+  pointers.delete(e.pointerId); downInfo=null;
+
+  if(!wasTap) return;
+
+  // ОДИН вентиль за клик по кнопке «Символ»
+  if(state.placingValve){
+    // короткий кусок 10 мм ~ визуально 36 px на обычных экранах; привязываем к DPR
+    const len = 36*DPR;
+    const a = { x:p.x-len/2, y:p.y };
+    const b = { x:p.x+len/2, y:p.y };
+    pushHistory();
+    // труба-«коротыш» (чтобы визуально было продолжение)
+    state.segs.push({a:{...a}, b:{...b}});
+    // сам символ
+    drawValve(ctx, a, b, DPR);
+    // выключаем режим — чтобы следующий ставился только после повторного нажатия кнопки
+    state.placingValve=false;
+    return draw();
+  }
+
+  if(state.mode==='line'){
+    if(!state.first){
+      state.first = snapToNode(p);
+      state._preview=null;
+      return draw();
+    }else{
+      const second = snapToNode(p);
+      // игнорируем «нулевые» линии
+      if(dist(state.first, second) >= 2*DPR){
+        pushHistory();
+        state.segs.push({a:state.first, b:second});
+      }
+      state.first=null; state._preview=null;
+      return draw();
+    }
+  }
+
+  if(state.mode==='erase'){
+    // удаляем ближайший сегмент при попадании в его окрестность
+    const hitR = 10*DPR;
+    let best=-1, bestD=1e9;
+    for(let i=0;i<state.segs.length;i++){
+      const s=state.segs[i];
+      const d=pointSegDist(p, s.a, s.b);
+      if(d<bestD){ bestD=d; best=i; }
+    }
+    if(best!==-1 && bestD<=hitR){
+      pushHistory();
+      state.segs.splice(best,1);
       draw();
     }
   }
-  window.addEventListener('resize', resize);
+});
 
-  const Mode = { idle:'idle', line:'line', erase:'erase', symbol:'symbol' };
-  let mode = Mode.idle;
-
-  // ---------- ДАННЫЕ ----------
-  const segs = [];    // {a:{x,y}, b:{x,y}}
-  const symbols = []; // {x,y,angle,size}
-  let history = [];
-
-  let firstPt = null;
-
-  // ---------- УТИЛЫ ----------
-  const screenToWorld = (sx,sy)=>({ x:(sx - view.cx)/view.s, y:(sy - view.cy)/view.s });
-  const worldToScreen = (x,y)=>({ x:view.cx + x*view.s, y:view.cy + y*view.s });
-
-  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
-
-  function snapToNodes(raw){
-    const R = 18*DPR;
-    let best=null, bestD=Infinity;
-    for (const s of segs){
-      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
-      const dA=Math.hypot(A.x-(raw.x*view.s+view.cx), A.y-(raw.y*view.s+view.cy));
-      const dB=Math.hypot(B.x-(raw.x*view.s+view.cx), B.y-(raw.y*view.s+view.cy));
-      if(dA<bestD && dA<=R){ best={...s.a}; bestD=dA; }
-      if(dB<bestD && dB<=R){ best={...s.b}; bestD=dB; }
-    }
-    return best || raw;
-  }
-
-  function saveHistory(){
-    history.push({
-      segs: JSON.parse(JSON.stringify(segs)),
-      symbols: JSON.parse(JSON.stringify(symbols))
-    });
-    if (history.length>100) history.shift();
-  }
-
-  // ---------- РИСОВАНИЕ ----------
-  function drawGrid(){
-    const step = 180; // «изометрическая» лёгкая
-    const alpha=.10;
-    ctx.save();
-    ctx.lineWidth=1; ctx.strokeStyle='#cfd3dc';
-
-    const s = step*view.s;
-    if (s<30){ ctx.restore(); return; }
-
-    // диагонали (30°/150°) и горизонтали
-    const lines = [
-      Math.PI/6,                  // 30°
-      Math.PI/2,                  // 90°
-      Math.PI - Math.PI/6         // 150°
-    ];
-
-    for (const ang of lines){
-      const vx=Math.cos(ang), vy=Math.sin(ang);
-      const px=-vy, py=vx;
-      const need = Math.ceil(Math.max(cv.width,cv.height)/s)+2;
-      for (let k=-need;k<=need;k++){
-        const bx=px*k*step, by=py*k*step;
-        const A=worldToScreen(bx - vx*20000, by - vy*20000);
-        const B=worldToScreen(bx + vx*20000, by + vy*20000);
-        ctx.globalAlpha=alpha;
-        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-
-  function draw(){
-    // фон
-    ctx.clearRect(0,0,cv.width,cv.height);
-    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-
-    // сетка
-    drawGrid();
-
-    // сегменты
-    ctx.lineCap='round'; ctx.lineJoin='round';
-    for (const s of segs){
-      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
-      // обводка
-      ctx.strokeStyle='#5b2eff'; ctx.lineWidth=10; ctx.globalAlpha=.25;
-      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-      // сама труба
-      ctx.strokeStyle='#7b2cff'; ctx.lineWidth=8; ctx.globalAlpha=1;
-      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-    }
-
-    // символы
-    for (const it of symbols){
-      const S = worldToScreen(it.x,it.y);
-      drawValveSymbol(ctx, S.x, S.y, it.angle, it.size);
-    }
-  }
-
-  // ---------- ВСТАВКА СИМВОЛА В ТРУБУ ----------
-  function insertValveAtWorld(pW){
-    // найти ближайший сегмент
-    let bestI=-1, bestD=Infinity, bestT=0, bestAng=0, bestP=null;
-    const R = 24/view.s; // радиус поиска в мире
-    for (let i=0;i<segs.length;i++){
-      const s=segs[i];
-      const v={x:s.b.x-s.a.x,y:s.b.y-s.a.y};
-      const w={x:pW.x-s.a.x,y:pW.y-s.a.y};
-      const len2=v.x*v.x+v.y*v.y; if(len2===0) continue;
-      let t = (v.x*w.x+v.y*w.y)/len2; t=Math.max(0,Math.min(1,t));
-      const P={x:s.a.x+v.x*t, y:s.a.y+v.y*t};
-      const d=dist(P,pW);
-      if(d<bestD){ bestD=d; bestI=i; bestT=t; bestP=P; bestAng=Math.atan2(v.y,v.x); }
-    }
-    if (bestI===-1 || bestD>R){ toast('Нет трубы рядом'); return; }
-
-    // разрезаем сегмент и вставляем символ
-    const s = segs[bestI];
-    const v={x:s.b.x-s.a.x,y:s.b.y-s.a.y};
-    const len=Math.hypot(v.x,v.y);
-    const keep = Math.max(6/view.s, len*0.06); // вырез маленького кусочка
-
-    const dir={x:v.x/len, y:v.y/len};
-    const P0={x:bestP.x-dir.x*keep, y:bestP.y-dir.y*keep};
-    const P1={x:bestP.x+dir.x*keep, y:bestP.y+dir.y*keep};
-
-    // заменить на два куска (если есть смысл)
-    const leftLen = Math.hypot(P0.x-s.a.x, P0.y-s.a.y);
-    const rightLen= Math.hypot(s.b.x-P1.x, s.b.y-P1.y);
-    const repl=[];
-    if (leftLen>1e-4)  repl.push({a:{...s.a}, b:P0});
-    if (rightLen>1e-4) repl.push({a:P1, b:{...s.b}});
-    saveHistory();
-    segs.splice(bestI,1,...repl);
-
-    // добавить символ
-    symbols.push({ x:bestP.x, y:bestP.y, angle:bestAng, size:28 });
-    draw();
-  }
-
-  // ---------- ВВОД ----------
-  const ZOOM = { min:0.4*DPR, max:8*DPR, step:1.12 };
-  let pointers=new Map();
-  let last1=null;
-
-  cv.addEventListener('pointerdown', (e)=>{
-    cv.setPointerCapture?.(e.pointerId);
-    const p={x:e.clientX*DPR,y:e.clientY*DPR};
-    pointers.set(e.pointerId,p);
-    if (pointers.size===1) last1=p;
-  }, {passive:true});
-
-  cv.addEventListener('pointermove', (e)=>{
-    if (!pointers.has(e.pointerId)) return;
-    const cur={x:e.clientX*DPR, y:e.clientY*DPR};
-    const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,cur);
-
-    if (pointers.size>=2){
-      const ids=[...pointers.keys()];
-      const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
-      const ap=(ids[0]===e.pointerId?prev:a), bp=(ids[1]===e.pointerId?prev:b);
-      const dPrev=Math.hypot(ap.x-bp.x,ap.y-bp.y), dCur=Math.hypot(a.x-b.x,a.y-b.y);
-      if (dPrev>0){
-        const cCur={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
-        const f=dCur/dPrev;
-        const nx = Math.max(ZOOM.min, Math.min(view.s*f, ZOOM.max));
-        const k = nx / view.s;
-        view.cx += (cCur.x - view.cx) - (cCur.x - view.cx)*k;
-        view.cy += (cCur.y - view.cy) - (cCur.y - view.cy)*k;
-        view.s = nx;
-        draw();
-      }
-      last1=null; return;
-    }
-
-    // перетаскивание полотна (idle)
-    if (last1 && mode===Mode.idle){
-      view.cx += cur.x-last1.x;
-      view.cy += cur.y-last1.y;
-      last1=cur;
-      draw();
-    }
-  }, {passive:true});
-
-  function endPtr(e){ pointers.delete(e.pointerId); last1=(pointers.size===1)?[...pointers.values()][0]:null; }
-  cv.addEventListener('pointerup', endPtr, {passive:true});
-  cv.addEventListener('pointercancel', endPtr, {passive:true});
-
-  cv.addEventListener('wheel', (e)=>{
-    e.preventDefault();
-    const sx=e.clientX*DPR, sy=e.clientY*DPR;
-    const factor = e.deltaY<0 ? ZOOM.step : (1/ZOOM.step);
-    const nextScale = Math.max(ZOOM.min, Math.min(view.s*factor, ZOOM.max));
-    const k = nextScale / view.s;
-    view.cx += (sx - view.cx) - (sx - view.cx)*k;
-    view.cy += (sy - view.cy) - (sy - view.cy)*k;
-    view.s  = nextScale;
-    draw();
-  }, {passive:false});
-
-  // тапы/клики
-  cv.addEventListener('click', (e)=>{
-    const sx=e.clientX*DPR, sy=e.clientY*DPR;
-    const W=screenToWorld(sx,sy);
-
-    if (mode===Mode.line){
-      if (!firstPt){
-        firstPt = snapToNodes(W);
-        toast('Поставьте 2-ю точку');
-        return;
-      }
-      const a=firstPt, b=snapToNodes(W);
-      saveHistory();
-      segs.push({a,b});
-      firstPt=null;
-      draw();
-      return;
-    }
-
-    if (mode===Mode.erase){
-      // удалить ближайший сегмент
-      let bestI=-1, bestD=Infinity;
-      const R = 16/DPR; // в мире
-      for (let i=0;i<segs.length;i++){
-        const s=segs[i];
-        const A=s.a, B=s.b;
-        const vx=B.x-A.x, vy=B.y-A.y, wx=W.x-A.x, wy=W.y-A.y;
-        const c1=vx*wx+vy*wy; if(c1<=0){ var d=Math.hypot(W.x-A.x,W.y-A.y); }
-        else{
-          const c2=vx*vx+vy*vy;
-          if (c2<=c1){ d=Math.hypot(W.x-B.x,W.y-B.y); }
-          else{
-            const t=c1/c2, px=A.x+t*vx, py=A.y+t*vy;
-            d=Math.hypot(W.x-px,W.y-py);
-          }
-        }
-        if (d<bestD){ bestD=d; bestI=i; }
-      }
-      if (bestI!==-1 && bestD<=R){
-        saveHistory();
-        segs.splice(bestI,1);
-        draw();
-      } else {
-        toast('Нет линии рядом');
-      }
-      return;
-    }
-
-    if (mode===Mode.symbol){
-      insertValveAtWorld(W);
-      return;
-    }
-
-    // idle — ничего
-  });
-
-  // ---------- КНОПКИ / API ----------
-  window.setMode = (m)=>{
-    mode = (m==='line')?Mode.line : (m==='erase')?Mode.erase : (m==='symbol')?Mode.symbol : Mode.idle;
-    firstPt=null;
-    if (mode===Mode.line) toast('Режим Линия: поставьте 1-ю точку');
-    if (mode===Mode.erase) toast('Ластик: тап по трубе');
-    if (mode===Mode.symbol) toast('Символ: тап по трубе');
-  };
-
-  window.fitView = ()=>{
-    view.s = Math.min(cv.width,cv.height)/900;
-    view.s = Math.max(ZOOM.min, Math.min(ZOOM.max, view.s));
-    view.cx = cv.width/2; view.cy = cv.height/2;
-    draw();
-  };
-
-  window.undo = ()=>{
-    const h=history.pop();
-    if (!h){ toast('История пуста'); return; }
-    segs.length=0; segs.push(...h.segs);
-    symbols.length=0; symbols.push(...h.symbols);
-    draw();
-  };
-
-  window.clearAll = ()=>{
-    saveHistory();
-    segs.length=0; symbols.length=0; firstPt=null; mode=Mode.idle;
-    draw();
-  };
-
-  // ---------- СТАРТ ----------
-  function boot(){
-    resize();
-    view.cx=cv.width/2; view.cy=cv.height/2; view.s=Math.min(cv.width,cv.height)/900;
-    draw();
-    toast('Готово. Выберите режим: Линия / Ластик / Символ.');
-  }
-  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot, {once:true});
-  else boot();
-})();
+// расстояние от точки до отрезка (в экранных px)
+function pointSegDist(p,a,b){
+  const vx=b.x-a.x, vy=b.y-a.y, wx=p.x-a.x, wy=p.y-a.y;
+  const c1=vx*wx+vy*wy; if(c1<=0) return dist(p,a);
+  const c2=vx*vx+vy*vy; if(c2<=c1) return dist(p,b);
+  const t=c1/c2, x=a.x+t*vx, y=a.y+t*vy;
+  return Math.hypot(p.x-x, p.y-y);
+}
