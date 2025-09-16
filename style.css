@@ -1,0 +1,35 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f8f9fa;
+}
+
+#toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  background: #4b0082;
+}
+
+#toolbar button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #9370db;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+#toolbar button:hover {
+  background: #ba55d3;
+}
+
+#isoCanvas {
+  width: 100vw;
+  height: 90vh;
+  display: block;
+  background: white;
+  border: 1px solid #ccc;
+}
