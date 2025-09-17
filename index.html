@@ -10,7 +10,7 @@
 <body>
   <canvas id="cv"></canvas>
 
-  <div class="bar" id="topBar">
+  <div class="bar">
     <button id="btnHand" class="btn ghost">Рука</button>
     <button id="btnFit"  class="btn ghost">Фит</button>
     <button id="btnZoomIn" class="btn ghost">＋</button>
@@ -33,11 +33,9 @@
     <div class="dropdown">
       <button id="btnMedia" class="btn ghost">Медиа ▾</button>
       <div id="mediaMenu" class="menu">
-        <label class="file-btn">📷 Сделать фото
-          <input id="pickCamera" type="file" accept="image/*" capture="environment">
-        </label>
-        <label class="file-btn">🖼 Выбрать из галереи
-          <input id="pickGallery" type="file" accept="image/*">
+        <label class="file-btn">
+          Сделать фото / выбрать
+          <input id="pickImage" type="file" accept="image/*" capture="environment">
         </label>
         <button id="btnClearImage">Убрать фото</button>
       </div>
