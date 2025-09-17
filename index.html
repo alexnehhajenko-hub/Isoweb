@@ -1,28 +1,17 @@
 <!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Isopipe — чертёж труб</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
+<html lang="ru"><meta charset="utf-8">
+<title>alive</title>
+<style>body{margin:0;font:18px/1.4 system-ui;background:#0b1220;color:#c8facc;display:grid;place-items:center;height:100vh}</style>
 <body>
-  <header class="bar">
-    <button id="bLine">Линия</button>
-    <button id="bErase">Ластик</button>
-    <button id="bValve">Вентиль</button>
-    <button id="bFit">Fit</button>
-    <button id="bUndo">Назад</button>
-    <button id="bClear">Очистить</button>
-    <button id="bGrid">Сетка</button>
-    <button id="bPhoto">Фото</button>
-    <input id="fPhoto" type="file" accept="image/*" hidden />
-  </header>
-
-  <canvas id="cv"></canvas>
-
-  <script src="valve.js"></script>
-  <script src="script.js"></script>
+<div>
+  <h1>✅ GitHub Pages жив</h1>
+  <p>Время: <span id="t"></span></p>
+  <p>devicePixelRatio: <b id="dpr"></b></p>
+  <p>Если видишь эту страницу по адресу /isoweb/alive.html — хостинг ок.</p>
+</div>
+<script>
+  document.getElementById('t').textContent = new Date().toISOString();
+  document.getElementById('dpr').textContent = window.devicePixelRatio || 1;
+</script>
 </body>
 </html>
