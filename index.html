@@ -1,355 +1,96 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>IsoWeb — простой и точный</title>
-<style>
-  :root{--violet:#7b2cff; --violet2:#5b1fe3}
-  html,body{height:100%;margin:0;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #cv{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
-
-  .bar{position:fixed;left:8px;right:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
-  .btn{height:40px;border:0;border-radius:12px;padding:0 12px;font-weight:800;cursor:pointer;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff}
-  .ghost{background:#fff;color:var(--violet);border:1px solid #d8c9ff}
-  .warn{background:#ff3b3b;color:#fff}
-
-  .panel{position:fixed;left:8px;right:8px;bottom:8px;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;z-index:9}
-  .row{display:flex;align-items:center;gap:10px}
-  .row label{min-width:150px;font-size:13px;color:#555}
-  .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
-  .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--violet)}
-  .val{width:48px;text-align:right;font-variant-numeric:tabular-nums;color:#666}
-
-  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.2s;z-index:20}
-  .toast.show{opacity:1}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>IsoPipe — изометрия по точкам</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <canvas id="cv"></canvas>
 
   <div class="bar">
-    <button class="btn" id="bCamera">📷 Камера</button>
-    <button class="btn" id="bGallery">📂 Галерея</button>
-    <button class="btn" id="bLine">Линия</button>
-    <button class="btn" id="bValve">Вентиль</button>
-    <button class="btn ghost" id="bGrid">Сетка</button>
-    <button class="btn ghost" id="bFit">Fit</button>
-    <button class="btn ghost" id="bUndo">Назад</button>
-    <button class="btn warn" id="bClear">Очистить</button>
+    <button id="btnHand"    class="btn ghost">Рука</button>
+    <button id="btnFit"     class="btn ghost">Фит</button>
+    <button id="btnLine"    class="btn">Линия</button>
+    <button id="btnUndo"    class="btn ghost">↩ Назад</button>
+    <button id="btnExport"  class="btn ghost">PNG</button>
+
+    <!-- Элементы (врезки) -->
+    <button id="btnGate"    class="btn ghost">Задвижка</button>
+    <button id="btnGlobe"   class="btn ghost">Клапан</button>
+    <button id="btnCheck"   class="btn ghost">Обратный</button>
+    <button id="btnBall"    class="btn ghost">Шаровой</button>
+    <button id="btnPump"    class="btn ghost">Насос</button>
   </div>
 
-  <!-- Единственная настройка: толщина линии -->
-  <div class="panel">
-    <div class="row">
-      <label>Толщина линии (px)</label>
-      <input id="lineWidth" type="range" min="2" max="24" value="6">
-      <span class="val" id="lineWidthVal">6</span>
+  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
+
+  <div id="angleTag" class="angle-tag" style="display:none">0°</div>
+  <div id="toast" class="toast"></div>
+
+  <!-- Панель настроек -->
+  <div id="panelWrap" class="panel-wrap" aria-hidden="true">
+    <div id="panelBackdrop" class="panel-backdrop"></div>
+    <div id="panel" class="panel" role="dialog" aria-modal="true" tabindex="-1">
+      <h4>Изометрия / Магнит</h4>
+      <div class="row switch">
+        <input id="snapOn" type="checkbox" checked>
+        <label for="snapOn">Притяжение (концы, продление, 0/90/30/150°)</label>
+      </div>
+      <div class="row">
+        <label>Радиус узлов (px)</label>
+        <input id="snapRadius" type="range" min="6" max="40" value="18">
+        <span id="snapRadiusVal" class="val">18</span>
+      </div>
+      <div class="row">
+        <label>Допуск оси (±°)</label>
+        <input id="isoTol" type="range" min="4" max="25" value="10">
+        <span id="isoTolVal" class="val">10</span>
+      </div>
+      <div class="row">
+        <label>Липкость концов (px)</label>
+        <input id="endStick" type="range" min="12" max="60" value="28">
+        <span id="endStickVal" class="val">28</span>
+      </div>
+      <div class="row">
+        <label>Финальная коррекция (px)</label>
+        <input id="finalSnapLimit" type="range" min="0" max="20" value="6">
+        <span id="finalSnapLimitVal" class="val">6</span>
+      </div>
+
+      <h4>Отрисовка</h4>
+      <div class="row">
+        <label>Толщина линии (px)</label>
+        <input id="lineWidth" type="range" min="2" max="24" value="6">
+        <span id="lineWidthVal" class="val">6</span>
+      </div>
+      <div class="row switch">
+        <input id="showPoints" type="checkbox" checked>
+        <label for="showPoints">Показывать точки</label>
+      </div>
+      <div class="row">
+        <label>Размер точки (px)</label>
+        <input id="ptSize" type="range" min="4" max="20" value="10">
+        <span id="ptSizeVal" class="val">10</span>
+      </div>
+
+      <h4>Шкала элементов</h4>
+      <div class="row">
+        <label>Пикселей на мм</label>
+        <input id="pxPerMm" type="range" min="3" max="16" value="6">
+        <span id="pxPerMmVal" class="val">6</span>
+      </div>
+
+      <div class="row">
+        <button id="btnDone"  class="btn ok">Готово</button>
+        <button id="btnClear" class="btn danger">Очистить</button>
+      </div>
     </div>
   </div>
 
-  <!-- инпуты фото (камера/галерея) -->
-  <input id="fileCamera"  type="file" accept="image/*" capture="environment" hidden>
-  <input id="fileGallery" type="file" accept="image/*" hidden>
-
-  <div class="toast" id="toast"></div>
-
-<script>
-(()=>{
-// ===== Точность: без сдвигов =====
-const DPR = 1;                // фикс — касание = пиксель экрана (точно)
-const VALVE_LEN_PX = 64;      // длина «кусочка трубы» вентиля на экране
-const VALVE_THICK_PX = 6;     // толщина визуальной трубы у вентиля
-const MAX_IMG_SIDE = 2000;    // чтобы фото не было слишком тяжёлым
-
-// ===== DOM/состояние =====
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d', {alpha:false});
-const toastEl = document.getElementById('toast');
-const toast=(t,ms=900)=>{ toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),ms); };
-
-const st = {
-  mode:'idle',         // idle | line | valve
-  first:null,          // первая точка линии (мир)
-  segs:[],             // трубы: [{a:{x,y}, b:{x,y}}]
-  valves:[],           // вентили: [{a:{x,y}, b:{x,y}}]
-  grid:true,
-
-  // камера/холст
-  s:1, cx:0, cy:0,
-
-  // стиль
-  lineWidth:6,
-
-  // фото-подложка
-  photo:{img:null, w:0, h:0, alpha:0.92}
-};
-
-// offscreen сетка
-let gridCv=document.createElement('canvas');
-let gridDirty=true;
-
-// ===== Размер =====
-function resize(){
-  cv.width = Math.floor(innerWidth*DPR);
-  cv.height= Math.floor(innerHeight*DPR);
-  if(st.cx===0&&st.cy===0){ st.cx=cv.width/2; st.cy=cv.height/2; st.s=1; }
-  gridDirty=true; scheduleDraw();
-}
-addEventListener('resize', resize, {passive:true});
-resize();
-
-// ===== Преобразования =====
-const w2s=(p)=>({x: st.cx + p.x*st.s, y: st.cy + p.y*st.s});
-const s2w=(sx,sy)=>({x:(sx-st.cx)/st.s, y:(sy-st.cy)/st.s});
-
-// ===== Сетка (кэш) =====
-function redrawGrid(){
-  gridCv.width=cv.width; gridCv.height=cv.height;
-  const g=gridCv.getContext('2d');
-  g.clearRect(0,0,gridCv.width,gridCv.height);
-
-  const step=200;          // фиксированный шаг
-  const angles=[30,90,150];
-  for(const ang of angles){
-    const r=ang*Math.PI/180, vx=Math.cos(r), vy=Math.sin(r), px=-vy, py=vx;
-    const stepScr=step*st.s;
-    const need=Math.ceil(Math.max(cv.width,cv.height)/stepScr)+2;
-    for(let k=-need;k<=need;k++){
-      const bx=px*k*step, by=py*k*step;
-      const A=w2s({x:bx - vx*20000, y:by - vy*20000});
-      const B=w2s({x:bx + vx*20000, y:by + vy*20000});
-      const major=(k%3===0);
-      g.globalAlpha = major? 0.30 : 0.16;
-      g.strokeStyle = major? '#c3c7d1' : '#e6eaf2';
-      g.lineWidth   = major? 1.4 : 1.0;
-      g.beginPath(); g.moveTo(A.x,A.y); g.lineTo(B.x,B.y); g.stroke();
-    }
-  }
-  g.globalAlpha=1; gridDirty=false;
-}
-
-// ===== Фото (камера/галерея) =====
-function downscaleImage(img){
-  const maxSide=Math.max(img.width,img.height);
-  if(maxSide<=MAX_IMG_SIDE) return img;
-  const scale=MAX_IMG_SIDE/maxSide, w=Math.round(img.width*scale), h=Math.round(img.height*scale);
-  const off=document.createElement('canvas'); off.width=w; off.height=h;
-  const ox=off.getContext('2d'); ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality='high';
-  ox.drawImage(img,0,0,w,h);
-  const scaled=new Image(); scaled.src=off.toDataURL('image/jpeg',0.9); return scaled;
-}
-function loadFromFile(file){
-  if(!file){ toast('Фото не выбрано'); return; }
-  const url=URL.createObjectURL(file); const img=new Image();
-  img.onload=()=>{
-    URL.revokeObjectURL(url);
-    const scaled=downscaleImage(img);
-    if(scaled===img) applyImage(img); else scaled.onload=()=>applyImage(scaled);
-  };
-  img.src=url;
-}
-function applyImage(img){
-  st.photo.img=img; st.photo.w=img.width; st.photo.h=img.height;
-  // подгон под экран
-  const sx=(cv.width /img.width )*0.9;
-  const sy=(cv.height/img.height)*0.9;
-  st.s = Math.max(0.2, Math.min(sx,sy)); // масштаб мира
-  st.cx=cv.width/2; st.cy=cv.height/2;
-  gridDirty=true; scheduleDraw(); toast('Фото добавлено');
-}
-
-// ===== Рисование вентиля в ЭКРАННЫХ координатах =====
-function drawValveScreen(A,B){
-  ctx.save();
-  ctx.lineCap='round';
-  ctx.strokeStyle='#7b2cff';
-  ctx.lineWidth=VALVE_THICK_PX;
-  ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-
-  const ang=Math.atan2(B.y-A.y, B.x-A.x);
-  const mid={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
-  ctx.translate(mid.x, mid.y); ctx.rotate(ang);
-
-  const w=12, h=8; // «бабочка»
-  ctx.fillStyle='#7b2cff'; ctx.strokeStyle='#4a21a8'; ctx.lineWidth=1.5;
-  ctx.beginPath();
-  ctx.moveTo(-w*0.5,0);
-  ctx.lineTo(0,-h*0.68);
-  ctx.lineTo(w*0.5,0);
-  ctx.lineTo(0,h*0.68);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
-
-  // ручка вверх
-  ctx.strokeStyle='#111'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(0,-h*0.95); ctx.lineTo(0,-h*1.9); ctx.stroke();
-  ctx.restore();
-}
-
-// ===== Отрисовка сцены =====
-let needs=false;
-function scheduleDraw(){ if(!needs){ needs=true; requestAnimationFrame(draw);} }
-function draw(){
-  needs=false;
-  ctx.clearRect(0,0,cv.width,cv.height);
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-
-  // фото-подложка (если есть)
-  if(st.photo.img){
-    ctx.save();
-    ctx.globalAlpha = st.photo.alpha;
-    ctx.translate(st.cx, st.cy);
-    ctx.scale(st.s, st.s);
-    ctx.drawImage(st.photo.img, -st.photo.w/2, -st.photo.h/2, st.photo.w, st.photo.h);
-    ctx.restore();
-  }
-
-  // сетка
-  if(st.grid){
-    if(gridDirty) redrawGrid();
-    ctx.drawImage(gridCv,0,0);
-  }
-
-  // трубы (в мире → постоянная толщина на экране)
-  ctx.save(); ctx.translate(st.cx,st.cy); ctx.scale(st.s,st.s);
-  for(const s of st.segs){
-    ctx.lineCap='round'; ctx.lineJoin='round';
-    ctx.strokeStyle='#5b00bf'; ctx.lineWidth=(st.lineWidth+2)/st.s; ctx.globalAlpha=.7;
-    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-    ctx.strokeStyle='#7b2cff'; ctx.lineWidth=st.lineWidth/st.s; ctx.globalAlpha=1;
-    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-  }
-  ctx.restore();
-
-  // вентили (экранные — стабильная толщина)
-  for(const v of st.valves){ drawValveScreen(w2s(v.a), w2s(v.b)); }
-
-  // предпросмотр линии
-  if(st.mode==='line' && st.first && lastPtr){
-    const A=w2s(st.first), B=lastPtr;
-    ctx.setLineDash([8,8]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=Math.max(3,st.lineWidth-2);
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle='#16a34a'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(A.x,A.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  }
-}
-
-// ===== Жесты (пан/пинч/колесо) =====
-const pointers=new Map();
-let lastPtr=null, panStart=null, pinch=null;
-
-cv.addEventListener('pointerdown', e=>{
-  cv.setPointerCapture?.(e.pointerId);
-  const p={x:e.clientX*DPR,y:e.clientY*DPR};
-  pointers.set(e.pointerId,p); lastPtr=p;
-
-  if(pointers.size===1){
-    if(st.mode==='line' && st.first){ /* ждём вторую точку */ }
-    else if(st.mode==='valve'){ /* ставим на pointerup */ }
-    else { panStart={x:p.x,y:p.y,cx:st.cx,cy:st.cy}; }
-  }
-
-  if(pointers.size===2){
-    const ids=[...pointers.keys()];
-    const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
-    pinch={d0:Math.hypot(a.x-b.x,a.y-b.y), c:{x:(a.x+b.x)/2, y:(a.y+b.y)/2}};
-  }
-}, {passive:true});
-
-cv.addEventListener('pointermove', e=>{
-  if(!pointers.has(e.pointerId)) return;
-  const cur={x:e.clientX*DPR,y:e.clientY*DPR};
-  const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,cur); lastPtr=cur;
-
-  if(pointers.size===1){
-    if(st.mode==='line' && st.first){ scheduleDraw(); return; }
-    if(panStart){
-      st.cx = panStart.cx + (cur.x-panStart.x);
-      st.cy = panStart.cy + (cur.y-panStart.y);
-      gridDirty=true; scheduleDraw();
-    }
-  }
-  if(pointers.size===2 && pinch){
-    const ids=[...pointers.keys()];
-    const A=pointers.get(ids[0]), B=pointers.get(ids[1]);
-    const d=Math.hypot(A.x-B.x, A.y-B.y);
-    if(d>0){
-      const f=d/pinch.d0;
-      const sx=pinch.c.x, sy=pinch.c.y;
-      const w=s2w(sx,sy);
-      const nextS=Math.max(0.2, Math.min(8, st.s*f));
-      st.cx = sx - w.x*nextS; st.cy = sy - w.y*nextS; st.s = nextS;
-      pinch.d0=d; pinch.c={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
-      gridDirty=true; scheduleDraw();
-    }
-  }
-}, {passive:true});
-
-function endPtr(e){ pointers.delete(e.pointerId); lastPtr=(pointers.size===1)?[...pointers.values()][0]:null; if(pointers.size<2) pinch=null; }
-
-cv.addEventListener('pointerup', e=>{
-  endPtr(e);
-  const sx=e.clientX*DPR, sy=e.clientY*DPR;
-
-  if(st.mode==='line'){
-    const w=s2w(sx,sy);
-    if(!st.first){ st.first=w; toast('Поставь вторую точку'); }
-    else{
-      st.segs.push({a:st.first, b:w}); // БЕЗ снапов — абсолютная точность
-      st.first=null; toast('Линия добавлена');
-    }
-    scheduleDraw(); return;
-  }
-
-  if(st.mode==='valve'){
-    // 1 тап: короткий горизонтальный сегмент в «мире», длина фикс в экране
-    const centerW=s2w(sx,sy);
-    const half = (VALVE_LEN_PX/2) / st.s; // экран→мир
-    const a={x:centerW.x-half, y:centerW.y};
-    const b={x:centerW.x+half, y:centerW.y};
-    st.valves.push({a,b});
-    st.mode='idle'; toast('Вентиль добавлен');
-    scheduleDraw(); return;
-  }
-}, {passive:true});
-cv.addEventListener('pointercancel', endPtr, {passive:true});
-
-// колесо (десктоп)
-cv.addEventListener('wheel', e=>{
-  e.preventDefault();
-  const sx=e.clientX*DPR, sy=e.clientY*DPR;
-  const f=e.deltaY<0?1.12:0.9;
-  const w=s2w(sx,sy);
-  const nextS=Math.max(0.2, Math.min(8, st.s*f));
-  st.cx = sx - w.x*nextS; st.cy = sy - w.y*nextS; st.s = nextS;
-  gridDirty=true; scheduleDraw();
-}, {passive:false});
-
-// ===== Кнопки =====
-const $=id=>document.getElementById(id);
-$('bCamera').onclick = ()=>$('fileCamera').click();
-$('bGallery').onclick= ()=>$('fileGallery').click();
-$('fileCamera').onchange = e=> loadFromFile(e.target.files?.[0]);
-$('fileGallery').onchange= e=> loadFromFile(e.target.files?.[0]);
-
-$('bLine').onclick  = ()=>{ st.mode='line';  st.first=null; toast('Линия: 2 тапа'); };
-$('bValve').onclick = ()=>{ st.mode='valve'; st.first=null; toast('Вентиль: 1 тап'); };
-$('bGrid').onclick  = ()=>{ st.grid=!st.grid; scheduleDraw(); };
-$('bFit').onclick   = ()=>{ st.s=1; st.cx=cv.width/2; st.cy=cv.height/2; gridDirty=true; scheduleDraw(); };
-$('bUndo').onclick  = ()=>{ if(st.first){ st.first=null; } else if(st.valves.length) st.valves.pop(); else if(st.segs.length) st.segs.pop(); scheduleDraw(); };
-$('bClear').onclick = ()=>{ st.segs.length=0; st.valves.length=0; st.first=null; scheduleDraw(); };
-
-// ===== Слайдер толщины =====
-const lineWidthEl=document.getElementById('lineWidth');
-const lineWidthVal=document.getElementById('lineWidthVal');
-const applyLW=()=>{ st.lineWidth=+lineWidthEl.value; lineWidthVal.textContent=String(st.lineWidth); scheduleDraw(); };
-lineWidthEl.addEventListener('input', applyLW, {passive:true});
-applyLW();
-
-// стартовая отрисовка
-scheduleDraw();
-})();
-</script>
+  <script src="script.js"></script>
+  <script src="valve.js"></script>
 </body>
 </html>
