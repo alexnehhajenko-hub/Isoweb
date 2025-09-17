@@ -1,21 +1,27 @@
+<!-- index.html -->
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
-  <title>Isoweb</title>
-  <link rel="stylesheet" href="style.css"/>
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>IsoPipe — чертёж</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="toolbar" class="toolbar">
-    <button onclick="setMode('line')">Линия</button>
-    <button onclick="setMode('erase')">Ластик</button>
-    <button onclick="setMode('valve')">Символ</button>
-    <button onclick="fitView()">Fit</button>
-    <button onclick="undo()">Назад</button>
-    <button onclick="clearAll()">Очистить</button>
+    <button data-act="line">Линия</button>
+    <button data-act="erase">Ластик</button>
+    <button data-act="valve">Вентиль</button>
+    <button data-act="grid">Сетка</button>
+    <button data-act="fit">Fit</button>
+    <button data-act="undo">Назад</button>
+    <button data-act="clear">Очистить</button>
   </div>
+
   <canvas id="cv"></canvas>
+
+  <div id="toast" class="toast"></div>
 
   <script src="valve.js"></script>
   <script src="script.js"></script>
