@@ -30,7 +30,6 @@
 
 <script>
 (function(){
-  // ---------- базовые ----------
   const DPR = Math.min(2.5, Math.max(1, window.devicePixelRatio||1));
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d', {alpha:false});
@@ -38,31 +37,26 @@
   const toast=(t,ms=900)=>{ toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),ms); };
 
   const st = {
-    mode:'idle',          // idle | line | valve | erase
-    first:null,           // первая точка для линии (мир)
-    segs:[],              // трубы: {a:{x,y}, b:{x,y}} — в мировых
-    valves:[],            // вентили: {a:{x,y}, b:{x,y}} — в мировых
+    mode:'idle',        // idle | line | valve | erase
+    first:null,         // первая точка линии (мир)
+    segs:[],            // трубы (мир): {a:{x,y}, b:{x,y}}
+    valves:[],          // вентили (мир): {a:{x,y}, b:{x,y}}
     grid:true,
-    // камера
-    s:1*DPR, cx:0, cy:0
+    s:1*DPR, cx:0, cy:0 // камера
   };
 
-  // ---------- размер ----------
   function resize(){
     const W=Math.round(innerWidth*DPR), H=Math.round(innerHeight*DPR);
     if(cv.width!==W||cv.height!==H){ cv.width=W; cv.height=H; if(st.cx===0&&st.cy===0){ st.cx=W/2; st.cy=H/2; } draw(); }
   }
   addEventListener('resize', resize, {passive:true}); resize();
 
-  // ---------- преобразования ----------
   const w2s=(p)=>({x: st.cx + p.x*st.s, y: st.cy + p.y*st.s});
   const s2w=(sx,sy)=>({x:(sx-st.cx)/st.s, y:(sy-st.cy)/st.s});
 
-  // ---------- изометрическая «3D» сетка (оси 30°/90°/150°) ----------
   function drawIsoGrid(){
     if(!st.grid) return;
-    // шаг в мировых единицах (200 «мм» условно)
-    const step=200;
+    const step=200;                         // шаг сетки (мир)
     const angles=[30,90,150];
     ctx.save();
     for(const ang of angles){
@@ -83,38 +77,31 @@
     ctx.restore(); ctx.globalAlpha=1;
   }
 
-  // ---------- вентиль (отрисовка по двум экранным точкам) ----------
   function drawValveScreen(A, B){
     ctx.save();
     // труба-отрезок
     ctx.lineCap='round'; ctx.strokeStyle='#7b2cff'; ctx.lineWidth=6*DPR;
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-    // символ
+    // символ «бабочка» + ручка
     const ang=Math.atan2(B.y-A.y, B.x-A.x);
     const mid={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
     ctx.translate(mid.x, mid.y); ctx.rotate(ang);
     const w=12*DPR, h=8*DPR;
     ctx.fillStyle='#7b2cff'; ctx.strokeStyle='#4a21a8'; ctx.lineWidth=1.5*DPR;
     ctx.beginPath();
-    ctx.moveTo(-w*0.5,0);
-    ctx.lineTo(0,-h*0.68);
-    ctx.lineTo(w*0.5,0);
-    ctx.lineTo(0,h*0.68);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    // ручка
-    ctx.strokeStyle='#111'; ctx.lineWidth=2*DPR;
+    ctx.moveTo(-w*0.5,0); ctx.lineTo(0,-h*0.68); ctx.lineTo(w*0.5,0); ctx.lineTo(0,h*0.68); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.strokeStyle='#111'; ctx.lineWidth=2*DPR; // ручка
     ctx.beginPath(); ctx.moveTo(0,-h*0.95); ctx.lineTo(0,-h*1.9); ctx.stroke();
     ctx.restore();
   }
 
-  // ---------- рисование сцены ----------
   function draw(){
     ctx.clearRect(0,0,cv.width,cv.height);
     ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,cv.width,cv.height);
-
     drawIsoGrid();
 
-    // трубы
+    // трубы (в мире)
     ctx.save(); ctx.translate(st.cx, st.cy); ctx.scale(st.s, st.s);
     for(const s of st.segs){
       ctx.lineCap='round'; ctx.lineJoin='round';
@@ -123,17 +110,12 @@
     }
     ctx.restore();
 
-    // вентили (рисуем в экранных для стабильной толщины)
-    for(const v of st.valves){
-      const A=w2s(v.a), B=w2s(v.b);
-      drawValveScreen(A,B);
-    }
+    // вентили (по экрану — стабильная толщина)
+    for(const v of st.valves){ drawValveScreen(w2s(v.a), w2s(v.b)); }
 
     // предпросмотр линии
     if(st.mode==='line' && st.first && lastPointer){
-      const A=w2s(st.first);
-      const w=s2w(lastPointer.x,lastPointer.y);
-      const B=w2s(w);
+      const A=w2s(st.first), B=w2s(s2w(lastPointer.x,lastPointer.y));
       ctx.setLineDash([10,10]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=3;
       ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
       ctx.setLineDash([]);
@@ -142,7 +124,7 @@
     }
   }
 
-  // ---------- жесты (пан/пинч + колесо) ----------
+  // --------- жесты: пан/пинч/колесо ----------
   const pointers=new Map(); let lastPointer=null;
   let panStart=null, pinch=null;
 
@@ -151,7 +133,6 @@
     const p={x:e.clientX*DPR,y:e.clientY*DPR}; pointers.set(e.pointerId,p); lastPointer=p;
 
     if(pointers.size===1){
-      // РЕЖИМЫ
       if(st.mode==='line'){
         const w=s2w(p.x,p.y);
         if(!st.first){ st.first=w; draw(); toast('Поставь вторую точку'); }
@@ -160,23 +141,21 @@
           st.first=null; st.mode='idle'; draw();
         }
       }else if(st.mode==='valve'){
-        // один тап → ставим короткий отрезок по экранной ориентации (горизонтально)
+        // один тап ставит вентиль, ориентированный горизонтально (быстрый шаблон)
         const w=s2w(p.x,p.y);
-        const half = (32*DPR)/st.s; // ~64 px длина на экране
+        const half = (32*DPR)/st.s; // ~64 px на экране
         const a={x:w.x-half,y:w.y}, b={x:w.x+half,y:w.y};
         st.valves.push({a,b});
         st.mode='idle'; draw();
       }else if(st.mode==='erase'){
-        // удалим ближайший объект (по экранной дистанции)
         const hit = nearestObject(p.x,p.y);
         if(hit && hit.dist<=22*DPR){
-          if(hit.kind==='seg') st.segs.splice(hit.idx,1);
-          else st.valves.splice(hit.idx,1);
+          if(hit.kind==='seg') st.segs.splice(hit.idx,1); else st.valves.splice(hit.idx,1);
           draw();
         } else { toast('Нет объектов рядом'); }
         st.mode='idle';
       }else{
-        panStart={x:p.x,y:p.y, cx:st.cx, cy:st.cy}; // панорамирование
+        panStart={x:p.x,y:p.y, cx:st.cx, cy:st.cy};
       }
     }
 
@@ -189,7 +168,7 @@
 
   cv.addEventListener('pointermove', e=>{
     if(!pointers.has(e.pointerId)) return;
-    const cur={x:e.clientX*DPR,y:e.clientY*DPR}, prev=pointers.get(e.pointerId);
+    const cur={x:e.clientX*DPR,y:e.clientY*DPR};
     pointers.set(e.pointerId,cur); lastPointer=cur;
 
     if(pointers.size===1){
@@ -224,7 +203,6 @@
   cv.addEventListener('pointerup', endPtr, {passive:true});
   cv.addEventListener('pointercancel', endPtr, {passive:true});
 
-  // колесо мыши (на телефоне игнорируется) — зум к указателю
   cv.addEventListener('wheel', e=>{
     e.preventDefault();
     const sx=e.clientX*DPR, sy=e.clientY*DPR;
@@ -235,7 +213,6 @@
     draw();
   }, {passive:false});
 
-  // ---------- поиск ближайшего объекта ----------
   function nearestObject(sx,sy){
     let best=null;
     function segDist(s){
@@ -250,7 +227,6 @@
     return best;
   }
 
-  // ---------- кнопки ----------
   document.getElementById('bLine').onclick  = ()=>{ st.mode='line';  st.first=null; toast('Линия: 2 тапа'); };
   document.getElementById('bValve').onclick = ()=>{ st.mode='valve'; st.first=null; toast('Вентиль: 1 тап'); };
   document.getElementById('bErase').onclick = ()=>{ st.mode='erase'; st.first=null; toast('Ластик: 1 тап'); };
@@ -259,11 +235,9 @@
   document.getElementById('bUndo').onclick  = ()=>{ if(st.valves.length) st.valves.pop(); else if(st.segs.length) st.segs.pop(); draw(); };
   document.getElementById('bClear').onclick = ()=>{ st.segs.length=0; st.valves.length=0; st.first=null; draw(); };
 
-  // ---------- старт ----------
   function boot(){ resize(); st.cx=cv.width/2; st.cy=cv.height/2; st.s=1*DPR; draw(); }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot, {once:true}); else boot();
 })();
 </script>
-
 </body>
 </html>
