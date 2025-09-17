@@ -1,208 +1,26 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
-<title>IsoPipe — минимальная веб-версия</title>
-<style>
-  :root{--violet:#7b2cff;--violet2:#6523ff}
-  html,body{margin:0;height:100%;overflow:hidden;background:#0b1220}
-  body{font:16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff}
-  #cv{display:block;width:100vw;height:100vh;background:#fff;touch-action:none}
-  .bar{position:fixed;left:8px;right:8px;top:8px;z-index:10;display:flex;flex-wrap:wrap;gap:8px}
-  .btn{height:40px;border:0;border-radius:12px;padding:0 12px;color:#fff;font-weight:700;background:linear-gradient(180deg,var(--violet2),var(--violet))}
-  .ghost{background:#fff;color:#5b30c2;border:1px solid #d8c9ff}
-  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.2s;z-index:20}
-  .toast.show{opacity:1}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>IsoPipe — чертёж</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="bar">
-    <button class="btn"    data-act="line">Линия</button>
-    <button class="btn"    data-act="valve">Вентиль</button>
-    <button class="btn"    data-act="undo">Назад</button>
-    <button class="btn"    data-act="clear">Очистить</button>
-    <button class="btn ghost" data-act="fit">Fit</button>
+  <div id="bar" class="bar">
+    <button class="btn" id="bLine">Линия</button>
+    <button class="btn" id="bValve">Вентиль</button>
+    <button class="btn" id="bErase">Ластик</button>
+    <button class="btn" id="bFit">Fit</button>
+    <button class="btn ghost" id="bUndo">Назад</button>
+    <button class="btn warn" id="bClear">Очистить</button>
   </div>
+
   <canvas id="cv"></canvas>
   <div id="toast" class="toast"></div>
 
-<script>
-(function(){
-  // ---------- базовые вещи ----------
-  const cv=document.getElementById('cv');
-  const ctx=cv.getContext('2d',{alpha:false});
-  const DPR=Math.min(2,Math.max(1,window.devicePixelRatio||1));
-  const toast=(t,ms=900)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
-
-  // состояние
-  const st={
-    mode:'idle',              // 'idle' | 'line' | 'valve'
-    first:null,               // первая точка для линии (в мировых координатах)
-    preview:null,             // предпросмотр второй точки
-    segs:[],                  // {a:{x,y}, b:{x,y}} обычные отрезки
-    valves:[],                // {A:{x,y}, B:{x,y}} экраны (храним в мире)
-    s:1*DPR, cx:0, cy:0       // трансформация: масштаб и центр в пикселях canvas
-  };
-
-  // размер
-  function resize(){
-    cv.width = Math.round(innerWidth*DPR);
-    cv.height= Math.round(innerHeight*DPR);
-    if(st.cx===0&&st.cy===0){ st.cx=cv.width/2; st.cy=cv.height/2; }
-    draw();
-  }
-  addEventListener('resize',resize,{passive:true}); resize();
-
-  // преобразования экран<->мир
-  const w2s=p=>({x:st.cx+p.x*st.s, y:st.cy+p.y*st.s});
-  const s2w=(sx,sy)=>({x:(sx-st.cx)/st.s, y:(sy-st.cy)/st.s});
-
-  // лёгкая изометрическая сетка
-  function grid(){
-    const step=200, angs=[30,90,150];
-    ctx.save();
-    for(const a of angs){
-      const r=a*Math.PI/180, vx=Math.cos(r), vy=Math.sin(r), px=-vy, py=vx;
-      const stepScr=step*st.s, need=Math.ceil(Math.max(cv.width,cv.height)/stepScr)+2;
-      for(let k=-need;k<=need;k++){
-        const bx=px*k*step, by=py*k*step;
-        const A=w2s({x:bx-vx*9999,y:by-vy*9999}), B=w2s({x:bx+vx*9999,y:by+vy*9999});
-        ctx.strokeStyle=(k%3===0)?'#c6cbd6':'#e6e9f0';
-        ctx.lineWidth=(k%3===0)?1.4:1;
-        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-      }
-    } ctx.restore();
-  }
-
-  // отрисовка вентиля (по двум экранным точкам, но рисуем в мире)
-  function drawValveCanvas(Aw,Bw){
-    const A=w2s(Aw), B=w2s(Bw);
-    ctx.save();
-    // «кусок трубы»
-    ctx.lineCap='round';
-    ctx.strokeStyle='#7b2cff';
-    ctx.lineWidth=Math.max(6*DPR, 6*st.s*0.75);
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-
-    // «бабочка» + ручка
-    const ang=Math.atan2(B.y-A.y, B.x-A.x);
-    const mid={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
-    ctx.translate(mid.x, mid.y); ctx.rotate(ang);
-
-    const w=12*DPR, h=8*DPR;
-    ctx.fillStyle='#7b2cff';
-    ctx.strokeStyle='#4a21a8';
-    ctx.lineWidth=1.5*DPR;
-
-    ctx.beginPath();
-    ctx.moveTo(-w*0.5,0);
-    ctx.lineTo(0,-h*0.65);
-    ctx.lineTo(w*0.5,0);
-    ctx.lineTo(0,h*0.65);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-
-    // ручка — короткий штрих вверх
-    ctx.strokeStyle='#111'; ctx.lineWidth=2*DPR;
-    ctx.beginPath(); ctx.moveTo(0,-h*0.95); ctx.lineTo(0,-h*1.8); ctx.stroke();
-
-    ctx.restore();
-  }
-
-  // рисование сцены
-  function draw(){
-    ctx.clearRect(0,0,cv.width,cv.height);
-    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-
-    grid();
-
-    // линии
-    ctx.save(); ctx.translate(st.cx,st.cy); ctx.scale(st.s,st.s);
-    for(const s of st.segs){
-      ctx.lineCap='round';
-      ctx.strokeStyle='#7b2cff';
-      ctx.lineWidth=(6*DPR)/st.s;
-      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-    }
-    ctx.restore();
-
-    // вентили
-    for(const v of st.valves){ drawValveCanvas(v.A, v.B); }
-
-    // предпросмотр линии и маркер первой точки
-    if(st.first){
-      const A=w2s(st.first);
-      ctx.fillStyle='#16a34a'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(A.x,A.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
-      if(st.preview){
-        const B=w2s(st.preview);
-        ctx.setLineDash([8,8]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=3;
-        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-  }
-
-  // плавное перемещение/зум
-  let lastPan=null;
-  cv.addEventListener('pointerdown', e=>{
-    cv.setPointerCapture?.(e.pointerId);
-    const sx=e.clientX*DPR, sy=e.clientY*DPR; const w=s2w(sx,sy);
-
-    if(st.mode==='line'){
-      if(!st.first){ st.first=w; st.preview=null; toast('Поставь вторую точку'); draw(); }
-      else{ st.segs.push({a:st.first, b:w}); st.first=null; st.preview=null; st.mode='idle'; draw(); }
-      return;
-    }
-    if(st.mode==='valve'){
-      // создаём короткий отрезок 10мм (~10 px на 1x DPR) по экранной ориентации
-      const pix=10*DPR; // длина вентиля на экране
-      const A={x:(sx-pix/2), y:sy}, B={x:(sx+pix/2), y:sy};
-      const Aw=s2w(A.x,A.y), Bw=s2w(B.x,B.y);
-      st.valves.push({A:Aw, B:Bw});
-      st.mode='idle'; draw();
-      return;
-    }
-
-    // иначе — панорамирование
-    lastPan={x:sx,y:sy};
-  });
-
-  cv.addEventListener('pointermove', e=>{
-    const sx=e.clientX*DPR, sy=e.clientY*DPR;
-    if(st.mode==='line'&&st.first){ st.preview=s2w(sx,sy); draw(); return; }
-    if(lastPan){
-      st.cx += sx-lastPan.x; st.cy += sy-lastPan.y; lastPan={x:sx,y:sy}; draw();
-    }
-  });
-  ['pointerup','pointercancel','pointerleave'].forEach(t=>cv.addEventListener(t,()=>{lastPan=null;}));
-
-  // колесо/щипок — мягкий зум к курсору/пальцам
-  cv.addEventListener('wheel', e=>{
-    e.preventDefault();
-    const factor = (e.deltaY<0)?1.06:0.94;
-    const sx=e.clientX*DPR, sy=e.clientY*DPR;
-    const w=s2w(sx,sy);
-    const nextS = Math.max(0.4*DPR, Math.min(4*DPR, st.s*factor));
-    st.cx = sx - w.x*nextS; st.cy = sy - w.y*nextS; st.s = nextS; draw();
-  }, {passive:false});
-
-  // кнопки
-  document.querySelector('.bar').addEventListener('click', e=>{
-    const act=e.target?.dataset?.act; if(!act) return;
-    if(act==='line'){  st.mode='line';  st.first=null; st.preview=null; toast('Линия: 2 тапа'); }
-    if(act==='valve'){ st.mode='valve'; st.first=null; st.preview=null; toast('Вентиль: 1 тап'); }
-    if(act==='undo'){
-      if(st.first && st.mode==='line'){ st.first=null; st.preview=null; st.mode='idle'; }
-      else if(st.valves.length){ st.valves.pop(); }
-      else if(st.segs.length){ st.segs.pop(); }
-      draw();
-    }
-    if(act==='clear'){ st.segs.length=0; st.valves.length=0; st.first=null; st.preview=null; draw(); }
-    if(act==='fit'){ st.s=1*DPR; st.cx=cv.width/2; st.cy=cv.height/2; draw(); }
-  });
-})();
-</script>
+  <script src="valve.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
