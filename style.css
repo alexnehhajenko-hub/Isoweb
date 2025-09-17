@@ -1,22 +1,20 @@
-/* style.css */
 :root{
-  --violet:#7b2cff; --violet2:#6523ff; --bg:#0b0020;
+  --violet:#7b2cff;
+  --violet2:#5420d9;
+  --ink:#1b1b24;
 }
-html,body{
-  margin:0; height:100%; background:#f5f6fb; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-  overflow:hidden;
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#f3f4f7;color:#111;
+  font:15px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.bar{
+  position:fixed; inset:0 0 auto 0; height:56px; padding:8px;
+  display:flex; gap:8px; align-items:center; z-index:10;
+  background:linear-gradient(180deg,#2b0b6b,#3f139c);
+  box-shadow:0 2px 6px rgba(0,0,0,.18)
 }
-#cv{ display:block; width:100vw; height:100vh; background:#fff; touch-action:none; }
-.toolbar{
-  position:fixed; left:8px; top:8px; right:8px; z-index:10; display:flex; gap:8px; flex-wrap:wrap;
+.bar button{
+  height:40px; padding:0 12px; border:0; border-radius:12px; font-weight:700;
+  background:linear-gradient(180deg,var(--violet),var(--violet2)); color:#fff
 }
-.toolbar button{
-  height:38px; border:0; border-radius:12px; padding:0 12px; color:#fff; font-weight:700;
-  background:linear-gradient(180deg,var(--violet2),var(--violet));
-}
-.toolbar button[data-act="grid"]{ background:#fff; color:#5b30c2; border:1px solid #d8c9ff; }
-.toast{
-  position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
-  background:#1f1f2e; color:#fff; padding:8px 12px; border-radius:10px; opacity:0; transition:.25s; z-index:15;
-}
-.toast.show{ opacity:1; }
+.bar button.ghost{background:#fff;color:var(--violet2);border:1px solid #e1d8ff}
+#cv{position:fixed; left:0; right:0; top:56px; bottom:0; display:block; background:#fff; touch-action:none}
