@@ -1,125 +1,132 @@
-// Библиотека врезаемых элементов: задвижка, клапаны, насос.
-// Все элементы рисуются в ЛОКАЛЬНОЙ системе координат:
-// ось X совпадает с осью трубы, (0,0) — точка на трубе, где стоит элемент.
-// Длина корпуса каждого элемента = ровно 10 мм.
-// Ручка: если труба горизонтальна — рисуется «сверху», если вертикальна — «в лицо».
+// Библиотека элементов (врезки) с корпусом ровно 10 мм.
+// Улучшённый «шаровый вентиль» с выразительной ручкой (евро-обозначение).
+// Координаты локальные: ось X вдоль трубы; (0,0) — центр вставки.
 (function(){
   const TAU = Math.PI*2;
 
-  function mm(pxPerMm, n){ return n*pxPerMm; }
+  function mm(ppm, n){ return n*ppm; }
 
-  function label(ctx, text){
+  function label(ctx, text, ppm){
     ctx.save();
     ctx.font='600 12px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
     ctx.fillStyle='#1f1f2e';
     ctx.textAlign='center';
     ctx.textBaseline='bottom';
-    ctx.fillText(text, 0, -mm(ctx._ppm, 0.8)); // подпись над корпусом
+    ctx.fillText(text, 0, -mm(ppm,0.8));
     ctx.restore();
   }
 
-  function drawHandle(ctx, orientation, pxPerMm){
+  function handleStyled(ctx, orientation, ppm){
+    // Визуально приятная «ручка-штурвал»: цвет контраста, аккуратные спицы
     ctx.save();
-    ctx.fillStyle = '#111';
-    ctx.strokeStyle = '#111';
-    ctx.lineWidth = Math.max(1, mm(pxPerMm,0.5));
+    ctx.lineWidth = Math.max(1, mm(ppm,0.5));
+    ctx.strokeStyle = '#1c1c28';
+    ctx.fillStyle = orientation==='top' ? '#ff6b6b' : '#ff6b6b';
+
     if(orientation==='top'){
-      // шток вверх и штурвал
-      ctx.beginPath(); ctx.moveTo(0, -mm(pxPerMm,2.5)); ctx.lineTo(0, -mm(pxPerMm,6)); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0, -mm(pxPerMm,6), mm(pxPerMm,2.2), 0, TAU); ctx.stroke();
+      // шток вверх
+      ctx.beginPath(); ctx.moveTo(0, -mm(ppm,2.6)); ctx.lineTo(0, -mm(ppm,6.2)); ctx.stroke();
+      // колёсико
+      const R = mm(ppm,2.4);
+      ctx.beginPath(); ctx.arc(0, -mm(ppm,6.2), R, 0, TAU); ctx.fill(); ctx.stroke();
+      // спицы
+      ctx.save(); ctx.translate(0, -mm(ppm,6.2));
+      for(let i=0;i<3;i++){
+        const a=i*TAU/3;
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(Math.cos(a)*R*0.85, Math.sin(a)*R*0.85);
+        ctx.stroke();
+      }
+      ctx.restore();
     }else{
-      // круг "в лицо"
-      ctx.beginPath(); ctx.arc(0, 0, mm(pxPerMm,2.6), 0, TAU); ctx.stroke();
+      // вид «в лицо»: диск
+      const R = mm(ppm,2.8);
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill(); ctx.stroke();
+      // спицы
+      for(let i=0;i<3;i++){
+        const a=i*TAU/3;
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(Math.cos(a)*R*0.85, Math.sin(a)*R*0.85);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }
 
-  // Прямоугольный корпус длиной 10 мм
-  function body10(ctx, pxPerMm, heightMm=4){
-    const L = mm(pxPerMm, 10), H = mm(pxPerMm, heightMm);
+  function body10(ctx, ppm, hMm=4){
+    const L = mm(ppm,10), H = mm(ppm,hMm);
     ctx.save();
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#111';
-    ctx.lineWidth = Math.max(1, mm(pxPerMm,0.5));
+    ctx.lineWidth = Math.max(1, mm(ppm,0.5));
     ctx.beginPath(); ctx.rect(-L/2, -H/2, L, H); ctx.fill(); ctx.stroke();
     ctx.restore();
   }
 
-  // ------------ конкретные элементы ------------
-  function drawGate(ctx, pxPerMm, orientation){
-    ctx._ppm = pxPerMm;
-    body10(ctx, pxPerMm, 4);
-    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(pxPerMm,0.5));
-    const L = mm(pxPerMm,10), H = mm(pxPerMm,4);
-    // «бабочка» из ISO 14617 для задвижки
+  function drawBall(ctx, ppm, orientation){
+    body10(ctx, ppm, 4);
+    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
+    // шар внутри корпуса
+    ctx.beginPath(); ctx.arc(0,0, mm(ppm,1.9), 0, TAU); ctx.stroke();
+    // короткий шток
+    ctx.beginPath(); ctx.moveTo(0, -mm(ppm,1.9)); ctx.lineTo(0, -mm(ppm,3.2)); ctx.stroke();
+    ctx.restore();
+    handleStyled(ctx, orientation, ppm);
+    label(ctx, 'BALL 10mm', ppm);
+  }
+
+  function drawGate(ctx, ppm, orientation){
+    body10(ctx, ppm, 4);
+    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
+    const L = mm(ppm,10), H = mm(ppm,4);
     ctx.beginPath();
     ctx.moveTo(-L*0.22, -H*0.5); ctx.lineTo(0,0); ctx.lineTo(-L*0.22,  H*0.5);
     ctx.moveTo( L*0.22, -H*0.5); ctx.lineTo(0,0); ctx.lineTo( L*0.22,  H*0.5);
     ctx.stroke();
     ctx.restore();
-    drawHandle(ctx, orientation, pxPerMm);
-    label(ctx, 'GATE 10mm');
+    handleStyled(ctx, orientation, ppm);
+    label(ctx, 'GATE 10mm', ppm);
   }
 
-  function drawBall(ctx, pxPerMm, orientation){
-    ctx._ppm = pxPerMm;
-    body10(ctx, pxPerMm, 4);
-    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(pxPerMm,0.5));
-    ctx.beginPath(); ctx.arc(0,0, mm(pxPerMm,1.8), 0, TAU); ctx.stroke();
-    // короткий шток
-    ctx.beginPath(); ctx.moveTo(0, -mm(pxPerMm,1.8)); ctx.lineTo(0, -mm(pxPerMm,3.4)); ctx.stroke();
+  function drawGlobe(ctx, ppm, orientation){
+    body10(ctx, ppm, 4);
+    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
+    ctx.beginPath(); ctx.moveTo(-mm(ppm,3),0); ctx.lineTo(mm(ppm,3),0); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,-mm(ppm,1.6), mm(ppm,1.6), Math.PI*0.15, Math.PI*0.85); ctx.stroke();
     ctx.restore();
-    drawHandle(ctx, orientation, pxPerMm);
-    label(ctx, 'BALL 10mm');
+    handleStyled(ctx, orientation, ppm);
+    label(ctx, 'GLOBE 10mm', ppm);
   }
 
-  function drawGlobe(ctx, pxPerMm, orientation){
-    ctx._ppm = pxPerMm;
-    body10(ctx, pxPerMm, 4);
-    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(pxPerMm,0.5));
-    // седло + тарелка сверху
-    ctx.beginPath(); ctx.moveTo(-mm(pxPerMm,3),0); ctx.lineTo(mm(pxPerMm,3),0); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0,-mm(pxPerMm,1.6), mm(pxPerMm,1.6), Math.PI*0.15, Math.PI*0.85); ctx.stroke();
-    ctx.restore();
-    drawHandle(ctx, orientation, pxPerMm);
-    label(ctx, 'GLOBE 10mm');
-  }
-
-  function drawCheck(ctx, pxPerMm /* no handle */){
-    ctx._ppm = pxPerMm;
-    body10(ctx, pxPerMm, 4);
-    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(pxPerMm,0.5));
-    // тарелка обратного клапана (треугольник)
+  function drawCheck(ctx, ppm){
+    body10(ctx, ppm, 4);
+    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
     ctx.beginPath();
-    ctx.moveTo(-mm(pxPerMm,2.6), -mm(pxPerMm,2));
-    ctx.lineTo( mm(pxPerMm,1.6), 0);
-    ctx.lineTo(-mm(pxPerMm,2.6),  mm(pxPerMm,2));
+    ctx.moveTo(-mm(ppm,2.6), -mm(ppm,2));
+    ctx.lineTo( mm(ppm,1.6), 0);
+    ctx.lineTo(-mm(ppm,2.6),  mm(ppm,2));
     ctx.closePath(); ctx.stroke();
     ctx.restore();
-    label(ctx, 'CHECK 10mm');
+    label(ctx, 'CHECK 10mm', ppm);
   }
 
-  function drawPump(ctx, pxPerMm){
-    ctx._ppm = pxPerMm;
-    const L = mm(pxPerMm,10), H = mm(pxPerMm,6);
-    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(pxPerMm,0.5));
-    // корпус
+  function drawPump(ctx, ppm){
+    const L = mm(ppm,10), H = mm(ppm,6);
+    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
     ctx.beginPath(); ctx.rect(-L/2, -H/2, L, H); ctx.stroke();
-    // колесо
-    ctx.beginPath(); ctx.arc(0,0, mm(pxPerMm,2.6), 0, TAU); ctx.stroke();
-    // короткие патрубки
-    ctx.beginPath(); ctx.moveTo(-L/2,0); ctx.lineTo(-mm(pxPerMm,2),0);
-    ctx.moveTo( L/2,0); ctx.lineTo( mm(pxPerMm,2),0);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0, mm(ppm,2.6), 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-L/2,0); ctx.lineTo(-mm(ppm,2),0); ctx.moveTo(L/2,0); ctx.lineTo(mm(ppm,2),0); ctx.stroke();
     ctx.restore();
-    label(ctx, 'PUMP 10mm');
+    label(ctx, 'PUMP 10mm', ppm);
   }
 
   window.ValveLib = {
     draw(type, ctx, pxPerMm, orientation){
       switch(type){
-        case 'gate':  return drawGate(ctx, pxPerMm, orientation);
         case 'ball':  return drawBall(ctx, pxPerMm, orientation);
+        case 'gate':  return drawGate(ctx, pxPerMm, orientation);
         case 'globe': return drawGlobe(ctx, pxPerMm, orientation);
         case 'check': return drawCheck(ctx, pxPerMm);
         case 'pump':  return drawPump(ctx, pxPerMm);
