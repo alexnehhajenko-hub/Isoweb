@@ -2,167 +2,128 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>IsoPipe — стабильная</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>IsoPipe — SafeBoot</title>
 <style>
   :root{--violet:#7b2cff;--violet2:#6523ff}
   html,body{margin:0;height:100%;background:#f5f6fb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   #cv{display:block;width:100vw;height:100vh;background:#fff;touch-action:none}
-
-  .toolbar{position:fixed;left:8px;right:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
-  .toolbar button{height:40px;border:0;border-radius:12px;padding:0 12px;color:#fff;font-weight:700;background:linear-gradient(180deg,var(--violet2),var(--violet))}
-  .toolbar button.ghost{background:#fff;color:#5b30c2;border:1px solid #d8c9ff}
+  .bar{position:fixed;left:8px;right:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
+  .bar button{height:40px;border:0;border-radius:12px;padding:0 12px;color:#fff;font-weight:700;background:linear-gradient(180deg,var(--violet2),var(--violet))}
+  .bar button.ghost{background:#fff;color:#5b30c2;border:1px solid #d8c9ff}
   .pill{background:#fff;border:1px solid #e7e3f7;border-radius:12px;height:40px;display:flex;align-items:center;gap:8px;padding:0 10px}
   .pill input[type="checkbox"]{width:18px;height:18px}
-
   .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 12px;border-radius:10px;opacity:0;transition:.2s;z-index:20}
   .toast.show{opacity:1}
 </style>
 </head>
 <body>
-  <div class="toolbar">
+  <div class="bar">
     <button data-act="line">Линия</button>
     <button data-act="valve">Вентиль</button>
-    <button data-act="erase">Ластик</button>
-    <label class="pill"><input id="snap" type="checkbox" checked> Snap</label>
-    <button data-act="fit">Fit</button>
     <button data-act="undo">Назад</button>
     <button data-act="clear">Очистить</button>
+    <button data-act="fit">Fit</button>
     <button class="ghost" data-act="grid">Сетка</button>
+    <label class="pill"><input id="snap" type="checkbox" checked> Snap</label>
   </div>
   <canvas id="cv"></canvas>
   <div id="toast" class="toast"></div>
 
 <script>
 (function(){
-  // ---------- базовые ----------
-  const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d', {alpha:false});
-  const DPR = Math.max(1, Math.min(window.devicePixelRatio||1, 2));
-  const toastEl = document.getElementById('toast');
-  const showToast=(t,ms=900)=>{ toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),ms); };
+  const cv=document.getElementById('cv');
+  const ctx=cv.getContext('2d',{alpha:false});
+  const DPR=Math.max(1, Math.min(window.devicePixelRatio||1, 2));
+  const toastEl=document.getElementById('toast');
+  const show=(t,ms=900)=>{toastEl.textContent=t;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),ms);};
 
-  // ---------- состояние сцены ----------
-  const state = {
-    mode:'idle',             // idle | line | valve | erase
-    first:null,              // первая точка (мир)
-    preview:null,            // предпросмотр (мир)
-    segs:[],                 // трубы: {a:{x,y}, b:{x,y}}
-    valves:[],               // вентили: {a:{x,y}, b:{x,y}}
-
-    // камера (экран<->мир) с плавным зумом
-    s:1*DPR, cx:0, cy:0,     // текущие
-    targetS:1*DPR,           // целевой масштаб
-    anim:false,
-
-    grid:true,
-    snapOn:true
+  const st={
+    mode:'idle', first:null, preview:null,
+    segs:[], valves:[],
+    s:1*DPR, targetS:1*DPR, cx:0, cy:0, anim:false,
+    grid:true, snap:true
   };
 
-  // ---------- размеры ----------
   function resize(){
-    cv.width = Math.round(innerWidth * DPR);
-    cv.height= Math.round(innerHeight* DPR);
-    if(state.cx===0 && state.cy===0){ state.cx=cv.width/2; state.cy=cv.height/2; }
+    cv.width=Math.round(innerWidth*DPR);
+    cv.height=Math.round(innerHeight*DPR);
+    if(st.cx===0 && st.cy===0){ st.cx=cv.width/2; st.cy=cv.height/2; }
     draw();
   }
-  window.addEventListener('resize', resize, {passive:true});
-  resize();
+  addEventListener('resize', resize, {passive:true}); resize();
 
-  // ---------- преобразования ----------
-  const w2s = (p)=>({x: state.cx + p.x*state.s, y: state.cy + p.y*state.s});
-  const s2w = (sx,sy)=>({x:(sx-state.cx)/state.s, y:(sy-state.cy)/state.s});
+  const w2s=p=>({x:st.cx+p.x*st.s,y:st.cy+p.y*st.s});
+  const s2w=(sx,sy)=>({x:(sx-st.cx)/st.s,y:(sy-st.cy)/st.s});
 
-  // ---------- сетка (изометрия 30/90/150) ----------
   function drawGrid(){
-    if(!state.grid) return;
+    if(!st.grid) return;
     const step=200, angles=[30,90,150];
     ctx.save();
     for(const ang of angles){
       const r=ang*Math.PI/180, vx=Math.cos(r), vy=Math.sin(r), px=-vy, py=vx;
-      const stepScr=step*state.s, need=Math.ceil(Math.max(cv.width,cv.height)/stepScr)+2;
+      const stepScr=step*st.s, need=Math.ceil(Math.max(cv.width,cv.height)/stepScr)+2;
       for(let k=-need;k<=need;k++){
         const bx=px*k*step, by=py*k*step;
         const A=w2s({x:bx-vx*9999,y:by-vy*9999}), B=w2s({x:bx+vx*9999,y:by+vy*9999});
-        const major=(k%3===0);
-        ctx.strokeStyle= major? '#b7bcc8':'#dcdfe6';
-        ctx.globalAlpha= major? .9:.7;
-        ctx.lineWidth  = major? 1.4:1.0;
-        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+        const major=k%3===0;
+        ctx.strokeStyle=major?'#b7bcc8':'#dcdfe6';
+        ctx.lineWidth=major?1.4:1.0;
+        ctx.globalAlpha=major?.9:.7;
+        ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
       }
     }
     ctx.restore(); ctx.globalAlpha=1;
   }
 
-  // ---------- снап ----------
-  const SNAP_PX = 20;
-  const ANGLES = [0,30,60,90,120,150]; // +180 автоматически
-  const normDeg = a=>((a%360)+360)%360;
-  const angDiff=(a,b)=>{let d=Math.abs(a-b)%360; return d>180?360-d:d;};
-
-  function nodes(){ const out=[]; for(const s of state.segs){ out.push(s.a,s.b); } for(const v of state.valves){ out.push(v.a,v.b);} return out; }
-  function snapToNode(pt){
-    if(!state.snapOn) return pt;
-    const sx=state.cx+pt.x*state.s, sy=state.cy+pt.y*state.s;
-    let best=null, bestD=Infinity, R=SNAP_PX*DPR;
+  // snap
+  const ANGLES=[0,30,60,90,120,150];
+  const norm=a=>((a%360)+360)%360;
+  const ad=(a,b)=>{let d=Math.abs(a-b)%360; return d>180?360-d:d;};
+  const nodes=()=>{const out=[]; st.segs.forEach(s=>out.push(s.a,s.b)); st.valves.forEach(v=>out.push(v.a,v.b)); return out;};
+  function snapNode(p){
+    if(!st.snap) return p;
+    const sx=st.cx+p.x*st.s, sy=st.cy+p.y*st.s, R=20*DPR;
+    let best=null, bestD=Infinity;
     for(const n of nodes()){
-      const ns=w2s(n); const d=Math.hypot(ns.x-sx, ns.y-sy);
+      const ns=w2s(n), d=Math.hypot(ns.x-sx, ns.y-sy);
       if(d<bestD && d<=R){ best=n; bestD=d; }
     }
-    return best? {x:best.x,y:best.y}:pt;
+    return best? {x:best.x,y:best.y} : p;
   }
-  function snapAngle(start, raw, tolDeg=10){
-    if(!state.snapOn || !start) return raw;
-    const v={x:raw.x-start.x,y:raw.y-start.y}; const L=Math.hypot(v.x,v.y);
-    if(L===0) return raw;
-    const ang=normDeg(Math.atan2(v.y,v.x)*180/Math.PI);
-    let bestA=ang, bestD=181;
-    for(const a of ANGLES.concat(ANGLES.map(a=>a+180))){
-      const d=angDiff(ang, normDeg(a));
-      if(d<bestD){ bestD=d; bestA=a; }
+  function snapAngle(a,b,tol=10){
+    if(!st.snap||!a) return b;
+    const v={x:b.x-a.x, y:b.y-a.y}, L=Math.hypot(v.x,v.y); if(L===0) return b;
+    const ang=norm(Math.atan2(v.y,v.x)*180/Math.PI);
+    let best=ang, bd=181;
+    for(const t of ANGLES.concat(ANGLES.map(x=>x+180))){
+      const d=ad(ang, norm(t)); if(d<bd){bd=d; best=t;}
     }
-    if(bestD>tolDeg) return raw;
-    const r=bestA*Math.PI/180;
-    return {x:start.x+Math.cos(r)*L, y:start.y+Math.sin(r)*L};
+    if(bd>tol) return b;
+    const r=best*Math.PI/180; return {x:a.x+Math.cos(r)*L, y:a.y+Math.sin(r)*L};
   }
-  function snapPoint(start, raw){
-    let p=snapToNode(raw);
-    p = snapAngle(start, p);
-    return p;
-  }
+  const snapPoint=(start, raw)=> snapAngle(start, snapNode(raw));
 
-  // ---------- рисование ----------
-  function drawValveSymbol(A, B){ // A,B — уже в мировых
-    // рисуем в экранных для стабильной толщины
-    const As=w2s(A), Bs=w2s(B);
+  function drawValveScreen(Aw,Bw){
+    const A=w2s(Aw), B=w2s(Bw);
     ctx.save();
-    // толстый кусок трубы
-    ctx.lineCap='round';
-    ctx.strokeStyle='#7b2cff';
-    ctx.lineWidth=6*DPR;
-    ctx.beginPath(); ctx.moveTo(As.x,As.y); ctx.lineTo(Bs.x,Bs.y); ctx.stroke();
+    // труба (экранная толщина — стабильная)
+    ctx.lineCap='round'; ctx.strokeStyle='#7b2cff'; ctx.lineWidth=6*DPR;
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
 
-    const ang=Math.atan2(Bs.y-As.y, Bs.x-As.x);
-    const mid={x:(As.x+Bs.x)/2, y:(As.y+Bs.y)/2};
-    ctx.translate(mid.x, mid.y); ctx.rotate(ang);
+    const ang=Math.atan2(B.y-A.y,B.x-A.x);
+    const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+    ctx.translate(mid.x,mid.y); ctx.rotate(ang);
 
-    // «бабочка» покрупнее и контрастнее
+    // «бабочка»
     const w=16*DPR, h=11*DPR;
     ctx.fillStyle='#7b2cff'; ctx.strokeStyle='#4a21a8'; ctx.lineWidth=1.6*DPR;
     ctx.beginPath();
-    ctx.moveTo(-w*0.5,0);
-    ctx.lineTo(0,-h*0.68);
-    ctx.lineTo(w*0.5,0);
-    ctx.lineTo(0,h*0.68);
+    ctx.moveTo(-w*0.5,0); ctx.lineTo(0,-h*0.68); ctx.lineTo(w*0.5,0); ctx.lineTo(0,h*0.68);
     ctx.closePath(); ctx.fill(); ctx.stroke();
-
-    // тонкая белая окантовка внутри — читаемость
+    // внутр. белая окантовка
     ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=1*DPR;
-    ctx.beginPath();
-    ctx.moveTo(-w*0.44,0); ctx.lineTo(0,-h*0.58); ctx.lineTo(w*0.44,0); ctx.lineTo(0,h*0.58); ctx.closePath();
-    ctx.stroke();
-
+    ctx.beginPath(); ctx.moveTo(-w*0.44,0); ctx.lineTo(0,-h*0.58); ctx.lineTo(w*0.44,0); ctx.lineTo(0,h*0.58); ctx.closePath(); ctx.stroke();
     // ручка
     ctx.strokeStyle='#111'; ctx.lineWidth=2*DPR;
     ctx.beginPath(); ctx.moveTo(0,-h*0.95); ctx.lineTo(0,-h*1.9); ctx.stroke();
@@ -173,32 +134,28 @@
   function draw(){
     ctx.clearRect(0,0,cv.width,cv.height);
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-
-    // сетка (в экранных)
     drawGrid();
 
-    // трубы — в мировых, но толщина зависит от масштаба, поэтому рисуем в мировых с поправкой
-    ctx.save(); ctx.translate(state.cx, state.cy); ctx.scale(state.s, state.s);
-    for(const s of state.segs){
-      ctx.lineCap='round'; ctx.lineJoin='round';
-      ctx.strokeStyle='#7b2cff'; ctx.lineWidth=(6*DPR)/state.s;
+    // трубы (в мировых, толщина масштабируется)
+    ctx.save(); ctx.translate(st.cx,st.cy); ctx.scale(st.s,st.s);
+    for(const s of st.segs){
+      ctx.lineCap='round'; ctx.strokeStyle='#7b2cff'; ctx.lineWidth=(6*DPR)/st.s;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-      // лёгкая тень
-      ctx.strokeStyle='rgba(75,32,168,.35)'; ctx.lineWidth=(1.3*DPR)/state.s;
+      ctx.strokeStyle='rgba(75,32,168,.35)'; ctx.lineWidth=(1.2*DPR)/st.s;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
     ctx.restore();
 
-    // вентили — рисуем в экранных (лучше визуально)
-    for(const v of state.valves){ drawValveSymbol(v.a, v.b); }
+    // вентили (в экранных — толщина стабильная)
+    for(const v of st.valves){ drawValveScreen(v.a,v.b); }
 
-    // предпросмотр линии/вентиля
-    if(state.first){
-      const A=w2s(state.first);
+    // предпросмотр
+    if(st.first){
+      const A=w2s(st.first);
       ctx.fillStyle='#16a34a'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
       ctx.beginPath(); ctx.arc(A.x,A.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
-      if(state.preview){
-        const B=w2s(state.preview);
+      if(st.preview){
+        const B=w2s(st.preview);
         ctx.setLineDash([8,8]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=3;
         ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
         ctx.setLineDash([]);
@@ -207,86 +164,61 @@
     }
   }
 
-  // ---------- плавный зум ----------
-  function requestAnim(){ if(state.anim) return; state.anim=true; raf(); }
-  function raf(){
-    const k=0.22; // коэффициент сглаживания
-    const ds = state.targetS - state.s;
-    if(Math.abs(ds)>1e-3){
-      state.s += ds * k;
-      draw();
-      requestAnimationFrame(raf);
-    }else{
-      state.s = state.targetS;
-      state.anim=false; draw();
-    }
+  // плавный зум к целевому масштабу
+  function animTick(){
+    const k=0.22;
+    const ds=st.targetS - st.s;
+    if(Math.abs(ds)>1e-3){ st.s += ds*k; draw(); requestAnimationFrame(animTick); }
+    else { st.s=st.targetS; st.anim=false; draw(); }
   }
+  function requestAnim(){ if(st.anim) return; st.anim=true; requestAnimationFrame(animTick); }
 
-  // мягкое колесо
-  cv.addEventListener('wheel', (e)=>{
+  // колесо (мелкие шаги)
+  cv.addEventListener('wheel', e=>{
     e.preventDefault();
-    const factor = (e.deltaY<0)? 1.08 : 0.93; // мелкий шаг
+    const factor = (e.deltaY<0)? 1.08 : 0.93;
     const sx=e.clientX*DPR, sy=e.clientY*DPR;
-    const before = s2w(sx,sy);
-    state.targetS = Math.max(0.35*DPR, Math.min(6*DPR, state.s * factor));
-    // фиксируем точку под курсором
-    const after = {x: sx - before.x*state.targetS, y: sy - before.y*state.targetS};
-    state.cx = after.x; state.cy = after.y;
-    requestAnim();
+    const before=s2w(sx,sy);
+    st.targetS = Math.max(0.35*DPR, Math.min(6*DPR, st.s*factor));
+    const after={x: sx - before.x*st.targetS, y: sy - before.y*st.targetS};
+    st.cx=after.x; st.cy=after.y; requestAnim();
   }, {passive:false});
 
-  // пинч — тоже «в цель»
-  const pointers=new Map();
-  let pinch=null, lastPan=null;
+  // указатели
+  const pointers=new Map(); let pinch=null, lastPan=null;
   cv.addEventListener('pointerdown', e=>{
     cv.setPointerCapture?.(e.pointerId);
-    const p={x:e.clientX*DPR,y:e.clientY*DPR};
-    pointers.set(e.pointerId,p);
+    const p={x:e.clientX*DPR,y:e.clientY*DPR}; pointers.set(e.pointerId,p);
 
     if(pointers.size===1){
-      // режимные тапы
       const w=s2w(p.x,p.y);
-      if(state.mode==='line'){
-        if(!state.first){ state.first = state.snapOn ? snapToNode(w) : w; state.preview=null; showToast('2-я точка'); draw(); }
+      if(st.mode==='line'){
+        if(!st.first){ st.first = st.snap? snapNode(w) : w; st.preview=null; show('2-я точка'); draw(); }
         else{
-          const end = state.snapOn ? snapPoint(state.first, w) : w;
-          state.segs.push({a:state.first, b:end});
-          state.first=null; state.preview=null; state.mode='idle'; draw();
+          const end = st.snap? snapPoint(st.first, w) : w;
+          st.segs.push({a:st.first,b:end});
+          st.first=null; st.preview=null; st.mode='idle'; draw();
         }
-      }else if(state.mode==='valve'){
-        if(!state.first){ state.first = state.snapOn ? snapToNode(w) : w; state.preview=null; showToast('2-я точка ориентации'); draw(); }
+      }else if(st.mode==='valve'){
+        if(!st.first){ st.first = st.snap? snapNode(w) : w; st.preview=null; show('Ориентация'); draw(); }
         else{
-          // фиксированная экранная длина 64 px
-          const targetPx = 64*DPR;
-          // направление из first -> w со снапом
-          const dir = state.snapOn ? snapPoint(state.first, w) : w;
-          const vx = dir.x - state.first.x, vy = dir.y - state.first.y;
-          const L = Math.hypot(vx,vy)||1;
-          const ux=vx/L, uy=vy/L;
-          const halfWorld = (targetPx/2) / state.s;
-          const a={x: state.first.x - ux*halfWorld, y: state.first.y - uy*halfWorld};
-          const b={x: state.first.x + ux*halfWorld, y: state.first.y + uy*halfWorld};
-          state.valves.push({a,b});
-          state.first=null; state.preview=null; state.mode='idle'; draw();
+          // фиксированная экранная длина 64 px (по 32 в обе стороны от центра)
+          const dir = st.snap? snapPoint(st.first, w) : w;
+          const vx=dir.x-st.first.x, vy=dir.y-st.first.y, L=Math.hypot(vx,vy)||1;
+          const ux=vx/L, uy=vy/L, halfWorld=(32*DPR)/st.s;
+          const A={x: st.first.x-ux*halfWorld, y: st.first.y-uy*halfWorld};
+          const B={x: st.first.x+ux*halfWorld, y: st.first.y+uy*halfWorld};
+          st.valves.push({a:A,b:B});
+          st.first=null; st.preview=null; st.mode='idle'; draw();
         }
-      }else if(state.mode==='erase'){
-        // удаляем ближайший объект (с разумным радиусом)
-        const hit = nearestObject(p.x,p.y);
-        if(hit && hit.dist <= 22*DPR){
-          if(hit.kind==='seg') state.segs.splice(hit.idx,1);
-          else state.valves.splice(hit.idx,1);
-          draw();
-        }else showToast('Нет объектов рядом');
-        state.mode='idle';
       }else{
         lastPan=p;
       }
     }
-
     if(pointers.size===2){
       const ids=[...pointers.keys()];
       const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
-      pinch = {d0: Math.hypot(a.x-b.x, a.y-b.y), c:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}};
+      pinch={d0:Math.hypot(a.x-b.x,a.y-b.y), c:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}};
     }
   }, {passive:true});
 
@@ -296,30 +228,23 @@
     const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,cur);
 
     if(pointers.size===1){
-      if(state.mode==='line' && state.first){
-        const w=s2w(cur.x,cur.y);
-        state.preview = state.snapOn ? snapPoint(state.first, w) : w;
-        draw();
-      }else if(state.mode==='valve' && state.first){
-        const w=s2w(cur.x,cur.y);
-        state.preview = state.snapOn ? snapPoint(state.first, w) : w;
-        draw();
+      if(st.mode==='line' && st.first){
+        const w=s2w(cur.x,cur.y); st.preview = st.snap? snapPoint(st.first, w) : w; draw();
+      }else if(st.mode==='valve' && st.first){
+        const w=s2w(cur.x,cur.y); st.preview = st.snap? snapPoint(st.first, w) : w; draw();
       }else if(lastPan){
-        state.cx += cur.x - lastPan.x; state.cy += cur.y - lastPan.y; lastPan=cur; draw();
+        st.cx += cur.x - lastPan.x; st.cy += cur.y - lastPan.y; lastPan=cur; draw();
       }
     }
     if(pointers.size===2 && pinch){
       const ids=[...pointers.keys()];
       const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
-      const d=Math.hypot(a.x-b.x, a.y-b.y);
-      if(d>0){
-        const factor = d / pinch.d0;
-        const sx=pinch.c.x, sy=pinch.c.y;
-        const w=s2w(sx,sy);
-        state.targetS = Math.max(0.35*DPR, Math.min(6*DPR, state.s*factor));
-        const after = {x: sx - w.x*state.targetS, y: sy - w.y*state.targetS};
-        state.cx = after.x; state.cy = after.y;
-        requestAnim();
+      const d=Math.hypot(a.x-b.x,a.y-b.y); if(d>0){
+        const factor=d/pinch.d0;
+        const sx=pinch.c.x, sy=pinch.c.y, before=s2w(sx,sy);
+        st.targetS = Math.max(0.35*DPR, Math.min(6*DPR, st.s*factor));
+        const after={x: sx - before.x*st.targetS, y: sy - before.y*st.targetS};
+        st.cx=after.x; st.cy=after.y; requestAnim();
       }
     }
   }, {passive:true});
@@ -333,38 +258,18 @@
   cv.addEventListener('pointercancel', endPtr, {passive:true});
   cv.addEventListener('pointerleave', endPtr, {passive:true});
 
-  // поиск ближайшего объекта (в экранных пикселях)
-  function nearestObject(sx,sy){
-    let best=null;
-    function segDist(s){
-      const A=w2s(s.a), B=w2s(s.b);
-      const vx=B.x-A.x, vy=B.y-A.y, wx=sx-A.x, wy=sy-A.y;
-      const c1=vx*wx+vy*wy; if(c1<=0) return Math.hypot(sx-A.x,sy-A.y);
-      const c2=vx*vx+vy*vy; if(c2<=c1) return Math.hypot(sx-B.x,sy-B.y);
-      const t=c1/c2, px=A.x+t*vx, py=A.y+t*vy; return Math.hypot(sx-px,sy-py);
-    }
-    state.segs.forEach((s,i)=>{ const d=segDist(s); if(!best||d<best.dist) best={kind:'seg',idx:i,dist:d}; });
-    state.valves.forEach((v,i)=>{ const d=segDist(v); if(!best||d<best.dist) best={kind:'valve',idx:i,dist:d}; });
-    return best;
-  }
-
-  // ---------- тулбар ----------
-  document.querySelector('.toolbar').addEventListener('click', e=>{
-    const act = e.target?.dataset?.act; if(!act) return;
-    if(act==='line'){  state.mode='line';  state.first=null; state.preview=null; showToast('Линия: 2 тапа'); }
-    if(act==='valve'){ state.mode='valve'; state.first=null; state.preview=null; showToast('Вентиль: центр → ориентация'); }
-    if(act==='erase'){ state.mode='erase'; state.first=null; state.preview=null; showToast('Ластик: один тап'); }
-    if(act==='fit'){   state.s=state.targetS=1*DPR; state.cx=cv.width/2; state.cy=cv.height/2; draw(); }
-    if(act==='undo'){  (state.valves.length?state.valves.pop():state.segs.pop()); draw(); }
-    if(act==='clear'){ state.segs.length=0; state.valves.length=0; state.first=null; state.preview=null; draw(); }
-    if(act==='grid'){  state.grid=!state.grid; draw(); }
+  // тулбар
+  document.querySelector('.bar').addEventListener('click', e=>{
+    const act=e.target?.dataset?.act; if(!act) return;
+    if(act==='line'){  st.mode='line';  st.first=null; st.preview=null; show('Линия: 2 тапа'); }
+    if(act==='valve'){ st.mode='valve'; st.first=null; st.preview=null; show('Вентиль: центр → ориентация'); }
+    if(act==='undo'){  (st.valves.length?st.valves.pop():st.segs.pop()); draw(); }
+    if(act==='clear'){ st.segs.length=0; st.valves.length=0; st.first=null; st.preview=null; draw(); }
+    if(act==='fit'){   st.s=st.targetS=1*DPR; st.cx=cv.width/2; st.cy=cv.height/2; draw(); }
+    if(act==='grid'){  st.grid=!st.grid; draw(); }
   });
 
-  // Snap toggle
-  document.getElementById('snap').onchange = e=>{ state.snapOn = !!e.target.checked; };
-
-  // старт
-  draw();
+  document.getElementById('snap').onchange=e=>{ st.snap=!!e.target.checked; };
 })();
 </script>
 </body>
