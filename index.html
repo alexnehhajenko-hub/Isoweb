@@ -3,538 +3,228 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — Маска (передний план) + фуллскрин-фикс</title>
+<title>IsoWeb — быстрый эскиз по фото</title>
 <style>
-  :root{--violet:#8000ff; --violet2:#7618ff}
-  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  :root{--violet:#7b2cff; --violet2:#5b1fe3}
+  html,body{height:100%;margin:0;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
-  /* Полный HUD: 2 ряда / 6 колонок */
-  .hud{position:fixed;top:8px;left:8px;right:8px;z-index:1000;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;transition:.2s ease opacity}
-  .hud.hidden{opacity:0;pointer-events:none}
+  .hud{position:fixed;top:8px;left:8px;right:8px;z-index:10;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
   .hud button{height:40px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .hud .wide{grid-column:span 2}
 
-  /* Мини-HUD (когда полный скрыт) */
-  .mini{position:fixed;top:8px;right:8px;z-index:1001;display:flex;gap:8px}
-  .mini.hidden{display:none}
-  .mini button{height:40px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800;padding:0 14px}
-
-  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.25s;z-index:1100}
-  .toast.show{opacity:1}
-
-  /* Панель настроек */
-  .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
-  .panel-wrap.open{display:block}
-  .panel-backdrop{position:absolute;inset:0;background:transparent}
-  .panel{position:absolute;top:96px;right:8px;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,360px)}
-  .panel h4{margin:0 0 8px 0;font-size:15px}
-  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
-  .row label{min-width:150px;font-size:13px;color:#555}
+  .panel{position:fixed;left:8px;right:8px;bottom:8px;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px 12px 4px;z-index:11}
+  .panel h4{margin:6px 0 8px;font-size:15px}
+  .row{display:flex;align-items:center;gap:10px;margin:8px 0}
+  .row label{min-width:160px;font-size:13px;color:#555}
   .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
   .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--violet)}
-  .switch{display:flex;align-items:center;gap:8px}
-  .close{position:absolute;top:6px;right:8px;line-height:1;border:none;background:transparent;font-size:20px;color:#666}
-
-  /* Модалка ввода текста (замена prompt) */
-  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:1200}
-  .modal.show{display:flex}
-  .modal .bg{position:absolute;inset:0;background:rgba(0,0,0,.25)}
-  .modal .card{position:relative;min-width:280px;max-width:90vw;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:14px}
-  .modal h4{margin:0 0 10px 0}
-  .modal input{width:100%;padding:10px;border:1px solid #d8c9ff;border-radius:10px;margin-bottom:10px;font-size:16px}
-  .modal .actions{display:flex;gap:8px;justify-content:flex-end}
-  .modal .actions button{height:38px;border:0;border-radius:10px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:700;padding:0 14px}
-  .modal .actions .ghost{background:#fff;color:#5c30b5;border:1px solid #d8c9ff}
+  .val{width:48px;text-align:right;font-variant-numeric:tabular-nums;color:#666}
+  .closeX{position:absolute;top:6px;right:8px;line-height:1;border:none;background:transparent;font-size:20px;color:#666}
+  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.25s;z-index:12}
+  .toast.show{opacity:1}
 </style>
 </head>
 <body>
   <canvas id="cv"></canvas>
 
-  <!-- ПОЛНЫЙ HUD -->
-  <div id="hud" class="hud">
-    <!-- ряд 1 -->
+  <div class="hud" id="hud">
     <button id="btnCamera">📷 Камера</button>
     <button id="btnGallery">📂 Галерея</button>
     <button id="btnLine">Линия</button>
-    <button id="btnText">Текст</button>
-    <button id="btnEraser">Ластик (часть)</button>
-    <button id="btnMask">Маска (передний план)</button>
-    <!-- ряд 2 -->
-    <button id="btnUndo" class="wide">↩ Назад</button>
-    <button id="btnClear" class="wide">🗑 Очистить</button>
-    <button id="btnExport" class="wide">⤓ PNG</button>
-    <button id="btnSnap" class="wide">🧲 Магнит: Вкл</button>
-    <button id="btnSettings" class="wide">⚙ Настройки</button>
+    <button id="btnValve">Вентиль</button>
+    <button id="btnUndo">↩ Назад</button>
+    <button id="btnClear">🗑 Очистить</button>
   </div>
 
-  <!-- МИНИ-HUD, когда большой скрыт (минимум, как просил) -->
-  <div id="mini" class="mini hidden">
-    <button id="miniLine">Линия</button>
-    <button id="miniEraser">Ластик</button>
-  </div>
-
-  <!-- инпуты фото -->
-  <input id="fileCamera"  type="file" accept="image/*" capture="environment" hidden />
-  <input id="fileGallery" type="file" accept="image/*" hidden />
-
-  <div id="toast" class="toast"></div>
-
-  <!-- Панель настроек -->
-  <div id="panelWrap" class="panel-wrap" aria-hidden="true">
-    <div id="panelBackdrop" class="panel-backdrop"></div>
-    <div id="panel" class="panel" role="dialog" aria-modal="true">
-      <button id="panelClose" class="close" aria-label="Закрыть">×</button>
-
-      <h4>Линии</h4>
-      <div class="row">
-        <label>Толщина (px)</label>
-        <input id="lineWidth" type="range" min="2" max="24" value="6">
-        <span id="lineWidthVal" style="width:36px;text-align:right;font-size:12px;color:#666">6</span>
-      </div>
-
-      <h4 style="margin-top:12px">Сетка</h4>
-      <div class="row">
-        <label>Прозрачность</label>
-        <input id="gridAlpha" type="range" min="0" max="100" value="22">
-        <span id="gridAlphaVal" style="width:36px;text-align:right;font-size:12px;color:#666">22%</span>
-      </div>
-      <div class="row">
-        <label>Шаг (px)</label>
-        <input id="gridStep" type="range" min="80" max="480" value="200">
-        <span id="gridStepVal" style="width:36px;text-align:right;font-size:12px;color:#666">200</span>
-      </div>
-      <div class="row">
-        <label>Угол (°)</label>
-        <input id="gridAngle" type="range" min="-90" max="90" value="30">
-        <span id="gridAngleVal" style="width:36px;text-align:right;font-size:12px;color:#666">30</span>
-      </div>
-
-      <h4 style="margin-top:12px">Магнит</h4>
-      <div class="row switch">
-        <input id="snapOn" type="checkbox" checked>
-        <label for="snapOn">Главный магнит</label>
-      </div>
-      <div class="row">
-        <label>Радиус узла (px)</label>
-        <input id="snapRadius" type="range" min="10" max="60" value="22">
-        <span id="snapRadiusVal" style="width:36px;text-align:right;font-size:12px;color:#666">22</span>
-      </div>
-
-      <div class="row switch">
-        <input id="isoSnapOn" type="checkbox" checked>
-        <label for="isoSnapOn">Автовыравнивание по изометрии</label>
-      </div>
-      <div class="row">
-        <label>Порог угла (±°)</label>
-        <input id="isoTol" type="range" min="4" max="20" value="10">
-        <span id="isoTolVal" style="width:36px;text-align:right;font-size:12px;color:#666">10</span>
-      </div>
-
-      <h4 style="margin-top:12px">Маска</h4>
-      <div class="row">
-        <label>Кисть маски (px)</label>
-        <input id="maskSize" type="range" min="8" max="60" value="26">
-        <span id="maskSizeVal" style="width:36px;text-align:right;font-size:12px;color:#666">26</span>
-      </div>
+  <!-- настройки -->
+  <div class="panel" id="panel">
+    <button class="closeX" id="closePanel">×</button>
+    <h4>Сетка</h4>
+    <div class="row">
+      <label>Прозрачность</label>
+      <input id="gridAlpha" type="range" min="0" max="100" value="22">
+      <span class="val" id="gridAlphaVal">22%</span>
+    </div>
+    <div class="row">
+      <label>Шаг (px)</label>
+      <input id="gridStep" type="range" min="80" max="480" value="200">
+      <span class="val" id="gridStepVal">200</span>
+    </div>
+    <div class="row">
+      <label>Угол (°)</label>
+      <input id="gridAngle" type="range" min="-90" max="90" value="30">
+      <span class="val" id="gridAngleVal">30</span>
+    </div>
+    <h4>Линии</h4>
+    <div class="row">
+      <label>Толщина (px)</label>
+      <input id="lineWidth" type="range" min="2" max="24" value="6">
+      <span class="val" id="lineWidthVal">6</span>
     </div>
   </div>
 
-  <!-- Модалка для ввода текста -->
-  <div id="textModal" class="modal" aria-hidden="true">
-    <div class="bg"></div>
-    <div class="card" role="dialog" aria-modal="true" aria-labelledby="textTitle">
-      <h4 id="textTitle">Введите подпись</h4>
-      <input id="textInput" type="text" placeholder="например: Ø159, 1200 мм" />
-      <div class="actions">
-        <button id="textCancel" class="ghost">Отмена</button>
-        <button id="textOk">ОК</button>
-      </div>
-    </div>
-  </div>
+  <input id="fileCamera" type="file" accept="image/*" capture="environment" hidden>
+  <input id="fileGallery" type="file" accept="image/*" hidden>
+  <div class="toast" id="toast"></div>
 
 <script>
-(function(){
-  // ===== Константы =====
-  const DPR = Math.min(1.5, Math.max(1, (window.devicePixelRatio||1)));
-  const MAX_IMG_SIDE = 2000;
-  const EDIT_HOLD_MS = 500;
-  const TAP_MOVE_TOL = 10;
-  const ERASER_HIT = 18;
-  const ERASER_GAP = 24;
-
-  // ===== DOM =====
+(()=>{
+  // ---------- базовые вещи ----------
+  const DPR = Math.min(1.5, Math.max(1, devicePixelRatio || 1));
   const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d', { alpha: false });
-  const hudEl = document.getElementById('hud');
-  const miniEl = document.getElementById('mini');
+  const ctx = cv.getContext('2d', { alpha:false });
+
   const toastEl = document.getElementById('toast');
-  const textModal = document.getElementById('textModal');
-  const textInput = document.getElementById('textInput');
+  const toast = (t,ms=1000)=>{ toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),ms); };
 
-  const toast = (t,ms=1200)=>{ toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),ms); };
-  const $ = id => document.getElementById(id);
+  const state = {
+    mode: 'idle',        // idle | line | valve
+    lineWidth: 6,
+    gridStep: 200,
+    gridAngle: 30,
+    gridAlpha: .22,
 
-  // ===== Состояние =====
-  const photo = { img:null, w:0, h:0, cx:0, cy:0, s:1, alpha:0.9 };
-  const segs = [];   // {a:{x,y}, b:{x,y}}
-  const labels = []; // {x,y,text}
-  const mask = { strokes:[], brushPx:26, drawing:false }; // список штрихов маски (в мировых координатах)
-  let mode = 'idle'; // idle | line | textPlace | erase | edit | mask
-  let firstPt = null, previewPt = null;
+    lines: [],           // [{a:{x,y}, b:{x,y}}] — «мировые» координаты
+    valves: [],          // [{a:{x,y}, b:{x,y}}]
+    first: null,
 
-  const grid = { alpha:0.22, step:200, angleDeg:30 };
-  const snap = { on:true, radiusPx:22, isoOn:true, isoTolDeg:10 };
-  let lineWidthPx = 6;
+    photo: {img:null, w:0, h:0, s:1, cx:0, cy:0, alpha:0.9}
+  };
 
-  // жесты
-  const pointers = new Map();
-  let last1 = null;
-  let holdTimer = null;
-  let downInfo = null;
-  let lastTapTime = 0;
+  // offscreen для сетки (кэш)
+  let gridOff = document.createElement('canvas');
+  let gridDirty = true;
 
-  // правка
-  let editing = null; // {type:'seg', segIndex, end:'a'|'b'} | {type:'label', labelIndex}
+  // requestAnimationFrame коалесцирование
+  let needsDraw = true;
+  function scheduleDraw(){ if(!needsDraw){ needsDraw = true; requestAnimationFrame(draw);} }
 
-  // offscreen для линий (маскирование без перерисовки фото)
-  let linesCv = document.createElement('canvas');
-  let linesCtx = linesCv.getContext('2d', { alpha:true });
+  function resize(){
+    cv.width  = Math.floor(innerWidth  * DPR);
+    cv.height = Math.floor(innerHeight * DPR);
+    gridDirty = true;
+    scheduleDraw();
+  }
+  addEventListener('resize', resize, {passive:true});
+  resize();
 
-  // ===== Экран <-> Мир =====
-  const screenToWorld = (sx,sy)=>({ x:(sx - photo.cx)/photo.s, y:(sy - photo.cy)/photo.s });
-  const worldToScreen = (x,y)=>({ x: photo.cx + x*photo.s, y: photo.cy + y*photo.s });
+  // ---------- преобразования экран/мир ----------
+  const S2W = (sx,sy)=>({ x:(sx - state.photo.cx)/state.photo.s, y:(sy - state.photo.cy)/state.photo.s });
+  const W2S = (x,y)=>({ x: state.photo.cx + x*state.photo.s, y: state.photo.cy + y*state.photo.s });
 
-  // ===== Сервисные =====
-  function fit(){
-    cv.width=Math.floor(innerWidth*DPR); cv.height=Math.floor(innerHeight*DPR);
-    if(linesCv.width!==cv.width || linesCv.height!==cv.height){
-      linesCv.width=cv.width; linesCv.height=cv.height;
+  // ---------- сетка (быстро) ----------
+  function renderGridToOffscreen(){
+    gridOff.width = cv.width; gridOff.height = cv.height;
+    const g = gridOff.getContext('2d');
+    g.clearRect(0,0,gridOff.width,gridOff.height);
+
+    const step = state.gridStep;
+    const angle = state.gridAngle * Math.PI/180;
+    const dirs = [angle, Math.PI/2, Math.PI - angle];
+
+    g.lineCap='butt';
+    for(const a of dirs){
+      const vx = Math.cos(a), vy = Math.sin(a);
+      const px = -vy, py = vx;
+      // сколько линий нужно
+      const span = Math.max(cv.width, cv.height) / state.photo.s + step*4;
+      const need = Math.ceil(span/step);
+
+      for(let k=-need;k<=need;k++){
+        const bx = px*k*step, by = py*k*step; // в «мире»
+        const A = W2S(bx - vx*10000, by - vy*10000);
+        const B = W2S(bx + vx*10000, by + vy*10000);
+        const major = (k%3===0);
+        g.globalAlpha = (major? state.gridAlpha*1.3 : state.gridAlpha);
+        g.strokeStyle = major? '#b7bcc8' : '#cfd3dc';
+        g.lineWidth = major? 1.6 : 1.0;
+        g.beginPath(); g.moveTo(A.x,A.y); g.lineTo(B.x,B.y); g.stroke();
+      }
     }
-    draw();
-  }
-  addEventListener('resize', ()=>{ closePanel(); fit(); });
-
-  function downscaleImage(img){
-    const maxSide=Math.max(img.width,img.height);
-    if(maxSide<=MAX_IMG_SIDE) return img;
-    const scale=MAX_IMG_SIDE/maxSide, w=Math.round(img.width*scale), h=Math.round(img.height*scale);
-    const off=document.createElement('canvas'); off.width=w; off.height=h;
-    const octx=off.getContext('2d'); octx.imageSmoothingEnabled=true; octx.imageSmoothingQuality='high';
-    octx.drawImage(img,0,0,w,h);
-    const scaled=new Image(); scaled.src=off.toDataURL('image/jpeg',0.9); return scaled;
-  }
-  function loadFromFile(file){
-    if(!file){ toast('Фото не выбрано'); return; }
-    const url=URL.createObjectURL(file); const img=new Image();
-    img.onload=()=>{
-      URL.revokeObjectURL(url);
-      const scaled=downscaleImage(img);
-      if(scaled===img) applyImage(img); else scaled.onload=()=>applyImage(scaled);
-    };
-    img.src=url;
-  }
-  function applyImage(img){
-    photo.img=img; photo.w=img.width; photo.h=img.height;
-    const sx=(cv.width/DPR)/photo.w*0.9, sy=(cv.height/DPR)/photo.h*0.9;
-    photo.s=Math.max(0.02,Math.min(sx,sy))*DPR; photo.cx=cv.width/2; photo.cy=cv.height/2;
-    draw(); toast('Фото добавлено');
+    g.globalAlpha = 1;
+    gridDirty = false;
   }
 
-  // ===== Рисование =====
+  // ---------- отрисовка ----------
   function draw(){
+    if(!needsDraw) return;
+    needsDraw = false;
+
     // фон
     ctx.clearRect(0,0,cv.width,cv.height);
-    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0,0,cv.width,cv.height);
 
     // фото
-    if(photo.img){
+    if(state.photo.img){
       ctx.save();
-      ctx.globalAlpha=photo.alpha;
-      ctx.translate(photo.cx,photo.cy); ctx.scale(photo.s,photo.s);
-      ctx.imageSmoothingEnabled=true;
-      ctx.drawImage(photo.img,-photo.w/2,-photo.h/2,photo.w,photo.h);
+      ctx.globalAlpha = state.photo.alpha;
+      ctx.translate(state.photo.cx, state.photo.cy);
+      ctx.scale(state.photo.s, state.photo.s);
+      ctx.drawImage(state.photo.img, -state.photo.w/2, -state.photo.h/2, state.photo.w, state.photo.h);
       ctx.restore();
     }
 
-    // сетка
-    drawIsoGrid();
+    // сетка (кэшированная)
+    if(gridDirty) renderGridToOffscreen();
+    ctx.drawImage(gridOff, 0, 0);
 
-    // ------- линии на offscreen-слое -------
-    linesCtx.clearRect(0,0,linesCv.width,linesCv.height);
-    linesCtx.lineCap='round'; linesCtx.lineJoin='round';
-    for(const s of segs){
-      const A=worldToScreen(s.a.x,s.a.y);
-      const B=worldToScreen(s.b.x,s.b.y);
-      // тень
-      linesCtx.strokeStyle='#5b00bf'; linesCtx.lineWidth=(lineWidthPx+2); linesCtx.globalAlpha=.7;
-      linesCtx.beginPath(); linesCtx.moveTo(A.x,A.y); linesCtx.lineTo(B.x,B.y); linesCtx.stroke();
-      // тело
-      linesCtx.strokeStyle='#8000ff'; linesCtx.lineWidth=lineWidthPx; linesCtx.globalAlpha=1;
-      linesCtx.beginPath(); linesCtx.moveTo(A.x,A.y); linesCtx.lineTo(B.x,B.y); linesCtx.stroke();
+    // линии
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    for(const seg of state.lines){
+      const A=W2S(seg.a.x,seg.a.y), B=W2S(seg.b.x,seg.b.y);
+      ctx.strokeStyle='#5b00bf'; ctx.lineWidth=state.lineWidth+2; ctx.globalAlpha=.7;
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+      ctx.strokeStyle='#7b2cff'; ctx.lineWidth=state.lineWidth; ctx.globalAlpha=1;
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
     }
 
-    // применяем маску: «вырезаем» линии в местах мазков маски
-    if(mask.strokes.length){
-      linesCtx.save();
-      linesCtx.globalCompositeOperation='destination-out';
-      linesCtx.lineCap='round'; linesCtx.lineJoin='round';
-      linesCtx.strokeStyle='rgba(0,0,0,1)';
-      linesCtx.lineWidth=mask.brushPx*DPR;
-      for(const st of mask.strokes){
-        if(st.length<2) continue;
-        linesCtx.beginPath();
-        const p0=worldToScreen(st[0].x,st[0].y); linesCtx.moveTo(p0.x,p0.y);
-        for(let i=1;i<st.length;i++){
-          const p=worldToScreen(st[i].x,st[i].y);
-          linesCtx.lineTo(p.x,p.y);
-        }
-        linesCtx.stroke();
-      }
-      linesCtx.restore();
-    }
+    // вентиль
+    for(const v of state.valves) drawValve(ctx, W2S(v.a.x,v.a.y), W2S(v.b.x,v.b.y), DPR);
 
-    // переносим слой линий на основной холст
-    ctx.drawImage(linesCv,0,0);
-
-    // подписи поверх всего
-    for(let i=0;i<labels.length;i++) drawLabel(labels[i], i);
-
-    // маркеры/превью
-    if(firstPt && mode==='line') drawMarker(firstPt,'#00a86b');
-    if(previewPt && mode==='line') drawPreview(firstPt,previewPt);
-
-    // визуальная подсказка кисти маски (кружок под пальцем — опционально)
-    // (упрощённо: не реализуем сейчас во избежание «липкой» точки)
-  }
-
-  function drawIsoGrid(){
-    const a=grid.alpha; if(a<=0) return;
-    const base=[grid.angleDeg,90,180-grid.angleDeg];
-    const margin=2000;
-    ctx.save();
-    for(const ang of base){
-      const r=ang*Math.PI/180, vx=Math.cos(r), vy=Math.sin(r), px=-vy, py=vx;
-      const need=Math.ceil((Math.max(cv.width,cv.height)+margin*2)/(grid.step*photo.s))+2;
-      for(let k=-need;k<=need;k++){
-        const bx=px*k*grid.step, by=py*k*grid.step;
-        const A=worldToScreen(bx-vx*100000, by-vy*100000);
-        const B=worldToScreen(bx+vx*100000, by+vy*100000);
-        const major=(k%3===0);
-        ctx.globalAlpha=(major?a*1.3:a);
-        ctx.strokeStyle= major? '#b7bcc8' : '#cfd3dc';
-        ctx.lineWidth= major? 1.6 : 1.0;
-        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-      }
-    }
-    ctx.restore(); ctx.globalAlpha=1;
-  }
-
-  function drawMarker(pt,color){
-    const S=worldToScreen(pt.x,pt.y);
-    ctx.fillStyle=color; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(S.x,S.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  }
-  function drawHandle(pt){
-    const S=worldToScreen(pt.x,pt.y);
-    ctx.fillStyle='#15a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(S.x,S.y,10,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  }
-  function drawPreview(a,b){
-    const A=worldToScreen(a.x,a.y), B=worldToScreen(b.x,b.y);
-    ctx.save();
-    ctx.setLineDash([8,8]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=Math.max(3,lineWidthPx-2);
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-    ctx.setLineDash([]); drawMarker(b,'#16a34a'); ctx.restore();
-  }
-
-  // ===== Метки (текст) =====
-  function drawLabel(lbl, idx){
-    const s=worldToScreen(lbl.x,lbl.y);
-    const padH=8, padV=6, r=8;
-    ctx.font='600 16px system-ui,-apple-system,Segoe UI,Roboto';
-    const w=ctx.measureText(lbl.text).width + padH*2;
-    const h=24 + (padV-6);
-    ctx.fillStyle='rgba(255,255,255,.96)';
-    ctx.strokeStyle='#8000ff'; ctx.lineWidth=1;
-    roundRectPath(ctx, s.x-w/2, s.y-h/2, w, h, r); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#8000ff'; ctx.textBaseline='middle';
-    ctx.fillText(lbl.text, s.x - (w/2) + padH, s.y);
-    if(editing && editing.type==='label' && editing.labelIndex===idx){
-      ctx.strokeStyle='#16a34a'; ctx.lineWidth=2;
-      roundRectPath(ctx, s.x-w/2-2, s.y-h/2-2, w+4, h+4, r+2); ctx.stroke();
+    // превью линии
+    if(state.mode==='line' && state.first && preview){ 
+      const A=W2S(state.first.x,state.first.y), B=W2S(preview.x,preview.y);
+      ctx.setLineDash([8,8]);
+      ctx.strokeStyle='#16a34a'; ctx.lineWidth=Math.max(3,state.lineWidth-2);
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
-  function roundRectPath(c,x,y,w,h,r){
-    const rr=Math.min(r,w/2,h/2);
-    c.beginPath();
-    c.moveTo(x+rr,y);
-    c.arcTo(x+w,y,x+w,y+h,rr);
-    c.arcTo(x+w,y+h,x,y+h,rr);
-    c.arcTo(x,y+h,x,y,rr);
-    c.arcTo(x,y,x+w,y,rr);
-    c.closePath();
-  }
-  function hitLabelAt(sx,sy){
-    ctx.font='600 16px system-ui,-apple-system,Segoe UI,Roboto';
-    for(let i=labels.length-1;i>=0;i--){
-      const lbl=labels[i], p=worldToScreen(lbl.x,lbl.y);
-      const w=ctx.measureText(lbl.text).width + 16, h=24;
-      const x=p.x - w/2, y=p.y - h/2;
-      if(sx>=x-6 && sx<=x+w+6 && sy>=y-6 && sy<=y+h+6) return i;
-    }
-    return -1;
-  }
 
-  // ===== Поиск конца линии для правки =====
-  function findEndpointNear(sx,sy, radiusPx=18){
-    const R=radiusPx*DPR;
-    let best=null, bestDist=Infinity;
-    for(let i=0;i<segs.length;i++){
-      const s=segs[i];
-      const A=worldToScreen(s.a.x,s.a.y);
-      const B=worldToScreen(s.b.x,s.b.y);
-      const dA=Math.hypot(A.x-sx,A.y-sy);
-      const dB=Math.hypot(B.x-sx,B.y-sy);
-      if(dA<bestDist && dA<=R){ best={segIndex:i,end:'a'}; bestDist=dA; }
-      if(dB<bestDist && dB<=R){ best={segIndex:i,end:'b'}; bestDist=dB; }
+  // ---------- простая «липкость» к изометрии ----------
+  function snapIso(p, start){
+    if(!start) return p;
+    const dirs = [state.gridAngle, 90, 180-state.gridAngle].map(d=>d*Math.PI/180);
+    const v = {x:p.x-start.x, y:p.y-start.y};
+    const L = Math.hypot(v.x,v.y)||0; if(!L) return p;
+    const ang = Math.atan2(v.y,v.x);
+    let bestA = ang, bestD = 1e9;
+    for(const a of [...dirs, ...dirs.map(a=>a+Math.PI)]){
+      const d = Math.abs(Math.atan2(Math.sin(ang-a), Math.cos(ang-a))); // |Δ|
+      if(d<bestD){ bestD=d; bestA=a; }
     }
-    return best;
-  }
-
-  // ===== Частичный ластик (резка) =====
-  function distanceToSegmentScreen(sx,sy, A,B){
-    const vx=B.x-A.x, vy=B.y-A.y;
-    const wx=sx-A.x, wy=sy-A.y;
-    const c1=vx*wx+vy*wy;
-    if(c1<=0) return Math.hypot(sx-A.x, sy-A.y);
-    const c2=vx*vx+vy*vy;
-    if(c2<=c1) return Math.hypot(sx-B.x, sy-B.y);
-    const t=c1/c2;
-    const px=A.x+t*vx, py=A.y+t*vy;
-    return Math.hypot(sx-px, sy-py);
-  }
-  function splitSegmentAtScreen(i, sx, sy){
-    const s = segs[i];
-    const A = worldToScreen(s.a.x,s.a.y), B = worldToScreen(s.b.x,s.b.y);
-    const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy;
-    if(len2===0) return false;
-    const t = Math.max(0, Math.min(1, ((sx-A.x)*vx+(sy-A.y)*vy)/len2 ));
-    const lenWorld = Math.hypot(s.b.x-s.a.x, s.b.y-s.a.y);
-    const gapT = Math.min(0.45, (ERASER_GAP/DPR)/ (photo.s*lenWorld) );
-    const t0 = Math.max(0, t - gapT), t1 = Math.min(1, t + gapT);
-    const P0 = { x: s.a.x + (s.b.x - s.a.x)*t0, y: s.a.y + (s.b.y - s.a.y)*t0 };
-    const P1 = { x: s.a.x + (s.b.x - s.a.x)*t1, y: s.a.y + (s.b.y - s.a.y)*t1 };
-    const left  = (t0>0.02) ? {a:{...s.a}, b:P0} : null;
-    const right = (t1<0.98) ? {a:P1, b:{...s.b}} : null;
-    segs.splice(i,1, ...[left,right].filter(Boolean));
-    return true;
-  }
-  function eraseAtScreenPointPartial(sx,sy){
-    const lbl = hitLabelAt(sx,sy);
-    if(lbl!==-1){ labels.splice(lbl,1); draw(); return true; }
-    let bestI=-1, bestD=Infinity;
-    for(let i=0;i<segs.length;i++){
-      const s=segs[i];
-      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
-      const d=distanceToSegmentScreen(sx,sy,A,B);
-      if(d<bestD){ bestD=d; bestI=i; }
-    }
-    if(bestI!==-1 && bestD<=ERASER_HIT*DPR){
-      const ok = splitSegmentAtScreen(bestI, sx, sy);
-      if(ok){ draw(); return true; }
-    }
-    return false;
-  }
-
-  // ===== Снапы =====
-  function allNodes(){ const arr=[]; for(const s of segs){ arr.push(s.a,s.b); } return arr; }
-  function snapToNodes(raw, radiusPx=snap.radiusPx){
-    if(!snap.on) return raw;
-    const sx=photo.cx+raw.x*photo.s, sy=photo.cy+raw.y*photo.s;
-    let best=null, bestDist=Infinity;
-    for(const n of allNodes()){
-      const ns=worldToScreen(n.x,n.y);
-      const d=Math.hypot(ns.x-sx,ns.y-sy);
-      if(d<bestDist){ bestDist=d; best=n; }
-    }
-    const R=radiusPx*DPR;
-    if(best && bestDist<=R) return {x:best.x,y:best.y};
-    return raw;
-  }
-  const normDeg=a=>((a%360)+360)%360;
-  const angDiff=(a,b)=>{ let d=Math.abs(a-b)%360; return d>180?360-d:d; };
-  function snapToIso(raw, startPoint, tolDeg=snap.isoTolDeg){
-    if(!(snap.on && snap.isoOn && startPoint)) return raw;
-    const v={x:raw.x-startPoint.x,y:raw.y-startPoint.y};
-    const L=Math.hypot(v.x,v.y); if(L===0) return raw;
-    const base=[grid.angleDeg,90,180-grid.angleDeg];
-    const targets=[...base, base[0]+180, base[1]+180, base[2]+180];
-    const ang=normDeg(Math.atan2(v.y,v.x)*180/Math.PI);
-    let bestA=null, bestD=181;
-    for(const t of targets){ const d=angDiff(ang,normDeg(t)); if(d<bestD){ bestD=d; bestA=t; } }
-    if(bestD<=tolDeg){
-      const a=bestA*Math.PI/180;
-      return { x:startPoint.x+Math.cos(a)*L, y:startPoint.y+Math.sin(a)*L };
-    }
-    return raw;
-  }
-  function snapPoint(raw, startPoint){
-    if(!snap.on) return raw;
-    let p=snapToNodes(raw);
-    p=snapToIso(p,startPoint);
-    return p;
-  }
-  function autoCorrectPoint(startPoint, rawEnd){
-    if(!snap.on) return rawEnd;
-    let p=snapToNodes(rawEnd, Math.max(snap.radiusPx, 28));
-    p=snapToIso(p,startPoint, Math.max(snap.isoTolDeg, 12));
+    // допуска 12°
+    if(bestD <= 12*Math.PI/180) return {x:start.x+Math.cos(bestA)*L, y:start.y+Math.sin(bestA)*L};
     return p;
   }
 
-  // ===== Жесты =====
+  // ---------- взаимодействие ----------
+  let pointers = new Map();
+  let preview = null;
+  let last1 = null;
+
   cv.addEventListener('pointerdown', e=>{
-    closePanel();
     cv.setPointerCapture?.(e.pointerId);
-    const p={x:e.clientX*DPR,y:e.clientY*DPR};
+    const p = {x:e.clientX*DPR, y:e.clientY*DPR};
     pointers.set(e.pointerId,p);
     if(pointers.size===1) last1=p;
 
-    downInfo = {id:e.pointerId, sx:p.x, sy:p.y, moved:false, multi:false};
-
-    clearTimeout(holdTimer);
-    holdTimer = setTimeout(()=>{
-      if(downInfo && !downInfo.moved && !downInfo.multi){
-        // правка конца линии
-        const hitEnd = findEndpointNear(p.x,p.y, 18);
-        if(hitEnd){
-          mode='edit';
-          editing={type:'seg', ...hitEnd};
-          toast('Правка конца: потяни. Почти вертикально — строго по высоте.');
-          draw(); return;
-        }
-        // правка подписи
-        const lblIndex = hitLabelAt(p.x,p.y);
-        if(lblIndex!==-1){
-          mode='edit';
-          editing={type:'label', labelIndex:lblIndex};
-          toast('Перетащи подпись и отпусти');
-          draw(); return;
-        }
-      }
-    }, EDIT_HOLD_MS);
-
-    // начало штриха маски
-    if(mode==='mask'){
-      const w=screenToWorld(p.x,p.y);
-      mask.drawing=true;
-      mask.strokes.push([w]);
-      draw();
-    }
-
-    if(mode==='line' && firstPt){
-      let w=screenToWorld(p.x,p.y);
-      previewPt=snapPoint(w, firstPt); draw();
+    if(state.mode==='line' && state.first){
+      preview = S2W(p.x,p.y);
+      preview = snapIso(preview, state.first);
+      scheduleDraw();
     }
   }, {passive:true});
 
@@ -543,229 +233,178 @@
     const cur={x:e.clientX*DPR,y:e.clientY*DPR};
     const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,cur);
 
-    if(downInfo && e.pointerId===downInfo.id){
-      const dist=Math.hypot(cur.x-downInfo.sx, cur.y-downInfo.sy)/DPR;
-      if(dist>TAP_MOVE_TOL) downInfo.moved=true;
-    }
-
+    // масштаб/панорама (двумя пальцами)
     if(pointers.size>=2){
-      if(downInfo) downInfo.multi=true;
       const ids=[...pointers.keys()];
       const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
       const ap=(ids[0]===e.pointerId?prev:a), bp=(ids[1]===e.pointerId?prev:b);
-      const dPrev=Math.hypot(ap.x-bp.x,ap.y-bp.y), dCur=Math.hypot(a.x-b.x,a.y-b.y);
-      const cCur={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+      const dPrev=Math.hypot(ap.x-bp.x, ap.y-bp.y);
+      const dCur =Math.hypot(a.x-b.x , a.y-b.y );
       if(dPrev>0){
-        const f=dCur/dPrev, dx=cCur.x-photo.cx, dy=cCur.y-photo.cy;
-        photo.cx += dx-dx*f; photo.cy += dy-dy*f;
-        photo.s = Math.max(0.02*DPR, Math.min(photo.s*f, 50*DPR));
+        const f=dCur/dPrev, c={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+        const dx=c.x-state.photo.cx, dy=c.y-state.photo.cy;
+        state.photo.cx += dx-dx*f; state.photo.cy += dy-dy*f;
+        state.photo.s  = Math.max(0.02*DPR, Math.min(state.photo.s*f, 50*DPR));
+        gridDirty = true;
+        scheduleDraw();
       }
-      draw(); last1=null; return;
+      last1 = null;
+      return;
     }
 
-    // панорамирование, если не рисуем/не редактируем/не маска
-    if(last1 && photo.img && mode!=='line' && mode!=='mask' && !(editing && (editing.type==='seg'||editing.type==='label'))){
-      photo.cx += cur.x-last1.x; photo.cy += cur.y-last1.y; last1=cur; draw();
+    // панорамирование одним пальцем, когда ничего не рисуем
+    if(last1 && state.mode!=='line' && state.mode!=='valve'){
+      state.photo.cx += cur.x-last1.x; state.photo.cy += cur.y-last1.y;
+      last1=cur; gridDirty=true; scheduleDraw(); return;
     }
 
-    // рисуем маску
-    if(mode==='mask' && mask.drawing){
-      const st = mask.strokes[mask.strokes.length-1];
-      const w=screenToWorld(cur.x,cur.y);
-      const last=st[st.length-1];
-      if(Math.hypot(w.x-last.x, w.y-last.y) > 1/photo.s){ st.push(w); draw(); }
-    }
-
-    // правка конца линии
-    if(mode==='edit' && editing && editing.type==='seg'){
-      const s=segs[editing.segIndex];
-      const start = (editing.end==='a')? s.b : s.a;
-      const startScr = worldToScreen(start.x,start.y);
-      const dxs = cur.x - startScr.x, dys = cur.y - startScr.y;
-      let w = screenToWorld(cur.x,cur.y);
-      const almostVertical = Math.abs(dxs) < Math.abs(dys)*0.6;
-      if(almostVertical){
-        const rawY = screenToWorld(cur.x,cur.y).y;
-        w = { x:start.x, y:rawY };
-        w = snapToNodes(w);
-      }else{
-        w = snapPoint(w, start);
-      }
-      if(editing.end==='a') s.a=w; else s.b=w;
-      draw();
-    }
-
-    // перетаскивание подписи
-    if(mode==='edit' && editing && editing.type==='label'){
-      const w=screenToWorld(cur.x,cur.y);
-      const lbl=labels[editing.labelIndex];
-      lbl.x=w.x; lbl.y=w.y;
-      draw();
-    }
-
-    if(mode==='line' && firstPt){
-      let w=screenToWorld(cur.x,cur.y);
-      previewPt=snapPoint(w, firstPt); draw();
+    if(state.mode==='line' && state.first){
+      preview = S2W(cur.x,cur.y);
+      preview = snapIso(preview, state.first);
+      scheduleDraw();
     }
   }, {passive:true});
 
-  function endPointers(e){
-    pointers.delete(e.pointerId);
-    last1=(pointers.size===1)?[...pointers.values()][0]:null;
-  }
+  function endPtr(e){ pointers.delete(e.pointerId); last1 = (pointers.size===1)?[...pointers.values()][0]:null; }
 
   cv.addEventListener('pointerup', e=>{
-    const now = performance.now();
-    const isDoubleTap = (now - lastTapTime) < 300;
-    lastTapTime = now;
-
-    endPointers(e);
-    clearTimeout(holdTimer);
-
+    endPtr(e);
     const sx=e.clientX*DPR, sy=e.clientY*DPR;
-    const wasTap = downInfo && e.pointerId===downInfo.id && !downInfo.moved && !downInfo.multi;
-    const raw = screenToWorld(sx,sy);
+    const w=S2W(sx,sy);
 
-    // завершение маски
-    if(mode==='mask' && mask.drawing){
-      mask.drawing=false; draw(); // уже нарисовано
-      downInfo=null; return;
+    if(state.mode==='line'){
+      if(!state.first){ state.first = w; preview=null; toast('Поставь вторую точку'); }
+      else{
+        const b = snapIso(w, state.first);
+        state.lines.push({a:state.first, b});
+        state.first=null; preview=null; toast('Линия добавлена');
+      }
+      scheduleDraw(); return;
     }
 
-    // дабл-тап: скрыть/показать HUD и мини-бар
-    if(wasTap && isDoubleTap){
-      const hide = !hudEl.classList.contains('hidden');
-      hudEl.classList.toggle('hidden', hide);
-      miniEl.classList.toggle('hidden', !hide);
-      downInfo=null; return;
+    if(state.mode==='valve'){
+      if(!state.first){ state.first = w; toast('Вторая точка вентиля'); }
+      else{
+        const b = snapIso(w, state.first);
+        state.valves.push({a:state.first, b});
+        state.first=null; toast('Вентиль добавлен');
+      }
+      scheduleDraw(); return;
     }
-
-    // завершение правки линии
-    if(mode==='edit' && editing && editing.type==='seg'){
-      const s=segs[editing.segIndex];
-      const start = (editing.end==='a')? s.b : s.a;
-      const endPt = (editing.end==='a')? s.a : s.b;
-      const fixed = autoCorrectPoint(start, endPt);
-      if(editing.end==='a') s.a=fixed; else s.b=fixed;
-      mode='idle'; editing=null; draw();
-      downInfo=null; return;
-    }
-
-    // завершение перетягивания подписи
-    if(mode==='edit' && editing && editing.type==='label'){
-      mode='idle'; editing=null; draw();
-      downInfo=null; return;
-    }
-
-    // ластик — частично
-    if(wasTap && mode==='erase'){
-      if(!eraseAtScreenPointPartial(sx,sy)) toast('Нет объектов под ластиком');
-      downInfo=null; return;
-    }
-
-    // текст — показать модалку ввода (вместо prompt, не ломает фуллскрин)
-    if(wasTap && mode==='textPlace'){
-      openTextModal(raw.x, raw.y);
-      downInfo=null; return;
-    }
-
-    // линия — постановка точек
-    if(wasTap && mode==='line'){
-      if(!firstPt){ firstPt = snap.on ? snapToNodes(raw) : raw; previewPt=null; toast('Поставь 2-ю точку'); draw(); }
-      else{ const corrected = autoCorrectPoint(firstPt, raw); segs.push({a:firstPt,b:corrected}); firstPt=null; previewPt=null; mode='idle'; draw(); }
-    }
-
-    downInfo=null;
   }, {passive:true});
-  cv.addEventListener('pointercancel', e=>{ endPointers(e); clearTimeout(holdTimer); downInfo=null; }, {passive:true});
+  cv.addEventListener('pointercancel', endPtr, {passive:true});
 
+  // колесо — масштаб к курсору (на десктопе)
   cv.addEventListener('wheel', e=>{
     e.preventDefault();
-    if(!photo.img) return;
-    const sx=e.clientX*DPR, sy=e.clientY*DPR, f=e.deltaY<0?1.12:0.9;
-    const dx=sx-photo.cx, dy=sy-photo.cy;
-    photo.cx += dx-dx*f; photo.cy += dy-dy*f;
-    photo.s = Math.max(0.02*DPR, Math.min(photo.s*f, 50*DPR));
-    draw();
+    const sx=e.clientX*DPR, sy=e.clientY*DPR;
+    const f=e.deltaY<0?1.12:0.9;
+    const dx=sx-state.photo.cx, dy=sy-state.photo.cy;
+    state.photo.cx += dx-dx*f; state.photo.cy += dy-dy*f;
+    state.photo.s  = Math.max(0.02*DPR, Math.min(state.photo.s*f, 50*DPR));
+    gridDirty=true; scheduleDraw();
   }, {passive:false});
 
-  // ===== Кнопки (полный HUD) =====
-  $('btnCamera').onclick=()=>$('fileCamera').click();
-  $('btnGallery').onclick=()=>$('fileGallery').click();
+  // ---------- кнопки ----------
+  const $=id=>document.getElementById(id);
+  $('btnLine').onclick = ()=>{ state.mode='line'; state.first=null; toast('Линия: 2 тапа'); };
+  $('btnValve').onclick= ()=>{ state.mode='valve'; state.first=null; toast('Вентиль: 2 тапа'); };
+  $('btnUndo').onclick = ()=>{
+    if(state.first) { state.first=null; preview=null; }
+    else if(state.valves.length) state.valves.pop();
+    else if(state.lines.length)  state.lines.pop();
+    scheduleDraw();
+  };
+  $('btnClear').onclick= ()=>{
+    state.lines.length=0; state.valves.length=0; state.first=null; preview=null; scheduleDraw();
+  };
+
+  // настройки (все через одно место, с коалесцированной перерисовкой)
+  function bindRange(id, format, apply){
+    const input=$(id), val=$(id+'Val');
+    const upd=()=>{
+      const v = +input.value;
+      val.textContent = format(v);
+      apply(v);
+      scheduleDraw();
+    };
+    input.addEventListener('input', upd, {passive:true});
+    upd();
+  }
+  bindRange('gridAlpha', v=>v+'%', v=>{ state.gridAlpha=v/100; gridDirty=true; });
+  bindRange('gridStep' , v=>v,     v=>{ state.gridStep=v;     gridDirty=true; });
+  bindRange('gridAngle', v=>v,     v=>{ state.gridAngle=v;    gridDirty=true; });
+  bindRange('lineWidth', v=>v,     v=>{ state.lineWidth=v; });
+
+  $('closePanel').onclick = ()=>{ document.getElementById('panel').style.display='none'; };
+  // По двойному тапу прятать/показывать панель
+  let lastTap=0;
+  addEventListener('pointerup', e=>{
+    const now=performance.now();
+    if(now-lastTap<300){
+      const p=document.getElementById('panel');
+      p.style.display = (p.style.display==='none'?'':'none');
+    }
+    lastTap=now;
+  }, {passive:true});
+
+  // ---------- фото (по желанию, для подложки) ----------
+  $('btnCamera').onclick = ()=>$('fileCamera').click();
+  $('btnGallery').onclick= ()=>$('fileGallery').click();
   $('fileCamera').onchange = e=> loadFromFile(e.target.files?.[0]);
   $('fileGallery').onchange= e=> loadFromFile(e.target.files?.[0]);
 
-  $('btnLine').onclick = ()=>{ closePanel(); mode='line'; firstPt=null; previewPt=null; toast('Линия: 1-й тап → 2-й тап'); };
-  $('btnText').onclick = ()=>{ closePanel(); mode='textPlace'; toast('Тапни на холст — появится окно ввода'); };
-  $('btnEraser').onclick = ()=>{ closePanel(); mode='erase'; firstPt=null; previewPt=null; toast('Ластик: тап по линии — вырезает часть'); };
-  $('btnMask').onclick   = ()=>{ closePanel(); mode='mask'; toast('Маска: проведи по объектам на фото — линии будут за ними'); };
-
-  $('btnUndo').onclick = ()=>{ closePanel();
-    if(firstPt && mode==='line'){ firstPt=null; previewPt=null; mode='idle'; }
-    else if(mask.strokes.length && mode==='mask'){ mask.strokes.pop(); }
-    else if(segs.length){ segs.pop(); }
-    else if(labels.length){ labels.pop(); }
-    draw();
-  };
-  $('btnClear').onclick= ()=>{ closePanel(); segs.length=0; labels.length=0; mask.strokes.length=0; firstPt=null; previewPt=null; mode='idle'; draw(); };
-  $('btnExport').onclick= ()=>{ closePanel(); const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='IsoPipe.png'; a.click(); };
-
-  // Мастер-тумблер «Магнит»
-  const btnSnap=$('btnSnap');
-  function refreshSnapButton(){ btnSnap.textContent = snap.on ? '🧲 Магнит: Вкл' : '🧲 Магнит: Выкл'; }
-  btnSnap.onclick=()=>{ snap.on=!snap.on; refreshSnapButton(); };
-  refreshSnapButton();
-
-  // Мини-HUD
-  $('miniLine').onclick = ()=>{ mode='line'; firstPt=null; previewPt=null; toast('Линия'); };
-  $('miniEraser').onclick = ()=>{ mode='erase'; firstPt=null; previewPt=null; toast('Ластик (часть)'); };
-
-  // Панель настроек
-  const wrap=$('panelWrap'), backdrop=$('panelBackdrop');
-  $('btnSettings').onclick=()=>{ wrap.classList.toggle('open'); wrap.setAttribute('aria-hidden', wrap.classList.contains('open')?'false':'true'); };
-  $('panelClose').onclick=()=>closePanel();
-  backdrop.onclick=()=>closePanel();
-  addEventListener('keydown',e=>{ if(e.key==='Escape') closePanel(); });
-  function closePanel(){ wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); }
-
-  // Настройки
-  $('lineWidth').oninput=e=>{ lineWidthPx=+e.value|0; $('lineWidthVal').textContent=e.value; draw(); };
-  $('gridAlpha').oninput=e=>{ grid.alpha=+e.value/100; $('gridAlphaVal').textContent=e.value+'%'; draw(); };
-  $('gridStep').oninput =e=>{ grid.step =+e.value|0; $('gridStepVal').textContent=e.value; draw(); };
-  $('gridAngle').oninput=e=>{ grid.angleDeg=(+e.value|0); $('gridAngleVal').textContent=e.value; draw(); };
-  $('snapOn').onchange =e=>{ snap.on = e.target.checked; refreshSnapButton(); };
-  $('snapRadius').oninput=e=>{ snap.radiusPx=+e.value|0; $('snapRadiusVal').textContent=e.value; };
-  $('isoSnapOn').onchange=e=>{ snap.isoOn = e.target.checked; };
-  $('isoTol').oninput =e=>{ snap.isoTolDeg=+e.value|0; $('isoTolVal').textContent=e.value; };
-
-  $('maskSize').oninput = e=>{ mask.brushPx=+e.value|0; $('maskSizeVal').textContent=e.value; if(mode==='mask') draw(); };
-
-  // ===== Модалка ввода текста (без prompt) =====
-  let pendingTextPos=null;
-  function openTextModal(x,y){
-    pendingTextPos={x,y};
-    textInput.value='';
-    textModal.classList.add('show');
-    textModal.setAttribute('aria-hidden','false');
-    setTimeout(()=>textInput.focus(), 0);
+  function loadFromFile(file){
+    if(!file) return;
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      state.photo.img=img; state.photo.w=img.width; state.photo.h=img.height;
+      const sx=(cv.width/DPR)/img.width*0.9, sy=(cv.height/DPR)/img.height*0.9;
+      state.photo.s = Math.max(0.02, Math.min(sx,sy))*DPR;
+      state.photo.cx=cv.width/2; state.photo.cy=cv.height/2;
+      gridDirty=true; scheduleDraw(); toast('Фото добавлено');
+    };
+    img.src=url;
   }
-  function closeTextModal(){
-    textModal.classList.remove('show');
-    textModal.setAttribute('aria-hidden','true');
-    pendingTextPos=null;
-  }
-  $('textCancel').onclick = ()=> closeTextModal();
-  $('textOk').onclick = ()=>{
-    const val=textInput.value.trim();
-    if(val && pendingTextPos){ labels.push({x:pendingTextPos.x,y:pendingTextPos.y,text:val}); draw(); }
-    closeTextModal();
-    mode='idle';
-  };
-  textModal.querySelector('.bg').onclick = ()=> closeTextModal();
 
-  // ===== Старт =====
-  fit();
-  toast('Дабл-тап: скрыть HUD → остаются Линия/Ластик. «Маска» прячет линии за объектами. Текст — через встроенное окно.');
+  // ---------- рисование вентиля (по двум экранным точкам) ----------
+  function drawValve(ctx, A, B, dpr){
+    ctx.save();
+    // короткий кусок трубы
+    ctx.lineCap='round';
+    ctx.strokeStyle='#7b2cff';
+    ctx.lineWidth=Math.max(4, 6*dpr);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+
+    // бабочка + ручка
+    const ang=Math.atan2(B.y-A.y, B.x-A.x);
+    const mid={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    ctx.translate(mid.x, mid.y);
+    ctx.rotate(ang);
+
+    const w=12*dpr, h=8*dpr;
+    ctx.fillStyle='#7b2cff';
+    ctx.strokeStyle='#4a21a8';
+    ctx.lineWidth=1.5*dpr;
+
+    ctx.beginPath();
+    ctx.moveTo(-w*0.5,0);
+    ctx.lineTo(0,-h*0.65);
+    ctx.lineTo(w*0.5,0);
+    ctx.lineTo(0,h*0.65);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    ctx.strokeStyle='#111';
+    ctx.lineWidth=2*dpr;
+    ctx.beginPath(); ctx.moveTo(0,-h*0.95); ctx.lineTo(0,-h*1.8); ctx.stroke();
+    ctx.restore();
+  }
+
+  // стартовая отрисовка
+  scheduleDraw();
 })();
 </script>
 </body>
