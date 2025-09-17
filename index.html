@@ -1,29 +1,143 @@
-<!-- index.html -->
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>IsoPipe — чертёж</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>IsoPipe — схема</title>
+  <style>
+    :root{--violet:#7b2cff;--violet2:#6523ff}
+    html,body{margin:0;height:100%;overflow:hidden;background:#f5f6fb;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+    #cv{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;}
+    .toolbar{position:fixed;top:8px;left:8px;right:8px;z-index:10;display:flex;gap:6px;flex-wrap:wrap}
+    .toolbar button{padding:6px 12px;border:0;border-radius:10px;color:#fff;font-weight:600;
+      background:linear-gradient(180deg,var(--violet2),var(--violet))}
+    .toolbar button.ghost{background:#fff;color:#5b30c2;border:1px solid #d8c9ff}
+    .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);
+      background:#1f1f2e;color:#fff;padding:6px 10px;border-radius:8px;opacity:0;transition:.25s}
+    .toast.show{opacity:1}
+  </style>
 </head>
 <body>
-  <div id="toolbar" class="toolbar">
+  <div class="toolbar">
     <button data-act="line">Линия</button>
-    <button data-act="erase">Ластик</button>
     <button data-act="valve">Вентиль</button>
+    <button data-act="erase">Ластик</button>
     <button data-act="grid">Сетка</button>
     <button data-act="fit">Fit</button>
     <button data-act="undo">Назад</button>
     <button data-act="clear">Очистить</button>
   </div>
-
   <canvas id="cv"></canvas>
-
   <div id="toast" class="toast"></div>
 
-  <script src="valve.js"></script>
-  <script src="script.js"></script>
+<script>
+(function(){
+  const cv=document.getElementById('cv');
+  const ctx=cv.getContext('2d',{alpha:false});
+  const DPR=Math.max(1,window.devicePixelRatio||1);
+  const toastEl=document.getElementById('toast');
+  const state={
+    mode:'idle', first:null, segs:[], valves:[], gridOn:true,
+    s:1*DPR, cx:0, cy:0, pointers:new Map(), lastPan:null
+  };
+  function toast(t,ms=1000){toastEl.textContent=t;toastEl.classList.add('show');
+    setTimeout(()=>toastEl.classList.remove('show'),ms);}
+
+  // размеры
+  function resize(){
+    cv.width=innerWidth*DPR; cv.height=innerHeight*DPR;
+    state.cx=cv.width/2; state.cy=cv.height/2; draw();
+  } window.addEventListener('resize',resize);
+
+  const scrToWorld=(sx,sy)=>({x:(sx-state.cx)/state.s,y:(sy-state.cy)/state.s});
+  const worldToScr=(x,y)=>({x:state.cx+x*state.s,y:state.cy+y*state.s});
+
+  // сетка
+  function drawGrid(){
+    if(!state.gridOn) return;
+    const step=200, angles=[30,90,150];
+    ctx.save();
+    for(const ang of angles){
+      const r=ang*Math.PI/180,vx=Math.cos(r),vy=Math.sin(r),px=-vy,py=vx;
+      const stepScr=step*state.s, need=Math.ceil(Math.max(cv.width,cv.height)/stepScr)+2;
+      for(let k=-need;k<=need;k++){
+        const bx=px*k*step,by=py*k*step;
+        const A=worldToScr(bx-vx*9999,by-vy*9999),B=worldToScr(bx+vx*9999,by+vy*9999);
+        ctx.strokeStyle=(k%3===0)?'#b7bcc8':'#dcdfe6'; ctx.lineWidth=(k%3===0)?1.4:1;
+        ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+      }
+    } ctx.restore();
+  }
+
+  // вентиль
+  function drawValve(ctx,A,B){
+    ctx.save();
+    ctx.strokeStyle='#7b2cff';ctx.lineWidth=6/DPR;
+    ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+    const ang=Math.atan2(B.y-A.y,B.x-A.x);
+    const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+    ctx.translate(mid.x,mid.y);ctx.rotate(ang);
+    const w=12/DPR,h=8/DPR;
+    ctx.fillStyle='#7b2cff';ctx.strokeStyle='#4a21a8';ctx.lineWidth=1/DPR;
+    ctx.beginPath();ctx.moveTo(-w/2,0);ctx.lineTo(0,-h*0.7);ctx.lineTo(w/2,0);ctx.lineTo(0,h*0.7);ctx.closePath();
+    ctx.fill();ctx.stroke();
+    ctx.strokeStyle='#111';ctx.lineWidth=1.5/DPR;
+    ctx.beginPath();ctx.moveTo(0,-h*0.9);ctx.lineTo(0,-h*1.8);ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
+    drawGrid();
+    ctx.save();ctx.translate(state.cx,state.cy);ctx.scale(state.s,state.s);
+    for(const s of state.segs){ctx.strokeStyle='#7b2cff';ctx.lineWidth=6/DPR;
+      ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();}
+    for(const v of state.valves){drawValve(ctx,v.a,v.b);}
+    if(state.first){ctx.fillStyle='#16a34a';ctx.beginPath();ctx.arc(state.first.x,state.first.y,5/DPR,0,Math.PI*2);ctx.fill();}
+    ctx.restore();
+  }
+
+  // ввод
+  cv.addEventListener('pointerdown',e=>{
+    const p={x:e.clientX*DPR,y:e.clientY*DPR};const w=scrToWorld(p.x,p.y);
+    if(state.mode==='line'){
+      if(!state.first){state.first=w;toast('Вторая точка');}
+      else{state.segs.push({a:state.first,b:w});state.first=null;state.mode='idle';draw();}
+    } else if(state.mode==='valve'){
+      if(!state.first){state.first=w;toast('Вторая точка ориентации');}
+      else{state.valves.push({a:state.first,b:w});state.first=null;state.mode='idle';draw();}
+    } else if(state.mode==='erase'){
+      state.segs.pop()||state.valves.pop();state.mode='idle';draw();
+    } else {state.lastPan=p;}
+  });
+  cv.addEventListener('pointermove',e=>{
+    if(state.mode==='idle'&&state.lastPan){
+      const cur={x:e.clientX*DPR,y:e.clientY*DPR};
+      state.cx+=cur.x-state.lastPan.x;state.cy+=cur.y-state.lastPan.y;state.lastPan=cur;draw();
+    }
+  });
+  cv.addEventListener('pointerup',()=>{state.lastPan=null;});
+  cv.addEventListener('wheel',e=>{
+    e.preventDefault();const f=(e.deltaY<0)?1.05:0.95;
+    state.s=Math.max(0.3,Math.min(5,state.s*f));draw();
+  },{passive:false});
+
+  // тулбар
+  document.querySelector('.toolbar').addEventListener('click',e=>{
+    const act=e.target.dataset.act;if(!act)return;
+    if(act==='line'){state.mode='line';state.first=null;toast('Линия');}
+    if(act==='valve'){state.mode='valve';state.first=null;toast('Вентиль');}
+    if(act==='erase'){state.mode='erase';toast('Ластик удаляет последний');}
+    if(act==='grid'){state.gridOn=!state.gridOn;draw();}
+    if(act==='fit'){resize();}
+    if(act==='undo'){state.segs.pop()||state.valves.pop();draw();}
+    if(act==='clear'){state.segs=[];state.valves=[];draw();}
+  });
+
+  resize();
+})();
+</script>
 </body>
 </html>
