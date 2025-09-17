@@ -102,7 +102,8 @@
 
   function drawCheck(ctx, ppm){
     body10(ctx, ppm, 4);
-    ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
+    ctx.save(); ctx.strokeStyle
+    ='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.5));
     ctx.beginPath();
     ctx.moveTo(-mm(ppm,2.6), -mm(ppm,2));
     ctx.lineTo( mm(ppm,1.6), 0);
