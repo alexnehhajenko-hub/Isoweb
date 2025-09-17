@@ -5,14 +5,31 @@
   <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>IsoPipe — чертёж</title>
-  <link rel="stylesheet" href="style.css">
+  <style>
+    html,body{
+      margin:0;
+      height:100%;
+      background:#ffffff;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      overflow:hidden;
+    }
+    #cv{display:block;position:fixed;inset:0;width:100vw;height:100vh;touch-action:none;background:#fff}
+    .bar{position:fixed;left:8px;top:8px;z-index:5;display:flex;gap:8px;flex-wrap:wrap}
+    .btn{height:40px;border:0;border-radius:8px;padding:0 12px;font-weight:600;cursor:pointer}
+    .btn.main{background:#7b2cff;color:#fff}
+    .btn.ghost{background:#fff;color:#7b2cff;border:1px solid #7b2cff}
+    .btn.warn{background:#ff3b3b;color:#fff}
+    .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+           background:#222;color:#fff;padding:6px 10px;border-radius:6px;opacity:0;transition:.2s;z-index:10}
+    .toast.show{opacity:1}
+  </style>
 </head>
 <body>
-  <div id="bar" class="bar">
-    <button class="btn" id="bLine">Линия</button>
-    <button class="btn" id="bValve">Вентиль</button>
-    <button class="btn" id="bErase">Ластик</button>
-    <button class="btn" id="bFit">Fit</button>
+  <div class="bar">
+    <button class="btn main" id="bLine">Линия</button>
+    <button class="btn main" id="bValve">Вентиль</button>
+    <button class="btn ghost" id="bErase">Ластик</button>
+    <button class="btn ghost" id="bFit">Fit</button>
     <button class="btn ghost" id="bUndo">Назад</button>
     <button class="btn warn" id="bClear">Очистить</button>
   </div>
@@ -20,7 +37,88 @@
   <canvas id="cv"></canvas>
   <div id="toast" class="toast"></div>
 
-  <script src="valve.js"></script>
-  <script src="script.js"></script>
+  <script>
+  const DPR = window.devicePixelRatio||1;
+  const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+  const toastEl=document.getElementById('toast');
+  const state={mode:'idle',first:null,segs:[],valves:[],zoom:1,cx:0,cy:0};
+
+  function resize(){cv.width=innerWidth*DPR; cv.height=innerHeight*DPR; draw();}
+  window.addEventListener('resize',resize);
+
+  function worldToScreen(x,y){return {x:state.cx+x*state.zoom,y:state.cy+y*state.zoom};}
+  function screenToWorld(x,y){return {x:(x-state.cx)/state.zoom,y:(y-state.cy)/state.zoom};}
+  function show(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),800);}
+
+  function drawGrid(){
+    const step=40; ctx.save(); ctx.strokeStyle="#ddd"; ctx.lineWidth=1;
+    for(let x=0;x<cv.width;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,cv.height);ctx.stroke();}
+    for(let y=0;y<cv.height;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(cv.width,y);ctx.stroke();}
+    ctx.restore();
+  }
+
+  function drawValve(A,B){
+    ctx.save();
+    ctx.lineCap='round'; ctx.strokeStyle='#7b2cff'; ctx.lineWidth=6;
+    ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+    const ang=Math.atan2(B.y-A.y,B.x-A.x); const mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+    ctx.translate(mid.x,mid.y); ctx.rotate(ang);
+    ctx.fillStyle='#7b2cff'; ctx.strokeStyle='#4a21a8'; ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(-6,0);ctx.lineTo(0,-5);ctx.lineTo(6,0);ctx.lineTo(0,5);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.strokeStyle='#000';ctx.beginPath();ctx.moveTo(0,-7);ctx.lineTo(0,-12);ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    drawGrid();
+    // линии
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    for(const s of state.segs){
+      const A=worldToScreen(s.a.x,s.a.y),B=worldToScreen(s.b.x,s.b.y);
+      ctx.strokeStyle='#7b2cff';ctx.lineWidth=4;
+      ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+    }
+    // предпросмотр
+    if(state.mode==='line' && state.first && lastPointer){
+      const A=worldToScreen(state.first.x,state.first.y);
+      const B=lastPointer;
+      ctx.setLineDash([6,6]);ctx.strokeStyle='green';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();ctx.setLineDash([]);
+    }
+    // вентили
+    for(const v of state.valves){drawValve(worldToScreen(v.a.x,v.a.y),worldToScreen(v.b.x,v.b.y));}
+  }
+
+  function setMode(m){state.mode=m;state.first=null;show(m);}
+  let lastPointer=null;
+
+  cv.addEventListener('pointerdown',e=>{
+    const p={x:e.clientX*DPR,y:e.clientY*DPR};lastPointer=p;
+    if(state.mode==='line'){
+      const w=screenToWorld(p.x,p.y);
+      if(!state.first){state.first=w;}
+      else{state.segs.push({a:state.first,b:w});state.first=null;setMode('idle');}
+    }else if(state.mode==='valve'){
+      const w=screenToWorld(p.x,p.y);
+      const A={x:w.x-10,y:w.y},B={x:w.x+10,y:w.y};
+      state.valves.push({a:A,b:B});setMode('idle');
+    }else if(state.mode==='erase'){
+      state.segs.pop()||state.valves.pop();setMode('idle');
+    }
+    draw();
+  });
+
+  cv.addEventListener('pointermove',e=>{lastPointer={x:e.clientX*DPR,y:e.clientY*DPR};if(state.mode==='line'&&state.first)draw();});
+
+  document.getElementById('bLine').onclick=()=>setMode('line');
+  document.getElementById('bValve').onclick=()=>setMode('valve');
+  document.getElementById('bErase').onclick=()=>setMode('erase');
+  document.getElementById('bFit').onclick=()=>{state.cx=cv.width/2;state.cy=cv.height/2;state.zoom=1;draw();};
+  document.getElementById('bUndo').onclick=()=>{if(state.segs.length)state.segs.pop();else if(state.valves.length)state.valves.pop();draw();};
+  document.getElementById('bClear').onclick=()=>{state.segs=[];state.valves=[];draw();};
+
+  resize();state.cx=cv.width/2;state.cy=cv.height/2;draw();
+  </script>
 </body>
 </html>
