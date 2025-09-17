@@ -431,7 +431,8 @@
     const bmp = await createImageBitmap(file);
     bgImg=bmp; bgW=bmp.width; bgH=bmp.height;
     // fit по фото
-    const k = Math.min(cv.width/bgW, cv.height/bgH);
+    const k = Math.min(cv.widt
+      h/bgW, cv.height/bgH);
     view.scale = k; view.tx = (cv.width - bgW*k)/2; view.ty = (cv.height - bgH*k)/2;
     draw(); mediaMenu.classList.remove('open');
   });
