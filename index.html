@@ -10,36 +10,50 @@
 <body>
   <canvas id="cv"></canvas>
 
-  <!-- ВЕРХНЯЯ ПАНЕЛЬ (двойной тап прячет/показывает) -->
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ С ГОРИЗОНТАЛЬНЫМ СКРОЛЛОМ -->
   <div class="bar" id="topBar">
-    <button id="btnHand" class="btn ghost">Рука</button>
-    <button id="btnFit"  class="btn ghost">Фит</button>
-    <button id="btnZoomIn" class="btn ghost">＋</button>
-    <button id="btnZoomOut" class="btn ghost">－</button>
-    <button id="btnLine" class="btn">Линия</button>
-    <button id="btnUndo" class="btn ghost">↩ Назад</button>
-    <button id="btnExport" class="btn ghost">PNG</button>
+    <div class="bar-scroll">
+      <button id="btnHand" class="btn ghost">🖐 Рука</button>
+      <button id="btnLine" class="btn">📐 Линия</button>
 
-    <div class="dropdown">
-      <button id="btnLib" class="btn ghost">Элементы ▾</button>
-      <div id="libMenu" class="menu">
-        <button data-type="ball">Шаровый вентиль</button>
-        <button data-type="gate">Задвижка</button>
-        <button data-type="globe">Регулирующий</button>
-        <button data-type="check">Обратный</button>
-        <button data-type="pump">Насос</button>
-      </div>
-    </div>
+      <div class="divider"></div>
 
-    <div class="dropdown">
-      <button id="btnMedia" class="btn ghost">Медиа ▾</button>
-      <div id="mediaMenu" class="menu">
-        <label class="file-btn">
-          Фото / Галерея
-          <input id="pickImage" type="file" accept="image/*" capture="environment">
-        </label>
-        <button id="btnClearImage">Убрать фото</button>
+      <button id="btnZoomOut" class="btn ghost">↘︎ Меньше</button>
+      <button id="btnZoomIn"  class="btn ghost">↗︎ Больше</button>
+      <button id="btnFit"     class="btn ghost">🗔 Фит</button>
+
+      <div class="divider"></div>
+
+      <div class="dropdown">
+        <button id="btnLib" class="btn ghost">🔧 Элементы ▾</button>
+        <div id="libMenu" class="menu">
+          <div class="menu-title">Запорная арматура (10 мм)</div>
+          <button data-type="ball">Шаровый вентиль</button>
+          <button data-type="gate">Задвижка</button>
+          <button data-type="globe">Регулирующий</button>
+          <button data-type="check">Обратный клапан</button>
+          <div class="menu-title">Насосы</div>
+          <button data-type="pump">Насос</button>
+        </div>
       </div>
+
+      <div class="dropdown">
+        <button id="btnMedia" class="btn ghost">🖼 Медиа ▾</button>
+        <div id="mediaMenu" class="menu">
+          <label class="file-btn">
+            Фото / Галерея
+            <!-- один input; на iOS работает и камера, и галерея -->
+            <input id="pickImage" type="file" accept="image/*">
+          </label>
+          <button id="btnClearImage">Убрать фото</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <button id="btnUndo"   class="btn ghost">↩ Назад</button>
+      <button id="btnExport" class="btn ghost">⬇ PNG</button>
+      <button id="btnClear"  class="btn danger">🗑 Очистить</button>
     </div>
   </div>
 
@@ -85,7 +99,7 @@
         <span id="lineWidthVal" class="val">6</span>
       </div>
       <div class="row switch">
-        <input id="showPoints" type="checkbox" checked>
+        <input id="showPoints" type="checkbox">
         <label for="showPoints">Показывать точки</label>
       </div>
       <div class="row">
@@ -103,7 +117,6 @@
 
       <div class="row">
         <button id="btnDone"  class="btn ok">Готово</button>
-        <button id="btnClear" class="btn danger">Очистить</button>
       </div>
     </div>
   </div>
