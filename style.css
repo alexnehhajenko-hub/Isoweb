@@ -2,7 +2,7 @@
 html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;touch-action:none}
 canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
-/* панель; скрывается двойным тапом */
+/* панель; двойной тап по холсту прячет/показывает */
 .bar{
   position:fixed;left:8px;right:64px;top:8px;z-index:1000;
   display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;
