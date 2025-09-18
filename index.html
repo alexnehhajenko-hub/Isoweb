@@ -10,7 +10,7 @@
 <body>
   <canvas id="cv"></canvas>
 
-  <!-- ВЕРХНЯЯ ПАНЕЛЬ С ГОРИЗОНТАЛЬНЫМ СКРОЛЛОМ -->
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ (обязательно id="topBar") -->
   <div class="bar" id="topBar">
     <div class="bar-scroll">
       <button id="btnHand" class="btn ghost">🖐 Рука</button>
@@ -18,8 +18,8 @@
 
       <div class="divider"></div>
 
-      <button id="btnZoomOut" class="btn ghost">↘︎ Меньше</button>
-      <button id="btnZoomIn"  class="btn ghost">↗︎ Больше</button>
+      <button id="btnZoomOut" class="btn ghost">− Меньше</button>
+      <button id="btnZoomIn"  class="btn ghost">＋ Больше</button>
       <button id="btnFit"     class="btn ghost">🗔 Фит</button>
 
       <div class="divider"></div>
@@ -31,7 +31,7 @@
           <button data-type="ball">Шаровый вентиль</button>
           <button data-type="gate">Задвижка</button>
           <button data-type="globe">Регулирующий</button>
-          <button data-type="check">Обратный клапан</button>
+          <button data-type="check">Обратный</button>
           <div class="menu-title">Насосы</div>
           <button data-type="pump">Насос</button>
         </div>
@@ -42,7 +42,7 @@
         <div id="mediaMenu" class="menu">
           <label class="file-btn">
             Фото / Галерея
-            <!-- один input; на iOS работает и камера, и галерея -->
+            <!-- один input, iOS/Android дадут выбрать камеру или библиотеку -->
             <input id="pickImage" type="file" accept="image/*">
           </label>
           <button id="btnClearImage">Убрать фото</button>
