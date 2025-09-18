@@ -4,6 +4,7 @@
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d', { alpha:false });
   const $ = id => document.getElementById(id);
+  const topBar = $('topBar');
   const toast = (t,ms=1200)=>{ const el=$('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms); };
 
   // ===== состояние =====
@@ -13,7 +14,7 @@
 
   const segs = [];                 // [{a:{x,y}, b:{x,y}}]
   const items = [];                // [{type, segIndex, t}]
-  const pts  = { show:false, sizePx:10 }; // точки выключены по умолчанию (быстро)
+  const pts  = { show:false, sizePx:10 }; // точки выключены по умолчанию (быстрее)
   const snap = { on:true, isoTolDeg:10, radiusPx:18, endStickPx:28, finalLimitPx:6 };
   let lineWidthPx = 6;
   let pxPerMm = 6;
@@ -46,7 +47,7 @@
   // выбор элемента
   let placeType=null;
 
-  // указатели
+  // указатели/жесты
   const pointers=new Map();
 
   // слой линий
@@ -84,7 +85,7 @@
   function snapToSegmentExtension(raw, tol=10){ if(!snap.on||!segs.length) return raw; let best=null,bestD=Infinity;
     for(const s of segs){ const A=s.a,B=s.b; const vx=B.x-A.x,vy=B.y-A.y,L=Math.hypot(vx,vy); if(L<1) continue;
       const nx=vx/L, ny=vy/L; const wx=raw.x-A.x, wy=raw.y-A.y; const proj=wx*nx+wy*ny;
-      const px=A.x+nx*proj, py=A.y+ny*proj; const d=Math.hypot(raw.x-px, raw.y-py);
+      const px=A.x+nx*proj, py=A.y+ny*proj; const d=Math.hypот(raw.x-px, raw.y-py);
       if(d<=tol && d<bestD){ bestD=d; best={x:px,y:py}; }
     }
     if(best){ best._lockAxis=true; return best; }
@@ -125,6 +126,7 @@
     if(bgImg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bgImg,0,0,bgW,bgH); }
 
     linesCtx.clearRect(0,0,linesCv.width,linesCv.height);
+    linesCtx.setTransform(view.scale,0,0,view.scale,view.ty,view.ty); // исправим далее
     linesCtx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     linesCtx.lineCap='round'; linesCtx.lineJoin='round';
 
@@ -155,7 +157,7 @@
       linesCtx.setLineDash([]);
     }
 
-    // точки (авто-скрытие если далеко/слишком много)
+    // точки (по желанию)
     const showDotsNow = pts.show && view.scale>0.85 && segs.length<800;
     if(showDotsNow){
       const size=pts.sizePx/DPR;
@@ -167,7 +169,7 @@
       const seen=new Set(), key=p=>`${Math.round(p.x)}|${Math.round(p.y)}`;
       for(const s of segs){
         if(!seen.has(key(s.a))){ dot(s.a); seen.add(key(s.a)); }
-        if(!seen.has(key(s.b))){ dot(s.b)); seen.add(key(s.b)); }
+        if(!seen.has(key(s.b))){ dot(s.b); seen.add(key(s.b)); }  // ← тут была лишняя скобка, исправлено
       }
       if(firstPt && !seen.has(key(firstPt))){ dot(firstPt); }
       if(previewPt){ linesCtx.beginPath(); linesCtx.fillStyle='#16a34a'; linesCtx.arc(previewPt.x,previewPt.y,size*.5,0,Math.PI*2); linesCtx.fill(); }
@@ -192,13 +194,10 @@
   // ===== жесты =====
   let lastPan=null, lastTap=0, swallowTap=false;
 
-  // двойной тап — прячем/показываем панель и НЕ начинаем рисовать
+  // двойной тап — спрятать/показать панель, не начинать рисование
   cv.addEventListener('pointerdown', e=>{
     const now=performance.now();
-    if(now-lastTap<260){
-      $('topBar').classList.toggle('hidden');
-      swallowTap=true; setTimeout(()=>swallowTap=false,0);
-    }
+    if(now-lastTap<260){ topBar.classList.toggle('hidden'); swallowTap=true; setTimeout(()=>swallowTap=false,0); }
     lastTap=now;
   }, {passive:true});
 
@@ -234,9 +233,9 @@
     const {sx,sy}=getCanvasPoint(e);
     pointers.set(e.pointerId,{sx,sy});
 
-    // pinch-зум
+    // pinch
     if(pointers.size>=2){
-      const pts=[...pointers.values()]; const [p0,p1]=pts;
+      const [p0,p1]=[...pointers.values()];
       if(!p0.prev||!p1.prev){ p0.prev={...p0}; p1.prev={...p1}; }
       else{
         const d0=Math.hypot(p0.prev.sx-p1.prev.sx,p0.prev.sy-p1.prev.sy);
@@ -276,7 +275,7 @@
     clearTimeout(holdTimer);
     hideAngleTag();
 
-    // постановка элемента — только по одному
+    // постановка элемента — по одному
     if(mode==='place' && placeType){
       if(!segs.length){ toast('Сначала нарисуй линию'); return; }
       const {sx,sy}=getCanvasPoint(e); const raw=screenToWorld(sx,sy);
@@ -299,12 +298,12 @@
     }
   }, {passive:false});
 
-  // iOS может прервать жест — чистим состояние
+  // iOS может прерывать жест — чистим состояние
   cv.addEventListener('pointercancel', e=>{
     endPointers(e); clearTimeout(holdTimer); hideAngleTag(); requestRedraw();
   }, {passive:true});
 
-  // колесо — масштаб
+  // колесо — масштаб (десктоп)
   cv.addEventListener('wheel', e=>{
     e.preventDefault();
     const {sx,sy}=getCanvasPoint(e);
@@ -316,79 +315,4 @@
     let best=null,bestD=Infinity;
     for(let i=0;i<segs.length;i++){
       const s=segs[i]; const dA=Math.hypot(s.a.x-x,s.a.y-y); const dB=Math.hypot(s.b.x-x,s.b.y-y);
-      if(dA<bestD&&dA<=r){best={segIndex:i,end:'a'};bestD=dA;}
-      if(dB<bestD&&dB<=r){best={segIndex:i,end:'b'};bestD=dB;}
-    }
-    return best;
-  }
-
-  // ===== кнопки/меню =====
-  function setActive(ids){ ['btnHand','btnLine'].forEach(id=>$(id).classList.toggle('active', ids.includes(id))); }
-  $('btnHand').onclick = ()=>{ mode='hand'; placeType=null; firstPt=null; previewPt=null; hideAngleTag(); setActive(['btnHand']); toast('Рука'); };
-  $('btnLine').onclick = ()=>{ mode='line'; placeType=null; firstPt=null; previewPt=null; hideAngleTag(); setActive(['btnLine']); toast('Линия: две точки'); };
-
-  $('btnUndo').onclick = ()=>{ if(firstPt&&mode==='line'){ firstPt=null; previewPt=null; mode='hand'; } else if(segs.length){ segs.pop(); } requestRedraw(); };
-  $('btnClear').onclick = ()=>{ segs.length=0; items.length=0; firstPt=null; previewPt=null; clearAxis(); requestRedraw(); };
-
-  $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='IsoPipe.png'; a.click(); };
-  $('btnZoomIn').onclick = ()=>{ setScaleAround(view.scale*1.15, cv.width/2, cv.height/2); };
-  $('btnZoomOut').onclick= ()=>{ setScaleAround(view.scale/1.15, cv.width/2, cv.height/2); };
-  $('btnFit').onclick    = ()=>{ if(bgImg){ const k=Math.min(cv.width/bgW, cv.height/bgH); view.scale=k; view.tx=(cv.width-bgW*k)/2; view.ty=(cv.height-bgH*k)/2; } else { view.scale=1; view.tx=view.ty=0; } requestRedraw(); };
-
-  const libMenu=$('libMenu'); $('btnLib').onclick=()=>libMenu.classList.toggle('open');
-  libMenu.addEventListener('click', e=>{
-    const btn=e.target.closest('button[data-type]'); if(!btn) return;
-    libMenu.classList.remove('open');
-    mode='place'; placeType=btn.dataset.type; setActive(['btnHand']);
-    toast('Тапни по трубе для установки');
-  });
-
-  const mediaMenu=$('mediaMenu'); $('btnMedia').onclick=()=>mediaMenu.classList.toggle('open');
-
-  // совместимый с iOS/Android загрузчик фото (без createImageBitmap)
-  async function fileToBitmap(file){
-    if('createImageBitmap' in window){
-      try{ return await createImageBitmap(file); }catch(_){}
-    }
-    return await new Promise((resolve, reject)=>{
-      const img=new Image(); img.onload=()=>resolve(img); img.onerror=reject;
-      img.src=URL.createObjectURL(file);
-    });
-  }
-  $('pickImage').addEventListener('change', async (e)=>{
-    const file=e.target.files?.[0]; if(!file) return;
-    const bmp=await fileToBitmap(file);
-    bgImg=bmp; bgW=bmp.width; bgH=bmp.height;
-    const k=Math.min(cv.width/bgW, cv.height/bgH);
-    view.scale=k; view.tx=(cv.width-bgW*k)/2; view.ty=(cv.height-bgH*k)/2;
-    requestRedraw(); mediaMenu.classList.remove('open');
-    e.target.value=''; // чтобы повторно выбрать тот же файл
-  });
-  $('btnClearImage').onclick=()=>{ bgImg=null; requestRedraw(); mediaMenu.classList.remove('open'); };
-
-  // панель настроек
-  const wrap=$('panelWrap'), panel=$('panel'), backdrop=$('panelBackdrop');
-  let lastFocus=null;
-  const openPanel=()=>{ lastFocus=document.activeElement; panelOpen=true; wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false'); cv.style.pointerEvents='none'; document.body.style.overflow='hidden'; panel.focus(); };
-  const closePanel=()=>{ panelOpen=false; wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); cv.style.pointerEvents='auto'; document.body.style.overflow=''; (lastFocus||$('btnSettings')).focus(); };
-  $('btnSettings').onclick=openPanel; $('btnDone').onclick=closePanel; backdrop.onclick=closePanel;
-  addEventListener('keydown', e=>{ if(panelOpen && e.key==='Escape') closePanel(); });
-  ['pointerdown','pointermove','pointerup','touchstart','touchmove','touchend','mousedown','mousemove','mouseup','wheel','click'].forEach(ev=>{
-    panel.addEventListener(ev, ev2=>ev2.stopPropagation(), {passive:false});
-  });
-
-  // настройки
-  $('snapOn').onchange    = e=>{ snap.on=!!e.target.checked; clearAxis(); };
-  $('snapRadius').oninput = e=>{ snap.radiusPx=+e.target.value||18; $('snapRadiusVal').textContent=e.target.value; };
-  $('isoTol').oninput     = e=>{ snap.isoTolDeg=+e.target.value||10; $('isoTolVal').textContent=e.target.value; };
-  $('endStick').oninput   = e=>{ snap.endStickPx=+e.target.value||28; $('endStickVal').textContent=e.target.value; };
-  $('finalSnapLimit').oninput = e=>{ snap.finalLimitPx=+e.target.value||6; $('finalSnapLimitVal').textContent=e.target.value; };
-  $('lineWidth').oninput  = e=>{ lineWidthPx=+e.target.value||6; $('lineWidthVal').textContent=lineWidthPx; requestRedraw(); };
-  $('showPoints').onchange= e=>{ pts.show=!!e.target.checked; requestRedraw(); };
-  $('ptSize').oninput     = e=>{ pts.sizePx=+e.target.value||10; $('ptSizeVal').textContent=pts.sizePx; requestRedraw(); };
-  $('pxPerMm').oninput    = e=>{ pxPerMm=+e.target.value||6; $('pxPerMmVal').textContent=pxPerMm; requestRedraw(); };
-
-  // старт
-  fit();
-  toast('Линия: две точки. Элементы — в меню «🔧 Элементы». Двойной тап по холсту — спрятать панель.');
-})();
+      if(dA<bestD&&dA<=r
