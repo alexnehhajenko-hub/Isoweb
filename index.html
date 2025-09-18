@@ -10,7 +10,8 @@
 <body>
   <canvas id="cv"></canvas>
 
-  <div class="bar">
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ (двойной тап прячет/показывает) -->
+  <div class="bar" id="topBar">
     <button id="btnHand" class="btn ghost">Рука</button>
     <button id="btnFit"  class="btn ghost">Фит</button>
     <button id="btnZoomIn" class="btn ghost">＋</button>
@@ -34,7 +35,7 @@
       <button id="btnMedia" class="btn ghost">Медиа ▾</button>
       <div id="mediaMenu" class="menu">
         <label class="file-btn">
-          Сделать фото / выбрать
+          Фото / Галерея
           <input id="pickImage" type="file" accept="image/*" capture="environment">
         </label>
         <button id="btnClearImage">Убрать фото</button>
