@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — безопасный одностраничник (v701)</title>
+<title>Pro Trace — popover толщины + pinch (v710)</title>
 <style>
   :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -12,11 +12,13 @@
   .bar{position:fixed;left:8px;right:8px;top:8px;z-index:1000;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:42px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
-  .btn.small{height:38px}
 
-  .panel{position:fixed;top:64px;right:8px;z-index:1001;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:10px;width:min(92vw,360px)}
-  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
-  .row label{min-width:150px;font-size:13px;color:#555}
+  /* Поповер толщины */
+  .pop{position:fixed;top:56px;right:8px;z-index:1001;background:#fff;border:1px solid var(--border);
+       border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:10px;display:none;width:min(92vw,340px)}
+  .pop.show{display:block}
+  .row{display:flex;align-items:center;gap:10px}
+  .row label{min-width:160px;font-size:13px;color:#555}
   .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
   .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--violet)}
   .val{width:40px;text-align:right;font-size:12px;color:#666}
@@ -39,20 +41,24 @@
     </label>
     <button id="btnUndo" class="btn ghost">↩ Назад</button>
     <button id="btnExport" class="btn ghost">⤓ PNG</button>
-    <div class="panel">
-      <div class="row">
-        <label>Толщина линии (px)</label>
-        <input id="linePx" type="range" min="2" max="24" value="10">
-        <span id="linePxVal" class="val">10</span>
-      </div>
+    <button id="btnThickness" class="btn ghost">⚙ Толщина</button>
+  </div>
+
+  <!-- Popover толщины -->
+  <div id="thPop" class="pop" role="dialog" aria-modal="true" aria-label="Настройки толщины линии">
+    <div class="row">
+      <label>Толщина линии (px)</label>
+      <input id="linePx" type="range" min="2" max="24" value="10">
+      <span id="linePxVal" class="val">10</span>
     </div>
+    <p style="margin:8px 0 0 0;font-size:12px;color:#666">Зум и панорамирование: <b>двумя пальцами</b>.</p>
   </div>
 
   <div id="toast" class="toast"></div>
 
 <script>
 (()=>{
-  // ---- аварийный ловец ошибок, чтоб не было «белого экрана» ----
+  // ---- ловец ошибок ----
   const toast=(t,ms=2000)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
   window.addEventListener('error',ev=>{toast('Ошибка: '+(ev?.message||'unknown')); console.error(ev.error||ev.message);});
   window.addEventListener('unhandledrejection',ev=>{toast('Ошибка: '+(ev?.reason?.message||'promise')); console.error(ev.reason);});
@@ -61,7 +67,7 @@
   const cv=document.getElementById('cv');
   const ctx=cv.getContext('2d',{alpha:false});
 
-  // Правильные координаты: без clientX*DPR
+  // Правильные координаты
   function getCanvasPoint(e){
     const r=cv.getBoundingClientRect();
     return {
@@ -87,11 +93,9 @@
   }
   addEventListener('resize',fit);
 
-  // преобразования
   const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale});
   const w2s=(x,y)=>({x:x*view.scale+view.tx, y:y*view.scale+view.ty});
 
-  // рендер
   function draw(){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
@@ -110,14 +114,13 @@
       ctx.strokeStyle='#16a34a'; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
       ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(prev.x,prev.y); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle='#16a34a';
       const p=w2s(prev.x,prev.y); ctx.setTransform(1,0,0,1,0,0);
-      ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#16a34a'; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
     }
   }
   let raf=0,dirty=false; const need=()=>{dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}};
 
-  // жесты
+  // жесты: панорамирование одной, зум двумя
   const pts=new Map(); let lastPan=null;
   cv.addEventListener('pointerdown',e=>{
     const {sx,sy}=getCanvasPoint(e); pts.set(e.pointerId,{sx,sy});
@@ -131,7 +134,7 @@
 
   cv.addEventListener('pointermove',e=>{
     if(!pts.has(e.pointerId)) return;
-    const {sx,sy}=getCanvasPoint(e); const cur={sx,sy}; const prevPt=pts.get(e.pointerId); pts.set(e.pointerId,cur);
+    const {sx,sy}=getCanvasPoint(e); const cur={sx,sy}; const pPrev=pts.get(e.pointerId); pts.set(e.pointerId,cur);
 
     if(pts.size===2){
       const [p0,p1]=[...pts.values()];
@@ -195,12 +198,26 @@
   $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
 
-  // настройки
-  $('linePx').oninput=e=>{params.linePx=+e.target.value; $('linePxVal').textContent=e.target.value; need();};
+  // поповер толщины
+  const pop=document.getElementById('thPop');
+  const lineRange=document.getElementById('linePx');
+  const lineVal=document.getElementById('linePxVal');
+
+  function openPop(){ pop.classList.add('show'); setTimeout(()=>{document.addEventListener('pointerdown',onOutside,{once:true});},0); }
+  function closePop(){ pop.classList.remove('show'); }
+  function onOutside(ev){
+    if(pop.contains(ev.target) || ev.target.id==='btnThickness') { document.addEventListener('pointerdown',onOutside,{once:true}); return; }
+    closePop();
+  }
+  document.getElementById('btnThickness').onclick=()=>{
+    if(pop.classList.contains('show')) closePop(); else openPop();
+  };
+  lineRange.oninput=e=>{ params.linePx=+e.target.value; lineVal.textContent=e.target.value; need(); };
+  lineRange.onchange=()=>{ closePop(); };
 
   // старт
   fit();
-  toast('Загружено v701. Если видишь белый экран — ошибка появится тут внизу.');
+  toast('Pinch: масштаб двумя пальцами. Толщина — через кнопку «⚙ Толщина».');
 })();
 </script>
 </body>
