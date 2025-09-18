@@ -3,17 +3,18 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — pinch + 3D Grid (v720)</title>
+<title>Pro Trace — надёжный pinch (v730)</title>
 <style>
   :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  /* ВАЖНО: touch-action:none, чтобы iOS/Android не перехватывали жест */
   canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
   .bar{position:fixed;left:8px;right:8px;top:8px;z-index:1000;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:42px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
 
-  /* Поповеры */
+  /* Поповер толщины */
   .pop{position:fixed;top:56px;right:8px;z-index:1001;background:#fff;border:1px solid var(--border);
        border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:10px;display:none;width:min(92vw,360px)}
   .pop.show{display:block}
@@ -22,7 +23,6 @@
   .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
   .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--violet)}
   .row .val{width:44px;text-align:right;font-size:12px;color:#666}
-  .row .switch{display:flex;align-items:center;gap:8px}
 
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1100;pointer-events:none}
   .toast.show{opacity:1}
@@ -43,7 +43,6 @@
     <button id="btnUndo" class="btn ghost">↩ Назад</button>
     <button id="btnExport" class="btn ghost">⤓ PNG</button>
     <button id="btnThickness" class="btn ghost">⚙ Толщина</button>
-    <button id="btnGrid" class="btn ghost"># Сетка 3D</button>
   </div>
 
   <!-- Поповер толщины -->
@@ -53,46 +52,23 @@
       <input id="linePx" type="range" min="2" max="24" value="10">
       <span id="linePxVal" class="val">10</span>
     </div>
-    <p style="margin:8px 0 0;font-size:12px;color:#666">Масштаб и панорамирование: <b>двумя пальцами</b>.</p>
-  </div>
-
-  <!-- Поповер сетки -->
-  <div id="gridPop" class="pop" role="dialog" aria-modal="true" aria-label="Сетка 3D">
-    <div class="row">
-      <div class="switch">
-        <input id="gridOn" type="checkbox" checked>
-        <label for="gridOn">Показывать сетку</label>
-      </div>
-    </div>
-    <div class="row">
-      <label>Прозрачность</label>
-      <input id="gridAlpha" type="range" min="0" max="100" value="25">
-      <span id="gridAlphaVal" class="val">25%</span>
-    </div>
-    <div class="row">
-      <label>Шаг (px)</label>
-      <input id="gridStep" type="range" min="80" max="480" value="200">
-      <span id="gridStepVal" class="val">200</span>
-    </div>
-    <div class="row">
-      <label>Угол (°)</label>
-      <input id="gridAngle" type="range" min="-90" max="90" value="30">
-      <span id="gridAngleVal" class="val">30</span>
-    </div>
-    <p style="margin:4px 0 0;font-size:12px;color:#666">Три семейства: <b>0°/90°</b> и <b>±угол</b> (например 30°/150°) — классическая изометрия.</p>
+    <p style="margin:8px 0 0;font-size:12px;color:#666">И зум, и пан — <b>двумя пальцами</b>.</p>
   </div>
 
   <div id="toast" class="toast"></div>
 
 <script>
 (()=>{
-  const toast=(t,ms=1800)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
+  // ---------- утилиты ----------
+  const toast=(t,ms=1600)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
+  window.addEventListener('error',ev=>{console.error(ev.error||ev.message);toast('Ошибка: '+(ev?.message||'unknown'));});
+  window.addEventListener('unhandledrejection',ev=>{console.error(ev.reason);toast('Ошибка: '+(ev?.reason?.message||'promise'));});
 
   const DPR = Math.max(1, window.devicePixelRatio||1);
   const cv=document.getElementById('cv');
   const ctx=cv.getContext('2d',{alpha:false});
 
-  // правильные координаты
+  // правильные координаты относительно канваса (для мыши и тача)
   function getCanvasPointXY(clientX, clientY){
     const r=cv.getBoundingClientRect();
     return {
@@ -101,14 +77,11 @@
     };
   }
 
-  // сцена
+  // ---------- сцена ----------
   const view={scale:1,tx:0,ty:0};
   let bg=null,bw=0,bh=0;
   const segs=[]; let mode='hand'; let first=null, prev=null;
   const params={ linePx:10 };
-
-  // сетка
-  const grid={ on:true, alpha:0.25, step:200, angleDeg:30 };
 
   function fit(){
     cv.width=Math.round(innerWidth*DPR);
@@ -124,57 +97,15 @@
   const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale});
   const w2s=(x,y)=>({x:x*view.scale+view.tx, y:y*view.scale+view.ty});
 
-  function drawGrid(){
-    if(!grid.on || grid.alpha<=0) return;
-    ctx.save();
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.globalAlpha=grid.alpha;
-
-    // рисуем в экранных координатах, но шаг пересчитываем по scale → визуально шаг постоянный
-    const step = grid.step;
-    const angles = [0, 90, grid.angleDeg, 180-grid.angleDeg]; // 0/90 и ±угол
-
-    // границы с запасом
-    const W=cv.width, H=cv.height, M=1000;
-
-    angles.forEach((deg,i)=>{
-      const rad = deg * Math.PI/180;
-      const vx = Math.cos(rad), vy = Math.sin(rad);
-      // перпендикуляр
-      const px = -vy, py = vx;
-
-      // смещение линии на экране: хотим шаг в px, не зависящий от зума.
-      // но у нас мир->экран: x*scale+tx, поэтому шаг экрана == step, сдвигаем по перп. в экране
-      // прогоним k от -N..N:
-      const N = Math.ceil((Math.max(W,H)+2*M)/step);
-      for(let k=-N;k<=N;k++){
-        const ox = W/2 + px*k*step;
-        const oy = H/2 + py*k*step;
-
-        // точки далеко за пределами, чтобы линия закрыла весь экран
-        const A = {x: ox - vx*20000, y: oy - vy*20000};
-        const B = {x: ox + vx*20000, y: oy + vy*20000};
-
-        ctx.strokeStyle = (k%3===0)? '#b7bcc8' : '#cfd3dc';
-        ctx.lineWidth = (k%3===0)? 1.6 : 1.0;
-        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-      }
-    });
-
-    ctx.restore(); ctx.globalAlpha=1;
-  }
-
   function draw(){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
 
-    // фон-фото
-    if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
+    if(bg){
+      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+      ctx.drawImage(bg,0,0,bw,bh);
+    }
 
-    // сетка поверх фото, под линиями
-    drawGrid();
-
-    // мир для линий
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
 
     for(const s of segs){
@@ -195,92 +126,138 @@
   }
   let raf=0,dirty=false; const need=()=>{dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}};
 
-  // ------- универсальные жесты: Pointer + Touch (fallback) -------
-  const hasPointer = 'PointerEvent' in window;
-  const pts = new Map(); let lastPan=null;
+  // ---------- ЖЕСТЫ ----------
+  // На тач-устройствах используем исключительно Touch Events (максимальная совместимость iOS).
+  // Двумя пальцами — и масштаб, и пан. Одним — только рисуем.
+  let touches=new Map(); // id -> {sx,sy}
+  let prevCenter=null, prevDist=null;
 
-  function handlePinch(){
-    const arr=[...pts.values()];
-    if(arr.length!==2) return false;
-    const p0=arr[0], p1=arr[1];
+  function touchCount(){ return touches.size; }
+  function centroid(){
+    const arr=[...touches.values()]; if(arr.length===0) return null;
+    let sx=0,sy=0; for(const t of arr){ sx+=t.sx; sy+=t.sy; }
+    return {sx:sx/arr.length, sy:sy/arr.length};
+  }
+  function distance2(a,b){ return Math.hypot(a.sx-b.sx, a.sy-b.sy); }
 
-    if(!p0.prev||!p1.prev){ p0.prev={...p0}; p1.prev={...p1}; return true; }
-
-    const d0=Math.hypot(p0.prev.sx-p1.prev.sx,p0.prev.sy-p1.prev.sy);
-    const d1=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
-    if(d0>0){
-      const k=d1/d0; const cx=(p0.sx+p1.sx)/2, cy=(p0.sy+p1.sy)/2;
-      view.tx = cx - k*(cx - view.tx);
-      view.ty = cy - k*(cy - view.ty);
-      view.scale = Math.max(0.2, Math.min(8, view.scale*k));
+  // важно: все touch* слушатели — {passive:false}
+  cv.addEventListener('touchstart', e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches){
+      const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
+      touches.set(t.identifier,{sx,sy});
+    }
+    // если появилась вторая точка — инициализируем pinch
+    if(touchCount()===2){
+      const arr=[...touches.values()];
+      prevCenter=centroid();
+      prevDist=distance2(arr[0],arr[1]);
+    }
+    // одиночным пальцем ставим первую точку в режиме линии
+    if(touchCount()===1 && mode==='line' && !first){
+      const only=[...touches.values()][0];
+      first = s2w(only.sx, only.sy);
+      prev = null;
       need();
     }
-    p0.prev={...p0}; p1.prev={...p1};
-    return true;
-  }
+  }, {passive:false});
 
-  function startPoint(id,sx,sy){ pts.set(id,{sx,sy}); }
-  function movePoint(id,sx,sy){
-    const cur={sx,sy}; const prevPt=pts.get(id); pts.set(id,cur);
-    if(pts.size===2){ handlePinch(); return; }
-
-    if(mode==='hand'){
-      if(!lastPan) lastPan={x:sx,y:sy};
-      view.tx += sx-lastPan.x; view.ty += sy-lastPan.y; lastPan={x:sx,y:sy}; need();
-    }
-    if(mode==='line' && first){ prev = s2w(sx,sy); need(); }
-  }
-  function endPoint(id){ pts.delete(id); lastPan=null; }
-
-  if(hasPointer){
-    cv.addEventListener('pointerdown',e=>{ const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY); startPoint(e.pointerId,sx,sy);
-      if(pts.size===2) return;
-      if(mode==='line'){ const w=s2w(sx,sy); if(!first){ first=w; prev=null; need(); } else { segs.push({a:first,b:w}); first=null; prev=null; mode='hand'; need(); } }
-    },{passive:false});
-
-    cv.addEventListener('pointermove',e=>{ if(!pts.has(e.pointerId)) return; const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY); movePoint(e.pointerId,sx,sy); },{passive:false});
-    cv.addEventListener('pointerup',e=>{ endPoint(e.pointerId); });
-    cv.addEventListener('pointercancel',e=>{ endPoint(e.pointerId); });
-  }else{
-    // Touch fallback
-    cv.addEventListener('touchstart',e=>{
-      e.preventDefault();
-      for(const t of e.changedTouches){ const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY); startPoint(t.identifier,sx,sy); }
-      if(pts.size===1 && mode==='line'){ const only=[...pts.values()][0]; const w=s2w(only.sx,only.sy); if(!first){ first=w; prev=null; need(); } }
-      if(pts.size===2) return;
-    },{passive:false});
-
-    cv.addEventListener('touchmove',e=>{
-      e.preventDefault();
-      for(const t of e.changedTouches){ const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY); movePoint(t.identifier,sx,sy); }
-    },{passive:false});
-
-    cv.addEventListener('touchend',e=>{
-      e.preventDefault();
-      // если одиночное касание — завершим сегмент на отпускании
-      if(e.changedTouches.length===1 && pts.size===1 && mode==='line' && first){
-        const t=e.changedTouches[0]; const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
-        const w=s2w(sx,sy); segs.push({a:first,b:w}); first=null; prev=null; mode='hand'; need();
-      }
-      for(const t of e.changedTouches){ endPoint(t.identifier); }
-    },{passive:false});
-    cv.addEventListener('touchcancel',e=>{ for(const t of e.changedTouches){ endPoint(t.identifier); } },{passive:false});
-  }
-
-  // колесо мыши как доп. зум (desktop)
-  cv.addEventListener('wheel',e=>{
+  cv.addEventListener('touchmove', e=>{
     e.preventDefault();
-    const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY); const k=e.deltaY<0?1.12:0.9;
-    view.tx = sx - k*(sx - view.tx);
-    view.ty = sy - k*(sy - view.ty);
-    view.scale = Math.max(0.2, Math.min(8, view.scale*k));
-    need();
-  },{passive:false});
+    // обновляем точки
+    for(const t of e.changedTouches){
+      if(!touches.has(t.identifier)) continue;
+      const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
+      touches.set(t.identifier,{sx,sy});
+    }
 
-  // кнопки
+    if(touchCount()===2){
+      // pinch + pan (масштаб вокруг центра + перенос на смещение центра)
+      const arr=[...touches.values()];
+      const nowCenter=centroid();
+      const nowDist=distance2(arr[0],arr[1]);
+      if(prevCenter && prevDist){
+        const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
+        // масштаб вокруг прошлого центра
+        view.tx = prevCenter.sx - k*(prevCenter.sx - view.tx);
+        view.ty = prevCenter.sy - k*(prevCenter.sy - view.ty);
+        view.scale = Math.max(0.2, Math.min(8, view.scale*k));
+        // перенос на delta центра
+        const dx = nowCenter.sx - prevCenter.sx;
+        const dy = nowCenter.sy - prevCenter.sy;
+        view.tx += dx; view.ty += dy;
+        need();
+      }
+      prevCenter=nowCenter; prevDist=nowDist;
+      return;
+    }
+
+    if(touchCount()===1){
+      const only=[...touches.values()][0];
+      if(mode==='line' && first){
+        prev = s2w(only.sx, only.sy); need();
+      }
+      // режим "рука" только двумя пальцами по твоей просьбе, одним не двигаем
+    }
+  }, {passive:false});
+
+  cv.addEventListener('touchend', e=>{
+    e.preventDefault();
+    // если завершили одиночный тап в режиме линии — замыкаем сегмент
+    if(e.changedTouches.length===1 && touchCount()===1 && mode==='line' && first){
+      const t=e.changedTouches[0];
+      const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
+      const w=s2w(sx,sy);
+      segs.push({a:first,b:w});
+      first=null; prev=null; mode='hand';
+      need();
+    }
+    for(const t of e.changedTouches){ touches.delete(t.identifier); }
+    if(touchCount()<2){ prevCenter=null; prevDist=null; }
+  }, {passive:false});
+
+  cv.addEventListener('touchcancel', e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches){ touches.delete(t.identifier); }
+    if(touchCount()<2){ prevCenter=null; prevDist=null; }
+  }, {passive:false});
+
+  // мышь/трекпад: поддержим тоже
+  const hasTouch = 'ontouchstart' in window;
+  if(!hasTouch){
+    // колесо — зум
+    cv.addEventListener('wheel', e=>{
+      e.preventDefault();
+      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
+      const k=e.deltaY<0?1.12:0.9;
+      view.tx = sx - k*(sx - view.tx);
+      view.ty = sy - k*(sy - view.ty);
+      view.scale = Math.max(0.2, Math.min(8, view.scale*k));
+      need();
+    }, {passive:false});
+    // мышью рисуем
+    let mouseDown=false;
+    cv.addEventListener('mousedown', e=>{
+      mouseDown=true;
+      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
+      if(mode==='line'){
+        const w=s2w(sx,sy);
+        if(!first){ first=w; prev=null; need(); }
+        else{ segs.push({a:first,b:w}); first=null; prev=null; mode='hand'; need(); }
+      }
+    });
+    cv.addEventListener('mousemove', e=>{
+      if(!mouseDown) return;
+      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
+      if(mode==='line' && first){ prev=s2w(sx,sy); need(); }
+    });
+    addEventListener('mouseup', ()=>{ mouseDown=false; });
+  }
+
+  // ---------- кнопки ----------
   const $=id=>document.getElementById(id);
   $('btnLine').onclick=()=>{mode='line';first=null;prev=null;toast('Режим: линия');};
-  $('btnHand').onclick=()=>{mode='hand';first=null;prev=null;toast('Режим: рука');};
+  $('btnHand').onclick=()=>{mode='hand';first=null;prev=null;toast('Режим: рука (пан/зум — 2 пальца)');};
   $('btnUndo').onclick=()=>{ if(first){first=null;prev=null;} else segs.pop(); need(); };
   $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
 
@@ -305,36 +282,15 @@
   const thPop=document.getElementById('thPop');
   const lineRange=document.getElementById('linePx');
   const lineVal=document.getElementById('linePxVal');
-  function togglePop(el){ el.classList.toggle('show'); if(el.classList.contains('show')){document.addEventListener('pointerdown',closeIfOutside,{once:true});} }
-  function closeIfOutside(ev){
-    if(thPop.contains(ev.target) || ev.target.id==='btnThickness' || gridPop.contains(ev.target) || ev.target.id==='btnGrid'){
-      document.addEventListener('pointerdown',closeIfOutside,{once:true}); return;
-    }
-    thPop.classList.remove('show'); gridPop.classList.remove('show');
-  }
-  document.getElementById('btnThickness').onclick=()=>togglePop(thPop);
+  function togglePop(){ thPop.classList.toggle('show'); if(thPop.classList.contains('show')){document.addEventListener('pointerdown',closeIfOutside,{once:true});} }
+  function closeIfOutside(ev){ if(thPop.contains(ev.target)||ev.target.id==='btnThickness'){ document.addEventListener('pointerdown',closeIfOutside,{once:true}); return; } thPop.classList.remove('show'); }
+  document.getElementById('btnThickness').onclick=()=>togglePop();
   lineRange.oninput=e=>{ params.linePx=+e.target.value; lineVal.textContent=e.target.value; need(); };
   lineRange.onchange=()=>{ thPop.classList.remove('show'); };
 
-  // поповер сетки
-  const gridPop=document.getElementById('gridPop');
-  document.getElementById('btnGrid').onclick=()=>togglePop(gridPop);
-  const gridOn = document.getElementById('gridOn');
-  const gridAlpha = document.getElementById('gridAlpha');
-  const gridAlphaVal = document.getElementById('gridAlphaVal');
-  const gridStep = document.getElementById('gridStep');
-  const gridStepVal = document.getElementById('gridStepVal');
-  const gridAngle = document.getElementById('gridAngle');
-  const gridAngleVal = document.getElementById('gridAngleVal');
-
-  gridOn.onchange = e=>{ grid.on = !!e.target.checked; need(); };
-  gridAlpha.oninput = e=>{ grid.alpha = (+e.target.value)/100; gridAlphaVal.textContent=e.target.value+'%'; need(); };
-  gridStep.oninput  = e=>{ grid.step  = (+e.target.value|0); gridStepVal.textContent=e.target.value; need(); };
-  gridAngle.oninput = e=>{ grid.angleDeg=(+e.target.value|0); gridAngleVal.textContent=e.target.value; need(); };
-
   // старт
   fit();
-  toast('Зум/пан — двумя пальцами. Сетка 3D — кнопка «# Сетка 3D».');
+  toast('Двумя пальцами — и зум, и пан. Одним — ставь точки для линии.');
 })();
 </script>
 </body>
