@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — pinch + точки (v735)</title>
+<title>Pro Trace — tap-tap линии (v740)</title>
 <style>
   :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -49,7 +49,7 @@
       <input id="linePx" type="range" min="2" max="24" value="10">
       <span id="linePxVal" class="val">10</span>
     </div>
-    <p style="margin:8px 0 0;font-size:12px;color:#666">И зум, и пан — <b>двумя пальцами</b>. Одним — ставишь точки.</p>
+    <p style="margin:8px 0 0;font-size:12px;color:#666">Точки ставятся <b>тап-тап</b>. Зум/пан — <b>двумя пальцами</b>.</p>
   </div>
 
   <div id="toast" class="toast"></div>
@@ -74,8 +74,9 @@
 
   const view={scale:1,tx:0,ty:0};
   let bg=null,bw=0,bh=0;
-  const segs=[]; let mode='hand';
-  let first=null, prev=null; // первая точка и превью второй
+  const segs=[]; 
+  let mode='hand';
+  let first=null, prev=null; // первая и превью
   const params={ linePx:10 };
 
   function fit(){
@@ -107,7 +108,7 @@
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
 
-    // первая точка — явный маркер
+    // маркер первой точки
     if(first){
       const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0);
       ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#ffffff'; ctx.lineWidth=2;
@@ -127,9 +128,15 @@
   }
   let raf=0,dirty=false; const need=()=>{dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}};
 
-  // ===== ЖЕСТЫ (чистые Touch Events для телефонов) =====
+  // ====== ЖЕСТЫ (тач) ======
   let touches=new Map();
   let prevCenter=null, prevDist=null;
+
+  // детектор «тапа»: коротко и почти без движения
+  const TAP_MAX_TIME=300;     // мс
+  const TAP_MAX_MOVE=14*DPR;  // пикселей экрана
+  const downs=new Map();      // id -> {t0,sx,sy}
+
   const touchCount=()=>touches.size;
   const centroid=()=>{
     const arr=[...touches.values()]; if(!arr.length) return null;
@@ -139,22 +146,17 @@
 
   cv.addEventListener('touchstart', e=>{
     e.preventDefault();
+    const now=performance.now();
     for(const t of e.changedTouches){
       const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
       touches.set(t.identifier,{sx,sy});
+      downs.set(t.identifier,{t0:now,sx,sy});
     }
-    // инициализация pinch
     if(touchCount()===2){
       const arr=[...touches.values()];
       prevCenter=centroid(); prevDist=distance2(arr[0],arr[1]);
     }
-    // первый тап в режиме «Линия» — ставим старт
-    if(touchCount()===1 && mode==='line' && !first){
-      const only=[...touches.values()][0];
-      first = s2w(only.sx, only.sy);
-      prev = null;
-      need();
-    }
+    // ВАЖНО: первую точку теперь ставим только на «тап» в touchend, а не на touchstart.
   }, {passive:false});
 
   cv.addEventListener('touchmove', e=>{
@@ -165,17 +167,16 @@
       touches.set(t.identifier,{sx,sy});
     }
 
+    // pinch (масштаб+пан) двумя пальцами
     if(touchCount()===2){
       const arr=[...touches.values()];
       const nowCenter=centroid();
       const nowDist=distance2(arr[0],arr[1]);
       if(prevCenter && prevDist){
         const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
-        // масштаб вокруг прошлого центра
         view.tx = prevCenter.sx - k*(prevCenter.sx - view.tx);
         view.ty = prevCenter.sy - k*(prevCenter.sy - view.ty);
         view.scale = Math.max(0.2, Math.min(8, view.scale*k));
-        // перенос на смещение центра
         view.tx += (nowCenter.sx - prevCenter.sx);
         view.ty += (nowCenter.sy - prevCenter.sy);
         need();
@@ -184,35 +185,50 @@
       return;
     }
 
+    // одно касание: только превью, если первая точка уже есть
     if(touchCount()===1){
       const only=[...touches.values()][0];
       if(mode==='line' && first){
         prev = s2w(only.sx, only.sy);
         need();
       }
-      // пан одним пальцем отключён по просьбе
     }
   }, {passive:false});
 
   cv.addEventListener('touchend', e=>{
     e.preventDefault();
-    // второй тап в режиме «Линия» — завершает отрезок
-    if(e.changedTouches.length===1 && touchCount()===1 && mode==='line' && first){
-      const t=e.changedTouches[0];
+    const now=performance.now();
+
+    for(const t of e.changedTouches){
+      const down=downs.get(t.identifier);
       const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
-      const w=s2w(sx,sy);
-      segs.push({a:first,b:w});
-      first=null; prev=null;
-      // остаёмся в режиме «Линия», можно сразу ставить следующий
-      need();
+      const isTap = !!down && (now - down.t0 <= TAP_MAX_TIME) && (Math.hypot(sx-down.sx, sy-down.sy) <= TAP_MAX_MOVE);
+
+      if(isTap && mode==='line'){
+        const W = s2w(sx,sy);
+        if(!first){
+          // первый ТАП — ставим первую точку
+          first = W; prev=null; need();
+        }else{
+          // второй ТАП — рисуем сегмент и ВОЗВРАЩАЕМСЯ в «Руку»
+          segs.push({a:first,b:W});
+          first=null; prev=null; need();
+          mode='hand';
+          toast('Сегмент готов. Для новой линии опять нажми «Линия».');
+        }
+      }
+
+      // уборка следов
+      downs.delete(t.identifier);
+      touches.delete(t.identifier);
     }
-    for(const t of e.changedTouches){ touches.delete(t.identifier); }
+
     if(touchCount()<2){ prevCenter=null; prevDist=null; }
   }, {passive:false});
 
   cv.addEventListener('touchcancel', e=>{
     e.preventDefault();
-    for(const t of e.changedTouches){ touches.delete(t.identifier); }
+    for(const t of e.changedTouches){ downs.delete(t.identifier); touches.delete(t.identifier); }
     if(touchCount()<2){ prevCenter=null; prevDist=null; }
   }, {passive:false});
 
@@ -229,26 +245,31 @@
       need();
     }, {passive:false});
 
-    let down=false;
+    let down=false, downPos=null, downTime=0;
+    const MOUSE_TAP_MOVE=6*DPR, MOUSE_TAP_TIME=400;
     cv.addEventListener('mousedown', e=>{
-      down=true;
-      if(mode!=='line') return;
-      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
-      const w=s2w(sx,sy);
-      if(!first){ first=w; prev=null; need(); }
-      else{ segs.push({a:first,b:w}); first=null; prev=null; need(); }
+      down=true; downTime=performance.now();
+      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY); downPos={sx,sy};
     });
     cv.addEventListener('mousemove', e=>{
-      if(!down||!first||mode!=='line') return;
-      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
-      prev=s2w(sx,sy); need();
+      if(!down || !first || mode!=='line') return;
+      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY); prev=s2w(sx,sy); need();
     });
-    addEventListener('mouseup', ()=>{ down=false; });
+    addEventListener('mouseup', e=>{
+      if(!down) return; down=false;
+      const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
+      const isTap = (performance.now()-downTime<=MOUSE_TAP_TIME) && (Math.hypot(sx-downPos.sx, sy-downPos.sy)<=MOUSE_TAP_MOVE);
+      if(isTap && mode==='line'){
+        const W=s2w(sx,sy);
+        if(!first){ first=W; prev=null; need(); }
+        else{ segs.push({a:first,b:W}); first=null; prev=null; need(); mode='hand'; toast('Сегмент готов. Нажми «Линия» для следующего.'); }
+      }
+    });
   }
 
   // ===== КНОПКИ =====
   const $=id=>document.getElementById(id);
-  $('btnLine').onclick=()=>{mode='line'; first=null; prev=null; toast('Режим: линия');};
+  $('btnLine').onclick=()=>{mode='line'; first=null; prev=null; toast('Режим: линия (тап-тап)');};
   $('btnHand').onclick=()=>{mode='hand'; first=null; prev=null; toast('Режим: рука (пан/зум — 2 пальца)');};
   $('btnUndo').onclick=()=>{ if(first){first=null;prev=null;} else segs.pop(); need(); };
   $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
@@ -280,7 +301,7 @@
 
   // старт
   fit();
-  toast('📐 Линия: первый тап — красная точка, второй — завершение. Пан/зум — двумя пальцами.');
+  toast('📐 Линия: ТАП → ТАП. После сегмента режим возвращается в «Руку».');
 })();
 </script>
 </body>
