@@ -1,143 +1,310 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>IsoPipe — изометрия по точкам</title>
-  <style>
-    :root{--violet:#7b2cff;--violet2:#6a1bff}
-    html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;touch-action:none}
-    canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>IsoPipe — по фото, стык-в-стык</title>
+<style>
+  :root{--violet:#7b2cff;--violet2:#6a1bff;--border:#e7e3f7}
+  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
-    .bar{position:fixed;left:0;right:56px;top:0;z-index:1000;padding:8px 8px 0 8px;transition:.2s}
-    .bar-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
-    .bar-scroll::-webkit-scrollbar{display:none}
+  .bar{position:fixed;left:0;right:56px;top:0;z-index:1000;padding:8px 8px 0;transition:.2s}
+  .bar-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
+  .bar-scroll::-webkit-scrollbar{display:none}
+  .btn{min-width:110px;height:46px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800;font-size:15px;white-space:nowrap;flex:0 0 auto}
+  .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
+  .btn.active{filter:brightness(1.08)}
+  .gear{position:fixed;top:8px;right:8px;width:46px;height:46px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
 
-    .btn{min-width:100px;height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800;font-size:14px;white-space:nowrap;flex:0 0 auto}
-    .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
-    .btn.active{filter:brightness(1.08)}
-
-    .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid #e7e3f7;background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
-
-    .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.25s;z-index:1100;pointer-events:none}
-    .toast.show{opacity:1}
-
-    .angle-tag{position:fixed;pointer-events:none;z-index:1002;background:rgba(27,27,42,.9);color:#fff;font-size:12px;padding:4px 6px;border-radius:8px;transform:translate(-50%,-130%);white-space:nowrap}
-  </style>
+  .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
+  .panel-wrap.open{display:block}
+  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
+  .panel{position:absolute;top:68px;right:8px;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,380px);max-height:80vh;overflow:auto}
+  .panel h4{margin:6px 0 8px;font-size:15px}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .row label{min-width:170px;font-size:14px;color:#555}
+  .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
+  .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:#7b2cff}
+  .switch{display:flex;align-items:center;gap:10px}
+  .val{width:42px;text-align:right;font-size:12px;color:#666}
+  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1100;pointer-events:none}
+  .toast.show{opacity:1}
+  .crosshair{position:fixed;pointer-events:none;z-index:1002;color:#444;font-size:10px;opacity:.8;transform:translate(-50%,-50%);display:none}
+  .crosshair:before,.crosshair:after{content:"";position:absolute;background:currentColor}
+  .crosshair:before{width:18px;height:1.5px;left:-9px;top:0}
+  .crosshair:after{width:1.5px;height:18px;left:0;top:-9px}
+</style>
 </head>
 <body>
   <canvas id="cv"></canvas>
 
-  <div class="bar" id="topBar">
+  <div class="bar">
     <div class="bar-scroll">
       <button id="btnHand" class="btn ghost">🖐 Рука</button>
       <button id="btnLine" class="btn">📐 Линия</button>
       <button id="btnUndo" class="btn ghost">↩ Назад</button>
-      <label class="btn ghost">
-        🖼 Фото/Галерея
-        <input id="pickImage" type="file" accept="image/*" style="display:none">
+      <label class="btn ghost" style="position:relative">🖼 Фото/галерея
+        <input id="pickImage" type="file" accept="image/*" style="position:absolute;inset:0;opacity:0">
       </label>
       <button id="btnClearImage" class="btn ghost">✖ Убрать фото</button>
     </div>
   </div>
 
-  <button id="btnSettings" class="gear">⚙</button>
+  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
 
-  <div id="angleTag" class="angle-tag" style="display:none">0°</div>
   <div id="toast" class="toast"></div>
+  <div id="cross" class="crosshair"></div>
+
+  <div id="panelWrap" class="panel-wrap" aria-hidden="true">
+    <div id="panelBackdrop" class="panel-backdrop"></div>
+    <div id="panel" class="panel" role="dialog" aria-modal="true">
+      <h4>Притяжение</h4>
+      <div class="row"><label>Сила магнита (px)</label><input id="snapTol" type="range" min="4" max="30" value="12"><span id="snapTolVal" class="val">12</span></div>
+      <div class="row"><label>Прилипание к концам (px)</label><input id="endStick" type="range" min="10" max="60" value="28"><span id="endStickVal" class="val">28</span></div>
+      <div class="row switch"><input id="showDots" type="checkbox"><label for="showDots">Показывать точки</label></div>
+      <div class="row"><button id="btnDone" class="btn" style="width:100%;background:linear-gradient(180deg,#16a34a,#15803d)">Готово</button></div>
+    </div>
+  </div>
 
 <script>
 (function(){
-  const DPR = window.devicePixelRatio||1;
+  // ====== базовые ======
+  const DPR = Math.max(1, window.devicePixelRatio||1);
   const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d');
-  const $ = id=>document.getElementById(id);
+  const ctx = cv.getContext('2d', {alpha:false});
+  const $ = id => document.getElementById(id);
+  const toast = (t,ms=1200)=>{ const el=$('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms); };
 
-  let mode='hand';
+  // состояние
+  let mode='hand';             // hand | line
   const segs=[];
-  let firstPt=null,previewPt=null;
-  const snap={on:true,radius:18};
+  let firstPt=null, previewPt=null;
+  const snap = { tol:12, endStick:28 };
+  let showDots=false;
 
-  let bgImg=null, view={scale:1,tx:0,ty:0};
+  // фон-фото и камера
+  let img=null, iw=0, ih=0;    // изображение в "мировых" пикселях
+  const view = { scale:1, tx:0, ty:0 }; // трансформ экрана -> мира
 
-  const pointers=new Map();
+  // курсор-прицел
+  const cross = $('cross');
+  const showCross = (sx,sy)=>{cross.style.display='block';cross.style.left=sx+'px';cross.style.top=sy+'px'};
+  const hideCross = ()=>{cross.style.display='none'};
 
+  // утилиты координат
   function fit(){
-    cv.width=innerWidth*DPR; cv.height=innerHeight*DPR;
-    requestRedraw();
+    cv.width = Math.round(innerWidth*DPR);
+    cv.height= Math.round(innerHeight*DPR);
+    redraw();
   }
-  addEventListener('resize',fit);
+  addEventListener('resize', fit);
 
-  function screenToWorld(sx,sy){return{x:(sx-view.tx)/view.scale,y:(sy-view.ty)/view.scale}}
-  function worldToScreen(x,y){return{x:x*view.scale+view.tx,y:y*view.scale+view.ty}}
-  function getCanvasPoint(e){const r=cv.getBoundingClientRect();return{sx:(e.clientX-r.left)*DPR,sy:(e.clientY-r.top)*DPR}}
+  const scr2world = (sx,sy)=>({ x:(sx - view.tx)/view.scale, y:(sy - view.ty)/view.scale });
+  const world2scr  = (x,y)=>({ x: x*view.scale + view.tx, y: y*view.scale + view.ty });
 
-  function draw(){
+  // ====== рисование ======
+  function redraw(){
     ctx.setTransform(1,0,0,1,0,0);
-    ctx.clearRect(0,0,cv.width,cv.height);
-    if(bgImg) ctx.drawImage(bgImg,view.tx,view.ty,bgImg.width*view.scale,bgImg.height*view.scale);
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+
+    // фон
+    if(img){
+      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+      ctx.drawImage(img,0,0,iw,ih);
+    }else{
+      ctx.setTransform(1,0,0,1,0,0);
+    }
+
+    // мир
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
 
+    // линии
     ctx.lineCap='round'; ctx.lineJoin='round';
-    ctx.strokeStyle='#7b2cff'; ctx.lineWidth=4/view.scale;
-    for(const s of segs){ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();}
+    for(const s of segs){
+      ctx.strokeStyle='#5b00bf'; ctx.globalAlpha=.7; ctx.lineWidth=(8/DPR)/view.scale;
+      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+
+      ctx.strokeStyle='#7b2cff'; ctx.globalAlpha=1; ctx.lineWidth=(6/DPR)/view.scale;
+      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+    }
 
     // первая точка
     if(firstPt){
-      ctx.beginPath();ctx.fillStyle='red';ctx.arc(firstPt.x,firstPt.y,6/view.scale,0,Math.PI*2);ctx.fill();
+      ctx.beginPath(); ctx.fillStyle='#ff3b30'; ctx.arc(firstPt.x,firstPt.y,(7/DPR)/view.scale,0,Math.PI*2); ctx.fill();
     }
+
     // превью
-    if(firstPt&&previewPt){
-      ctx.beginPath();ctx.strokeStyle='green';ctx.setLineDash([10/view.scale,6/view.scale]);
-      ctx.moveTo(firstPt.x,firstPt.y);ctx.lineTo(previewPt.x,previewPt.y);ctx.stroke();ctx.setLineDash([]);
-      ctx.beginPath();ctx.fillStyle='green';ctx.arc(previewPt.x,previewPt.y,5/view.scale,0,Math.PI*2);ctx.fill();
+    if(firstPt && previewPt){
+      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=(5/DPR)/view.scale;
+      ctx.beginPath(); ctx.moveTo(firstPt.x,firstPt.y); ctx.lineTo(previewPt.x,previewPt.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.fillStyle='#16a34a'; ctx.arc(previewPt.x,previewPt.y,(6/DPR)/view.scale,0,Math.PI*2); ctx.fill();
     }
+
+    // узлы (по желанию)
+    if(showDots){
+      const r=(5/DPR)/view.scale;
+      const dot=p=>{ctx.beginPath();ctx.fillStyle='rgba(123,44,255,.35)';ctx.arc(p.x,p.y,r*1.4,0,Math.PI*2);ctx.fill();
+                    ctx.beginPath();ctx.fillStyle='#7b2cff';ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();}
+      for(const s of segs){dot(s.a); dot(s.b);}
+    }
+
+    ctx.setTransform(1,0,0,1,0,0);
   }
-  let raf=0,dirty=false;
-  function requestRedraw(){dirty=true;if(!raf)raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}
+  let raf=0, dirty=false; function need(){dirty=true; if(!raf){raf=requestAnimationFrame(()=>{raf=0; if(dirty){dirty=false; redraw();}})}}
 
-  // жесты
-  cv.addEventListener('pointerdown',e=>{
+  // ====== snapping: только сегмент и концы ======
+  function snapToEnds(p){
+    let best=null, bd=Infinity;
+    for(const s of segs){
+      for(const n of [s.a, s.b]){
+        const d=Math.hypot(n.x-p.x, n.y-p.y);
+        if(d < bd && d <= snap.endStick){ bd=d; best=n; }
+      }
+    }
+    return best ? {x:best.x, y:best.y, _lock:'end'} : p;
+  }
+  function snapToSegment(p){
+    if(!segs.length) return p;
+    let best=null, bd=Infinity;
+    for(const s of segs){
+      const A=s.a, B=s.b;
+      const vx=B.x-A.x, vy=B.y-A.y, L=Math.hypot(vx,vy); if(L<1) continue;
+      const nx=vx/L, ny=vy/L;
+      const wx=p.x-A.x, wy=p.y-A.y;
+      let proj=wx*nx+wy*ny; proj=Math.max(0, Math.min(L, proj)); // строго внутри
+      const px=A.x+nx*proj, py=A.y+ny*proj;
+      const d=Math.hypot(p.x-px, p.y-py);
+      if(d < bd && d <= snap.tol){ bd=d; best={x:px,y:py}; }
+    }
+    return best ? {...best, _lock:'seg'} : p;
+  }
+  function previewSnap(raw){
+    const end = snapToEnds(raw);
+    if(end._lock) return end;
+    return snapToSegment(raw);
+  }
+  function finalize(start, rawEnd){
+    // сначала узлы, потом сегмент; в конце ещё раз «жёсткий стык» к ближайшему концу
+    let p = snapToEnds(rawEnd); p = snapToSegment(p);
+    p = snapToEnds(p);
+    return p;
+  }
+
+  // ====== жесты ======
+  const pointers = new Map(); let lastPan=null;
+  function getPt(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*DPR, sy:(e.clientY-r.top)*DPR }; }
+
+  cv.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    pointers.set(e.pointerId,getCanvasPoint(e));
-    if(pointers.size===2) return; // pinch
-    const {sx,sy}=getCanvasPoint(e); const p=screenToWorld(sx,sy);
-    if(mode==='line'){
-      if(!firstPt){firstPt=p;previewPt=null;}
-      else{segs.push({a:firstPt,b:p});firstPt=null;previewPt=null;}
-      requestRedraw();
-    }
-  });
-  cv.addEventListener('pointermove',e=>{
-    if(!pointers.has(e.pointerId)) return;
-    pointers.set(e.pointerId,getCanvasPoint(e));
-    if(pointers.size===2){
-      const [p1,p2]=[...pointers.values()];
-      const dx=p2.sx-p1.sx,dy=p2.sy-p1.sy;const dist=Math.hypot(dx,dy);
-      if(!cv._lastDist) cv._lastDist=dist;
-      else{const k=dist/cv._lastDist;cv._lastDist=dist;const cx=(p1.sx+p2.sx)/2,cy=(p1.sy+p2.sy)/2;
-        view.tx=cx-k*(cx-view.tx);view.ty=cy-k*(cy-view.ty);view.scale*=k;requestRedraw();}
-    }else if(mode==='line'&&firstPt){
-      const {sx,sy}=getCanvasPoint(e);previewPt=screenToWorld(sx,sy);requestRedraw();
-    }
-  });
-  cv.addEventListener('pointerup',e=>{pointers.delete(e.pointerId);cv._lastDist=null});
+    const pt=getPt(e); pointers.set(e.pointerId, pt);
+    if(pointers.size===2) return; // начинаем pinch — не мешаем
 
-  // кнопки
-  $('btnHand').onclick=()=>{mode='hand';toast('Рука');};
-  $('btnLine').onclick=()=>{mode='line';firstPt=null;previewPt=null;toast('Линия');};
-  $('btnUndo').onclick=()=>{segs.pop();requestRedraw();};
-  $('btnClearImage').onclick=()=>{bgImg=null;requestRedraw();};
-  $('pickImage').onchange=e=>{
-    const file=e.target.files[0];if(!file)return;
-    const img=new Image();
-    img.onload=()=>{bgImg=document.createElement('canvas');bgImg.width=img.width;bgImg.height=img.height;bgImg.getContext('2d').drawImage(img,0,0);view.scale=Math.min(cv.width/bgImg.width,cv.height/bgImg.height);view.tx=0;view.ty=0;requestRedraw();};
-    img.src=URL.createObjectURL(file);
+    // показать прицел
+    showCross(pt.sx/DPR, pt.sy/DPR);
+
+    if(mode==='line'){
+      const w = scr2world(pt.sx, pt.sy);
+      if(!firstPt){ firstPt = w; previewPt=null; need(); return; }
+      // ставим вторую точку с финальным снапом
+      const final = finalize(firstPt, w);
+      segs.push({a:firstPt, b:final});
+      firstPt=null; previewPt=null; need();
+    }
+  }, {passive:false});
+
+  cv.addEventListener('pointermove', e=>{
+    if(!pointers.has(e.pointerId)) return;
+    const pt=getPt(e); pointers.set(e.pointerId, pt);
+
+    // прицел
+    showCross(pt.sx/DPR, pt.sy/DPR);
+
+    if(pointers.size===2){
+      // pinch-zoom
+      const [p0,p1]=[...pointers.values()];
+      const d = (p)=>Math.hypot(p.sx, p.sy);
+      if(!p0.prev||!p1.prev){ p0.prev={...p0}; p1.prev={...p1}; return; }
+      const d0=Math.hypot(p0.prev.sx-p1.prev.sx,p0.prev.sy-p1.prev.sy);
+      const d1=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
+      if(d0>0){
+        const k=d1/d0;
+        const cx=(p0.sx+p1.sx)/2, cy=(p0.sy+p1.sy)/2;
+        view.tx = cx - k*(cx - view.tx);
+        view.ty = cy - k*(cy - view.ty);
+        view.scale *= k;
+        need();
+      }
+      p0.prev={...p0}; p1.prev={...p1};
+      return;
+    }
+
+    if(mode==='hand'){
+      // панорамирование одним пальцем
+      if(!lastPan) lastPan={x:pt.sx,y:pt.sy};
+      const dx=pt.sx-lastPan.x, dy=pt.sy-lastPan.y;
+      view.tx += dx; view.ty += dy;
+      lastPan={x:pt.sx,y:pt.sy};
+      need();
+    }
+
+    if(mode==='line' && firstPt){
+      // превью с привязкой
+      const raw = scr2world(pt.sx, pt.sy);
+      previewPt = previewSnap(raw);
+      need();
+    }
+  }, {passive:false});
+
+  cv.addEventListener('pointerup', e=>{
+    pointers.delete(e.pointerId);
+    lastPan=null;
+    if(pointers.size===0) hideCross();
+  });
+
+  cv.addEventListener('pointercancel', e=>{
+    pointers.delete(e.pointerId);
+    lastPan=null; if(pointers.size===0) hideCross();
+  });
+
+  // ====== кнопки ======
+  function setActive(id){ ['btnHand','btnLine'].forEach(b=>$(b).classList.toggle('active', b===id)); }
+  $('btnHand').onclick=()=>{ mode='hand'; firstPt=null; previewPt=null; setActive('btnHand'); toast('Рука: панорамирование, два пальца — масштаб'); };
+  $('btnLine').onclick=()=>{ mode='line'; firstPt=null; previewPt=null; setActive('btnLine'); toast('Линия: поставь 2 точки'); };
+  $('btnUndo').onclick=()=>{ if(firstPt){firstPt=null; previewPt=null;} else segs.pop(); need(); };
+  $('btnClearImage').onclick=()=>{ img=null; iw=ih=0; need(); };
+
+  // фото
+  $('pickImage').onchange = e=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    const loader=new Image(); loader.onload=()=>{
+      // делаем bitmap того же размера — в "мировых" пикселях фото
+      const c=document.createElement('canvas'); c.width=loader.naturalWidth; c.height=loader.naturalHeight;
+      c.getContext('2d',{alpha:false}).drawImage(loader,0,0);
+      img=c; iw=c.width; ih=c.height;
+      // фитом по экрану
+      const k=Math.min(cv.width/iw, cv.height/ih);
+      view.scale=k; view.tx=(cv.width - iw*k)/2; view.ty=(cv.height - ih*k)/2;
+      need();
+    };
+    loader.src=URL.createObjectURL(file);
   };
 
-  function toast(t,ms=1200){const el=$('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);}
+  // настройки
+  const wrap=$('panelWrap'), panel=$('panel'), back=$('panelBackdrop');
+  const openPanel=()=>{wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false');};
+  const closePanel=()=>{wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true');};
+  $('btnSettings').onclick=openPanel; $('btnDone').onclick=closePanel; back.onclick=closePanel;
+
+  $('snapTol').oninput = e=>{ snap.tol=+e.target.value; $('snapTolVal').textContent=e.target.value; };
+  $('endStick').oninput = e=>{ snap.endStick=+e.target.value; $('endStickVal').textContent=e.target.value; };
+  $('showDots').onchange= e=>{ showDots=!!e.target.checked; need(); };
+
+  // старт
   fit();
+  setActive('btnHand');
+  toast('🖐 Рука: панорамируй; 📐 Линия: ставь 2 точки. Два пальца — масштаб.');
 })();
 </script>
 </body>
