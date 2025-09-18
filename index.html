@@ -20,10 +20,10 @@
   .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
   .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
-  .panel{position:absolute;top:68px;right:8px;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,380px);max-height:80vh;overflow:auto}
+  .panel{position:absolute;top:68px;right:8px;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,400px);max-height:80vh;overflow:auto}
   .panel h4{margin:6px 0 8px;font-size:15px}
   .row{display:flex;align-items:center;gap:10px;margin:10px 0}
-  .row label{min-width:170px;font-size:14px;color:#555}
+  .row label{min-width:190px;font-size:14px;color:#555}
   .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
   .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:#7b2cff}
   .switch{display:flex;align-items:center;gap:10px}
@@ -48,10 +48,9 @@
         <input id="pickImage" type="file" accept="image/*" style="position:absolute;inset:0;opacity:0">
       </label>
       <button id="btnClearImage" class="btn ghost">✖ Убрать фото</button>
+      <button id="btnSettings" class="gear" title="Настройки">⚙</button>
     </div>
   </div>
-
-  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
 
   <div id="toast" class="toast"></div>
   <div id="cross" class="crosshair"></div>
@@ -59,17 +58,25 @@
   <div id="panelWrap" class="panel-wrap" aria-hidden="true">
     <div id="panelBackdrop" class="panel-backdrop"></div>
     <div id="panel" class="panel" role="dialog" aria-modal="true">
-      <h4>Притяжение</h4>
-      <div class="row"><label>Сила магнита (px)</label><input id="snapTol" type="range" min="4" max="30" value="12"><span id="snapTolVal" class="val">12</span></div>
-      <div class="row"><label>Прилипание к концам (px)</label><input id="endStick" type="range" min="10" max="60" value="28"><span id="endStickVal" class="val">28</span></div>
+      <h4>Привязки</h4>
+      <div class="row"><label>Магнит к линии (px, на экране)</label><input id="snapTolPx" type="range" min="4" max="30" value="10"><span id="snapTolPxVal" class="val">10</span></div>
+      <div class="row"><label>Стык к концам (px, на экране)</label><input id="endStickPx" type="range" min="10" max="60" value="24"><span id="endStickPxVal" class="val">24</span></div>
+
+      <h4>Автовыравнивание (опция)</h4>
+      <div class="row switch"><input id="axisSnapOn" type="checkbox"><label for="axisSnapOn">К 0° / 90° / 30° / 150°</label></div>
+      <div class="row"><label>Допуск выравнивания (±°)</label><input id="axisTolDeg" type="range" min="3" max="20" value="8"><span id="axisTolDegVal" class="val">8</span></div>
+
+      <h4>Вид линии</h4>
+      <div class="row"><label>Толщина линии (px, на экране)</label><input id="linePx" type="range" min="2" max="24" value="10"><span id="linePxVal" class="val">10</span></div>
       <div class="row switch"><input id="showDots" type="checkbox"><label for="showDots">Показывать точки</label></div>
+
       <div class="row"><button id="btnDone" class="btn" style="width:100%;background:linear-gradient(180deg,#16a34a,#15803d)">Готово</button></div>
     </div>
   </div>
 
 <script>
 (function(){
-  // ====== базовые ======
+  // ===== базовые =====
   const DPR = Math.max(1, window.devicePixelRatio||1);
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d', {alpha:false});
@@ -77,234 +84,221 @@
   const toast = (t,ms=1200)=>{ const el=$('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms); };
 
   // состояние
-  let mode='hand';             // hand | line
+  let mode='hand';                 // hand | line
   const segs=[];
   let firstPt=null, previewPt=null;
-  const snap = { tol:12, endStick:28 };
-  let showDots=false;
 
-  // фон-фото и камера
-  let img=null, iw=0, ih=0;    // изображение в "мировых" пикселях
-  const view = { scale:1, tx:0, ty:0 }; // трансформ экрана -> мира
+  // параметры (всегда в ЭКРАННЫХ px; конвертируем в мир через scale)
+  const p = {
+    snapTolPx: 10,    // прилипание к сегменту
+    endStickPx: 24,   // стык к концам
+    axisSnapOn: false,
+    axisTolDeg: 8,
+    linePx: 10,       // толщина линии на экране
+    showDots: false,
+  };
 
-  // курсор-прицел
-  const cross = $('cross');
-  const showCross = (sx,sy)=>{cross.style.display='block';cross.style.left=sx+'px';cross.style.top=sy+'px'};
-  const hideCross = ()=>{cross.style.display='none'};
+  // фото + вид
+  let img=null, iw=0, ih=0;
+  const view={ scale:1, tx:0, ty:0 };
 
-  // утилиты координат
-  function fit(){
-    cv.width = Math.round(innerWidth*DPR);
-    cv.height= Math.round(innerHeight*DPR);
-    redraw();
-  }
+  // прицел
+  const cross=$('cross');
+  const showCross=(sx,sy)=>{cross.style.display='block';cross.style.left=sx+'px';cross.style.top=sy+'px'};
+  const hideCross=()=>{cross.style.display='none'};
+
+  function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
   addEventListener('resize', fit);
 
-  const scr2world = (sx,sy)=>({ x:(sx - view.tx)/view.scale, y:(sy - view.ty)/view.scale });
-  const world2scr  = (x,y)=>({ x: x*view.scale + view.tx, y: y*view.scale + view.ty });
+  const scr2world=(sx,sy)=>({ x:(sx - view.tx)/view.scale, y:(sy - view.ty)/view.scale });
+  const world2scr=(x,y)=>({ x:x*view.scale+view.tx, y:y*view.scale+view.ty });
 
-  // ====== рисование ======
-  function redraw(){
+  // ===== отрисовка =====
+  function draw(){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+    if(img){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(img,0,0,iw,ih); }
 
-    // фон
-    if(img){
-      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-      ctx.drawImage(img,0,0,iw,ih);
-    }else{
-      ctx.setTransform(1,0,0,1,0,0);
-    }
-
-    // мир
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-
-    // линии
     ctx.lineCap='round'; ctx.lineJoin='round';
+
+    const lwOuter = (p.linePx+2)/view.scale;
+    const lwMain  = (p.linePx)/view.scale;
+
     for(const s of segs){
-      ctx.strokeStyle='#5b00bf'; ctx.globalAlpha=.7; ctx.lineWidth=(8/DPR)/view.scale;
+      ctx.strokeStyle='#5b00bf'; ctx.globalAlpha=.7; ctx.lineWidth=lwOuter;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
 
-      ctx.strokeStyle='#7b2cff'; ctx.globalAlpha=1; ctx.lineWidth=(6/DPR)/view.scale;
+      ctx.strokeStyle='#7b2cff'; ctx.globalAlpha=1; ctx.lineWidth=lwMain;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
 
-    // первая точка
     if(firstPt){
-      ctx.beginPath(); ctx.fillStyle='#ff3b30'; ctx.arc(firstPt.x,firstPt.y,(7/DPR)/view.scale,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.fillStyle='#ff3b30'; ctx.arc(firstPt.x,firstPt.y, (p.linePx*0.7)/view.scale,0,Math.PI*2); ctx.fill();
     }
-
-    // превью
     if(firstPt && previewPt){
-      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=(5/DPR)/view.scale;
+      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=(Math.max(3,p.linePx-2))/view.scale;
       ctx.beginPath(); ctx.moveTo(firstPt.x,firstPt.y); ctx.lineTo(previewPt.x,previewPt.y); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.beginPath(); ctx.fillStyle='#16a34a'; ctx.arc(previewPt.x,previewPt.y,(6/DPR)/view.scale,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.fillStyle='#16a34a'; ctx.arc(previewPt.x,previewPt.y,(p.linePx*0.6)/view.scale,0,Math.PI*2); ctx.fill();
     }
 
-    // узлы (по желанию)
-    if(showDots){
-      const r=(5/DPR)/view.scale;
-      const dot=p=>{ctx.beginPath();ctx.fillStyle='rgba(123,44,255,.35)';ctx.arc(p.x,p.y,r*1.4,0,Math.PI*2);ctx.fill();
-                    ctx.beginPath();ctx.fillStyle='#7b2cff';ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();}
+    if(p.showDots){
+      const r=(p.linePx*0.5)/view.scale;
+      const dot=q=>{ctx.beginPath();ctx.fillStyle='rgba(123,44,255,.35)';ctx.arc(q.x,q.y,r*1.4,0,Math.PI*2);ctx.fill();
+                    ctx.beginPath();ctx.fillStyle='#7b2cff';ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill();};
       for(const s of segs){dot(s.a); dot(s.b);}
     }
 
     ctx.setTransform(1,0,0,1,0,0);
   }
-  let raf=0, dirty=false; function need(){dirty=true; if(!raf){raf=requestAnimationFrame(()=>{raf=0; if(dirty){dirty=false; redraw();}})}}
+  let raf=0,dirty=false; const need=()=>{dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}};
 
-  // ====== snapping: только сегмент и концы ======
-  function snapToEnds(p){
-    let best=null, bd=Infinity;
+  // ===== snapping: в «мировых» → пороги из экранных
+  const degNorm=a=>((a%360)+360)%360;
+  const degDiff=(a,b)=>{let d=Math.abs(a-b)%360;return d>180?360-d:d;};
+  const ISO=[0,90,30,150,210,330,180,-90];
+
+  function endsSnap(raw){ // стык к концам
+    const tol = p.endStickPx / view.scale;
+    let best=null,bd=Infinity;
     for(const s of segs){
-      for(const n of [s.a, s.b]){
-        const d=Math.hypot(n.x-p.x, n.y-p.y);
-        if(d < bd && d <= snap.endStick){ bd=d; best=n; }
+      for(const n of [s.a,s.b]){
+        const d=Math.hypot(n.x-raw.x,n.y-raw.y);
+        if(d<bd && d<=tol){ bd=d; best=n; }
       }
     }
-    return best ? {x:best.x, y:best.y, _lock:'end'} : p;
+    return best?{x:best.x,y:best.y,_lock:'end'}:raw;
   }
-  function snapToSegment(p){
-    if(!segs.length) return p;
-    let best=null, bd=Infinity;
+  function segSnap(raw){  // к самому сегменту (без продления)
+    const tol = p.snapTolPx / view.scale;
+    let best=null,bd=Infinity;
     for(const s of segs){
-      const A=s.a, B=s.b;
-      const vx=B.x-A.x, vy=B.y-A.y, L=Math.hypot(vx,vy); if(L<1) continue;
-      const nx=vx/L, ny=vy/L;
-      const wx=p.x-A.x, wy=p.y-A.y;
-      let proj=wx*nx+wy*ny; proj=Math.max(0, Math.min(L, proj)); // строго внутри
+      const A=s.a,B=s.b; const vx=B.x-A.x,vy=B.y-A.y, L=Math.hypot(vx,vy); if(L<1) continue;
+      const nx=vx/L, ny=vy/L; const wx=raw.x-A.x, wy=raw.y-A.y;
+      let proj=wx*nx+wy*ny; proj=Math.max(0,Math.min(L,proj));
       const px=A.x+nx*proj, py=A.y+ny*proj;
-      const d=Math.hypot(p.x-px, p.y-py);
-      if(d < bd && d <= snap.tol){ bd=d; best={x:px,y:py}; }
+      const d=Math.hypot(raw.x-px, raw.y-py);
+      if(d<bd && d<=tol){bd=d; best={x:px,y:py};}
     }
-    return best ? {...best, _lock:'seg'} : p;
+    return best?{...best,_lock:'seg'}:raw;
   }
-  function previewSnap(raw){
-    const end = snapToEnds(raw);
-    if(end._lock) return end;
-    return snapToSegment(raw);
+  function axisSnap(start,raw){ // опционально к осям
+    if(!p.axisSnapOn || !start) return raw;
+    const vx=raw.x-start.x, vy=raw.y-start.y, L=Math.hypot(vx,vy); if(L===0) return raw;
+    const ang=degNorm(Math.atan2(vy,vx)*180/Math.PI);
+    let bestA=null,bd=Infinity;
+    for(const t of ISO){ const d=degDiff(ang,degNorm(t)); if(d<bd){bd=d;bestA=t;} }
+    if(bd<=p.axisTolDeg){
+      const a=bestA*Math.PI/180;
+      return {x:start.x+Math.cos(a)*L, y:start.y+Math.sin(a)*L, _lock:'axis'};
+    }
+    return raw;
   }
-  function finalize(start, rawEnd){
-    // сначала узлы, потом сегмент; в конце ещё раз «жёсткий стык» к ближайшему концу
-    let p = snapToEnds(rawEnd); p = snapToSegment(p);
-    p = snapToEnds(p);
-    return p;
+  function previewSnap(raw,start){
+    let q = endsSnap(raw); if(q._lock) return q;
+    q = segSnap(q);       if(q._lock) return q;
+    return axisSnap(start,q);
+  }
+  function finalize(start,raw){
+    let q = endsSnap(raw); q = segSnap(q); q = endsSnap(q); // жёсткий стык
+    q = axisSnap(start,q);                               // последним — если включено
+    return q;
   }
 
-  // ====== жесты ======
-  const pointers = new Map(); let lastPan=null;
+  // ===== жесты =====
+  const pointers=new Map(); let lastPan=null;
   function getPt(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*DPR, sy:(e.clientY-r.top)*DPR }; }
 
   cv.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    const pt=getPt(e); pointers.set(e.pointerId, pt);
-    if(pointers.size===2) return; // начинаем pinch — не мешаем
-
-    // показать прицел
+    const pt=getPt(e); pointers.set(e.pointerId,pt);
     showCross(pt.sx/DPR, pt.sy/DPR);
 
+    if(pointers.size===2) return; // pinch
+
     if(mode==='line'){
-      const w = scr2world(pt.sx, pt.sy);
-      if(!firstPt){ firstPt = w; previewPt=null; need(); return; }
-      // ставим вторую точку с финальным снапом
-      const final = finalize(firstPt, w);
-      segs.push({a:firstPt, b:final});
-      firstPt=null; previewPt=null; need();
+      const w=scr2world(pt.sx,pt.sy);
+      if(!firstPt){ firstPt=w; previewPt=null; need(); return; }
+      const final=finalize(firstPt,w);
+      segs.push({a:firstPt,b:final}); firstPt=null; previewPt=null; need();
     }
   }, {passive:false});
 
   cv.addEventListener('pointermove', e=>{
     if(!pointers.has(e.pointerId)) return;
-    const pt=getPt(e); pointers.set(e.pointerId, pt);
-
-    // прицел
+    const pt=getPt(e); pointers.set(e.pointerId,pt);
     showCross(pt.sx/DPR, pt.sy/DPR);
 
     if(pointers.size===2){
-      // pinch-zoom
       const [p0,p1]=[...pointers.values()];
-      const d = (p)=>Math.hypot(p.sx, p.sy);
       if(!p0.prev||!p1.prev){ p0.prev={...p0}; p1.prev={...p1}; return; }
       const d0=Math.hypot(p0.prev.sx-p1.prev.sx,p0.prev.sy-p1.prev.sy);
       const d1=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
       if(d0>0){
-        const k=d1/d0;
-        const cx=(p0.sx+p1.sx)/2, cy=(p0.sy+p1.sy)/2;
-        view.tx = cx - k*(cx - view.tx);
-        view.ty = cy - k*(cy - view.ty);
-        view.scale *= k;
-        need();
+        const k=d1/d0; const cx=(p0.sx+p1.sx)/2, cy=(p0.sy+p1.sy)/2;
+        view.tx = cx - k*(cx - view.tx); view.ty = cy - k*(cy - view.ty); view.scale *= k; need();
       }
-      p0.prev={...p0}; p1.prev={...p1};
-      return;
+      p0.prev={...p0}; p1.prev={...p1}; return;
     }
 
     if(mode==='hand'){
-      // панорамирование одним пальцем
       if(!lastPan) lastPan={x:pt.sx,y:pt.sy};
       const dx=pt.sx-lastPan.x, dy=pt.sy-lastPan.y;
-      view.tx += dx; view.ty += dy;
-      lastPan={x:pt.sx,y:pt.sy};
-      need();
+      view.tx+=dx; view.ty+=dy; lastPan={x:pt.sx,y:pt.sy}; need();
     }
 
     if(mode==='line' && firstPt){
-      // превью с привязкой
-      const raw = scr2world(pt.sx, pt.sy);
-      previewPt = previewSnap(raw);
-      need();
+      const raw=scr2world(pt.sx,pt.sy);
+      previewPt=previewSnap(raw,firstPt); need();
     }
   }, {passive:false});
 
   cv.addEventListener('pointerup', e=>{
-    pointers.delete(e.pointerId);
-    lastPan=null;
-    if(pointers.size===0) hideCross();
+    pointers.delete(e.pointerId); lastPan=null; if(pointers.size===0) hideCross();
   });
-
   cv.addEventListener('pointercancel', e=>{
-    pointers.delete(e.pointerId);
-    lastPan=null; if(pointers.size===0) hideCross();
+    pointers.delete(e.pointerId); lastPan=null; if(pointers.size===0) hideCross();
   });
 
-  // ====== кнопки ======
-  function setActive(id){ ['btnHand','btnLine'].forEach(b=>$(b).classList.toggle('active', b===id)); }
-  $('btnHand').onclick=()=>{ mode='hand'; firstPt=null; previewPt=null; setActive('btnHand'); toast('Рука: панорамирование, два пальца — масштаб'); };
-  $('btnLine').onclick=()=>{ mode='line'; firstPt=null; previewPt=null; setActive('btnLine'); toast('Линия: поставь 2 точки'); };
-  $('btnUndo').onclick=()=>{ if(firstPt){firstPt=null; previewPt=null;} else segs.pop(); need(); };
+  // ===== кнопки =====
+  function setActive(id){['btnHand','btnLine'].forEach(b=>$(b).classList.toggle('active', b===id));}
+  $('btnHand').onclick=()=>{mode='hand';firstPt=null;previewPt=null;setActive('btnHand');toast('Рука: панорамирование; два пальца — масштаб');};
+  $('btnLine').onclick=()=>{mode='line';firstPt=null;previewPt=null;setActive('btnLine');toast('Линия: поставь 2 точки');};
+  $('btnUndo').onclick=()=>{ if(firstPt){firstPt=null;previewPt=null;} else segs.pop(); need(); };
   $('btnClearImage').onclick=()=>{ img=null; iw=ih=0; need(); };
 
   // фото
   $('pickImage').onchange = e=>{
-    const file=e.target.files?.[0]; if(!file) return;
+    const f=e.target.files?.[0]; if(!f) return;
     const loader=new Image(); loader.onload=()=>{
-      // делаем bitmap того же размера — в "мировых" пикселях фото
       const c=document.createElement('canvas'); c.width=loader.naturalWidth; c.height=loader.naturalHeight;
       c.getContext('2d',{alpha:false}).drawImage(loader,0,0);
       img=c; iw=c.width; ih=c.height;
-      // фитом по экрану
       const k=Math.min(cv.width/iw, cv.height/ih);
-      view.scale=k; view.tx=(cv.width - iw*k)/2; view.ty=(cv.height - ih*k)/2;
+      view.scale=k; view.tx=(cv.width-iw*k)/2; view.ty=(cv.height-ih*k)/2;
       need();
     };
-    loader.src=URL.createObjectURL(file);
+    loader.src=URL.createObjectURL(f);
   };
 
   // настройки
-  const wrap=$('panelWrap'), panel=$('panel'), back=$('panelBackdrop');
-  const openPanel=()=>{wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false');};
-  const closePanel=()=>{wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true');};
+  const wrap=$('panelWrap'),panel=$('panel'),back=$('panelBackdrop');
+  const openPanel=()=>{wrap.classList.add('open');wrap.setAttribute('aria-hidden','false');};
+  const closePanel=()=>{wrap.classList.remove('open');wrap.setAttribute('aria-hidden','true');};
   $('btnSettings').onclick=openPanel; $('btnDone').onclick=closePanel; back.onclick=closePanel;
 
-  $('snapTol').oninput = e=>{ snap.tol=+e.target.value; $('snapTolVal').textContent=e.target.value; };
-  $('endStick').oninput = e=>{ snap.endStick=+e.target.value; $('endStickVal').textContent=e.target.value; };
-  $('showDots').onchange= e=>{ showDots=!!e.target.checked; need(); };
+  $('snapTolPx').oninput=e=>{p.snapTolPx=+e.target.value; $('snapTolPxVal').textContent=e.target.value;};
+  $('endStickPx').oninput=e=>{p.endStickPx=+e.target.value; $('endStickPxVal').textContent=e.target.value;};
+  $('axisSnapOn').onchange=e=>{p.axisSnapOn=!!e.target.checked;};
+  $('axisTolDeg').oninput=e=>{p.axisTolDeg=+e.target.value; $('axisTolDegVal').textContent=e.target.value;};
+  $('linePx').oninput=e=>{p.linePx=+e.target.value; $('linePxVal').textContent=e.target.value; need();};
+  $('showDots').onchange=e=>{p.showDots=!!e.target.checked; need();};
 
   // старт
   fit();
   setActive('btnHand');
-  toast('🖐 Рука: панорамируй; 📐 Линия: ставь 2 точки. Два пальца — масштаб.');
+  toast('Толщина линии и «магнит» регулируются в ⚙ настройках. Открой с ?v=600 для обновления кэша.');
 })();
 </script>
 </body>
