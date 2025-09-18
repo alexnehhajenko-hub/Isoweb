@@ -2,7 +2,7 @@
 html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;touch-action:none}
 canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
-/* ВЕРХНЯЯ ПАНЕЛЬ */
+/* Верхняя панель со скроллом */
 .bar{position:fixed;left:0;right:56px;top:0;z-index:1000;padding:8px 8px 0 8px}
 .bar-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
 .bar-scroll::-webkit-scrollbar{display:none}
@@ -31,10 +31,8 @@ canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;
 
 .file-btn{position:relative;display:block;padding:12px;border-radius:10px;background:#fff;cursor:pointer;border:1px dashed #d6d3ee}
 .file-btn:hover{background:#f6f4ff}
-/* iOS: input НЕ должен быть display:none — кладём его поверх как прозрачный */
-.file-btn input{
-  position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%
-}
+/* важный хак для iOS: не скрывать input, а сделать его прозрачным поверх */
+.file-btn input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
 
 .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid #e7e3f7;background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
 
