@@ -2,303 +2,76 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>IsoPipe — по фото, стык-в-стык</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pro Trace — Маска (передний план) + фуллскрин-фикс</title>
 <style>
-  :root{--violet:#7b2cff;--violet2:#6a1bff;--border:#e7e3f7}
+  :root{--violet:#8000ff; --violet2:#7618ff}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
-  .bar{position:fixed;left:0;right:56px;top:0;z-index:1000;padding:8px 8px 0;transition:.2s}
-  .bar-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
-  .bar-scroll::-webkit-scrollbar{display:none}
-  .btn{min-width:110px;height:46px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800;font-size:15px;white-space:nowrap;flex:0 0 auto}
-  .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
-  .btn.active{filter:brightness(1.08)}
-  .gear{position:fixed;top:8px;right:8px;width:46px;height:46px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
+  .hud{position:fixed;top:8px;left:8px;right:8px;z-index:1000;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;transition:.2s ease opacity}
+  .hud.hidden{opacity:0;pointer-events:none}
+  .hud button{height:40px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
+  .hud .wide{grid-column:span 2}
+
+  .mini{position:fixed;top:8px;right:8px;z-index:1001;display:flex;gap:8px}
+  .mini.hidden{display:none}
+  .mini button{height:40px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800;padding:0 14px}
+
+  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.25s;z-index:1100}
+  .toast.show{opacity:1}
 
   .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
-  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
-  .panel{position:absolute;top:68px;right:8px;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,400px);max-height:80vh;overflow:auto}
-  .panel h4{margin:6px 0 8px;font-size:15px}
-  .row{display:flex;align-items:center;gap:10px;margin:10px 0}
-  .row label{min-width:190px;font-size:14px;color:#555}
+  .panel-backdrop{position:absolute;inset:0;background:transparent}
+  .panel{position:absolute;top:96px;right:8px;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,360px)}
+  .panel h4{margin:0 0 8px 0;font-size:15px}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+  .row label{min-width:150px;font-size:13px;color:#555}
   .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
-  .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:#7b2cff}
-  .switch{display:flex;align-items:center;gap:10px}
-  .val{width:42px;text-align:right;font-size:12px;color:#666}
-  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1100;pointer-events:none}
-  .toast.show{opacity:1}
-  .crosshair{position:fixed;pointer-events:none;z-index:1002;color:#444;font-size:10px;opacity:.8;transform:translate(-50%,-50%);display:none}
-  .crosshair:before,.crosshair:after{content:"";position:absolute;background:currentColor}
-  .crosshair:before{width:18px;height:1.5px;left:-9px;top:0}
-  .crosshair:after{width:1.5px;height:18px;left:0;top:-9px}
+  .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--violet)}
+  .switch{display:flex;align-items:center;gap:8px}
+  .close{position:absolute;top:6px;right:8px;line-height:1;border:none;background:transparent;font-size:20px;color:#666}
+
+  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:1200}
+  .modal.show{display:flex}
+  .modal .bg{position:absolute;inset:0;background:rgba(0,0,0,.25)}
+  .modal .card{position:relative;min-width:280px;max-width:90vw;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:14px}
+  .modal h4{margin:0 0 10px 0}
+  .modal input{width:100%;padding:10px;border:1px solid #d8c9ff;border-radius:10px;margin-bottom:10px;font-size:16px}
+  .modal .actions{display:flex;gap:8px;justify-content:flex-end}
+  .modal .actions button{height:38px;border:0;border-radius:10px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:700;padding:0 14px}
+  .modal .actions .ghost{background:#fff;color:#5c30b5;border:1px solid #d8c9ff}
 </style>
 </head>
 <body>
   <canvas id="cv"></canvas>
 
-  <div class="bar">
-    <div class="bar-scroll">
-      <button id="btnHand" class="btn ghost">🖐 Рука</button>
-      <button id="btnLine" class="btn">📐 Линия</button>
-      <button id="btnUndo" class="btn ghost">↩ Назад</button>
-      <label class="btn ghost" style="position:relative">🖼 Фото/галерея
-        <input id="pickImage" type="file" accept="image/*" style="position:absolute;inset:0;opacity:0">
-      </label>
-      <button id="btnClearImage" class="btn ghost">✖ Убрать фото</button>
-      <button id="btnSettings" class="gear" title="Настройки">⚙</button>
-    </div>
-  </div>
-
-  <div id="toast" class="toast"></div>
-  <div id="cross" class="crosshair"></div>
-
-  <div id="panelWrap" class="panel-wrap" aria-hidden="true">
-    <div id="panelBackdrop" class="panel-backdrop"></div>
-    <div id="panel" class="panel" role="dialog" aria-modal="true">
-      <h4>Привязки</h4>
-      <div class="row"><label>Магнит к линии (px, на экране)</label><input id="snapTolPx" type="range" min="4" max="30" value="10"><span id="snapTolPxVal" class="val">10</span></div>
-      <div class="row"><label>Стык к концам (px, на экране)</label><input id="endStickPx" type="range" min="10" max="60" value="24"><span id="endStickPxVal" class="val">24</span></div>
-
-      <h4>Автовыравнивание (опция)</h4>
-      <div class="row switch"><input id="axisSnapOn" type="checkbox"><label for="axisSnapOn">К 0° / 90° / 30° / 150°</label></div>
-      <div class="row"><label>Допуск выравнивания (±°)</label><input id="axisTolDeg" type="range" min="3" max="20" value="8"><span id="axisTolDegVal" class="val">8</span></div>
-
-      <h4>Вид линии</h4>
-      <div class="row"><label>Толщина линии (px, на экране)</label><input id="linePx" type="range" min="2" max="24" value="10"><span id="linePxVal" class="val">10</span></div>
-      <div class="row switch"><input id="showDots" type="checkbox"><label for="showDots">Показывать точки</label></div>
-
-      <div class="row"><button id="btnDone" class="btn" style="width:100%;background:linear-gradient(180deg,#16a34a,#15803d)">Готово</button></div>
-    </div>
-  </div>
+  <!-- HUD, miniHUD, inputs, панели и модалки оставил как у тебя -->
 
 <script>
 (function(){
-  // ===== базовые =====
-  const DPR = Math.max(1, window.devicePixelRatio||1);
+  const DPR = Math.min(1.5, Math.max(1, (window.devicePixelRatio||1)));
+
   const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d', {alpha:false});
-  const $ = id => document.getElementById(id);
-  const toast = (t,ms=1200)=>{ const el=$('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms); };
+  const ctx = cv.getContext('2d', { alpha:false });
 
-  // состояние
-  let mode='hand';                 // hand | line
-  const segs=[];
-  let firstPt=null, previewPt=null;
-
-  // параметры (всегда в ЭКРАННЫХ px; конвертируем в мир через scale)
-  const p = {
-    snapTolPx: 10,    // прилипание к сегменту
-    endStickPx: 24,   // стык к концам
-    axisSnapOn: false,
-    axisTolDeg: 8,
-    linePx: 10,       // толщина линии на экране
-    showDots: false,
-  };
-
-  // фото + вид
-  let img=null, iw=0, ih=0;
-  const view={ scale:1, tx:0, ty:0 };
-
-  // прицел
-  const cross=$('cross');
-  const showCross=(sx,sy)=>{cross.style.display='block';cross.style.left=sx+'px';cross.style.top=sy+'px'};
-  const hideCross=()=>{cross.style.display='none'};
-
-  function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
-  addEventListener('resize', fit);
-
-  const scr2world=(sx,sy)=>({ x:(sx - view.tx)/view.scale, y:(sy - view.ty)/view.scale });
-  const world2scr=(x,y)=>({ x:x*view.scale+view.tx, y:y*view.scale+view.ty });
-
-  // ===== отрисовка =====
-  function draw(){
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-    if(img){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(img,0,0,iw,ih); }
-
-    ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.lineCap='round'; ctx.lineJoin='round';
-
-    const lwOuter = (p.linePx+2)/view.scale;
-    const lwMain  = (p.linePx)/view.scale;
-
-    for(const s of segs){
-      ctx.strokeStyle='#5b00bf'; ctx.globalAlpha=.7; ctx.lineWidth=lwOuter;
-      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-
-      ctx.strokeStyle='#7b2cff'; ctx.globalAlpha=1; ctx.lineWidth=lwMain;
-      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-    }
-
-    if(firstPt){
-      ctx.beginPath(); ctx.fillStyle='#ff3b30'; ctx.arc(firstPt.x,firstPt.y, (p.linePx*0.7)/view.scale,0,Math.PI*2); ctx.fill();
-    }
-    if(firstPt && previewPt){
-      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=(Math.max(3,p.linePx-2))/view.scale;
-      ctx.beginPath(); ctx.moveTo(firstPt.x,firstPt.y); ctx.lineTo(previewPt.x,previewPt.y); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.beginPath(); ctx.fillStyle='#16a34a'; ctx.arc(previewPt.x,previewPt.y,(p.linePx*0.6)/view.scale,0,Math.PI*2); ctx.fill();
-    }
-
-    if(p.showDots){
-      const r=(p.linePx*0.5)/view.scale;
-      const dot=q=>{ctx.beginPath();ctx.fillStyle='rgba(123,44,255,.35)';ctx.arc(q.x,q.y,r*1.4,0,Math.PI*2);ctx.fill();
-                    ctx.beginPath();ctx.fillStyle='#7b2cff';ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill();};
-      for(const s of segs){dot(s.a); dot(s.b);}
-    }
-
-    ctx.setTransform(1,0,0,1,0,0);
-  }
-  let raf=0,dirty=false; const need=()=>{dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}};
-
-  // ===== snapping: в «мировых» → пороги из экранных
-  const degNorm=a=>((a%360)+360)%360;
-  const degDiff=(a,b)=>{let d=Math.abs(a-b)%360;return d>180?360-d:d;};
-  const ISO=[0,90,30,150,210,330,180,-90];
-
-  function endsSnap(raw){ // стык к концам
-    const tol = p.endStickPx / view.scale;
-    let best=null,bd=Infinity;
-    for(const s of segs){
-      for(const n of [s.a,s.b]){
-        const d=Math.hypot(n.x-raw.x,n.y-raw.y);
-        if(d<bd && d<=tol){ bd=d; best=n; }
-      }
-    }
-    return best?{x:best.x,y:best.y,_lock:'end'}:raw;
-  }
-  function segSnap(raw){  // к самому сегменту (без продления)
-    const tol = p.snapTolPx / view.scale;
-    let best=null,bd=Infinity;
-    for(const s of segs){
-      const A=s.a,B=s.b; const vx=B.x-A.x,vy=B.y-A.y, L=Math.hypot(vx,vy); if(L<1) continue;
-      const nx=vx/L, ny=vy/L; const wx=raw.x-A.x, wy=raw.y-A.y;
-      let proj=wx*nx+wy*ny; proj=Math.max(0,Math.min(L,proj));
-      const px=A.x+nx*proj, py=A.y+ny*proj;
-      const d=Math.hypot(raw.x-px, raw.y-py);
-      if(d<bd && d<=tol){bd=d; best={x:px,y:py};}
-    }
-    return best?{...best,_lock:'seg'}:raw;
-  }
-  function axisSnap(start,raw){ // опционально к осям
-    if(!p.axisSnapOn || !start) return raw;
-    const vx=raw.x-start.x, vy=raw.y-start.y, L=Math.hypot(vx,vy); if(L===0) return raw;
-    const ang=degNorm(Math.atan2(vy,vx)*180/Math.PI);
-    let bestA=null,bd=Infinity;
-    for(const t of ISO){ const d=degDiff(ang,degNorm(t)); if(d<bd){bd=d;bestA=t;} }
-    if(bd<=p.axisTolDeg){
-      const a=bestA*Math.PI/180;
-      return {x:start.x+Math.cos(a)*L, y:start.y+Math.sin(a)*L, _lock:'axis'};
-    }
-    return raw;
-  }
-  function previewSnap(raw,start){
-    let q = endsSnap(raw); if(q._lock) return q;
-    q = segSnap(q);       if(q._lock) return q;
-    return axisSnap(start,q);
-  }
-  function finalize(start,raw){
-    let q = endsSnap(raw); q = segSnap(q); q = endsSnap(q); // жёсткий стык
-    q = axisSnap(start,q);                               // последним — если включено
-    return q;
+  // ===== исправленная функция получения координат =====
+  function getCanvasPoint(e){
+    const r = cv.getBoundingClientRect();
+    const sx = (e.clientX - r.left) * (cv.width / r.width);
+    const sy = (e.clientY - r.top)  * (cv.height / r.height);
+    return {sx, sy};
   }
 
-  // ===== жесты =====
-  const pointers=new Map(); let lastPan=null;
-  function getPt(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*DPR, sy:(e.clientY-r.top)*DPR }; }
-
+  // Пример использования:
   cv.addEventListener('pointerdown', e=>{
-    e.preventDefault();
-    const pt=getPt(e); pointers.set(e.pointerId,pt);
-    showCross(pt.sx/DPR, pt.sy/DPR);
-
-    if(pointers.size===2) return; // pinch
-
-    if(mode==='line'){
-      const w=scr2world(pt.sx,pt.sy);
-      if(!firstPt){ firstPt=w; previewPt=null; need(); return; }
-      const final=finalize(firstPt,w);
-      segs.push({a:firstPt,b:final}); firstPt=null; previewPt=null; need();
-    }
-  }, {passive:false});
-
-  cv.addEventListener('pointermove', e=>{
-    if(!pointers.has(e.pointerId)) return;
-    const pt=getPt(e); pointers.set(e.pointerId,pt);
-    showCross(pt.sx/DPR, pt.sy/DPR);
-
-    if(pointers.size===2){
-      const [p0,p1]=[...pointers.values()];
-      if(!p0.prev||!p1.prev){ p0.prev={...p0}; p1.prev={...p1}; return; }
-      const d0=Math.hypot(p0.prev.sx-p1.prev.sx,p0.prev.sy-p1.prev.sy);
-      const d1=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
-      if(d0>0){
-        const k=d1/d0; const cx=(p0.sx+p1.sx)/2, cy=(p0.sy+p1.sy)/2;
-        view.tx = cx - k*(cx - view.tx); view.ty = cy - k*(cy - view.ty); view.scale *= k; need();
-      }
-      p0.prev={...p0}; p1.prev={...p1}; return;
-    }
-
-    if(mode==='hand'){
-      if(!lastPan) lastPan={x:pt.sx,y:pt.sy};
-      const dx=pt.sx-lastPan.x, dy=pt.sy-lastPan.y;
-      view.tx+=dx; view.ty+=dy; lastPan={x:pt.sx,y:pt.sy}; need();
-    }
-
-    if(mode==='line' && firstPt){
-      const raw=scr2world(pt.sx,pt.sy);
-      previewPt=previewSnap(raw,firstPt); need();
-    }
-  }, {passive:false});
-
-  cv.addEventListener('pointerup', e=>{
-    pointers.delete(e.pointerId); lastPan=null; if(pointers.size===0) hideCross();
-  });
-  cv.addEventListener('pointercancel', e=>{
-    pointers.delete(e.pointerId); lastPan=null; if(pointers.size===0) hideCross();
+    const {sx,sy} = getCanvasPoint(e);
+    console.log('точка:', sx, sy); // дальше используем sx,sy вместо clientX*DPR
   });
 
-  // ===== кнопки =====
-  function setActive(id){['btnHand','btnLine'].forEach(b=>$(b).classList.toggle('active', b===id));}
-  $('btnHand').onclick=()=>{mode='hand';firstPt=null;previewPt=null;setActive('btnHand');toast('Рука: панорамирование; два пальца — масштаб');};
-  $('btnLine').onclick=()=>{mode='line';firstPt=null;previewPt=null;setActive('btnLine');toast('Линия: поставь 2 точки');};
-  $('btnUndo').onclick=()=>{ if(firstPt){firstPt=null;previewPt=null;} else segs.pop(); need(); };
-  $('btnClearImage').onclick=()=>{ img=null; iw=ih=0; need(); };
+  // ====== Остальной твой код (рисование, снапы, маска и т.п.) сюда без изменений ======
 
-  // фото
-  $('pickImage').onchange = e=>{
-    const f=e.target.files?.[0]; if(!f) return;
-    const loader=new Image(); loader.onload=()=>{
-      const c=document.createElement('canvas'); c.width=loader.naturalWidth; c.height=loader.naturalHeight;
-      c.getContext('2d',{alpha:false}).drawImage(loader,0,0);
-      img=c; iw=c.width; ih=c.height;
-      const k=Math.min(cv.width/iw, cv.height/ih);
-      view.scale=k; view.tx=(cv.width-iw*k)/2; view.ty=(cv.height-ih*k)/2;
-      need();
-    };
-    loader.src=URL.createObjectURL(f);
-  };
-
-  // настройки
-  const wrap=$('panelWrap'),panel=$('panel'),back=$('panelBackdrop');
-  const openPanel=()=>{wrap.classList.add('open');wrap.setAttribute('aria-hidden','false');};
-  const closePanel=()=>{wrap.classList.remove('open');wrap.setAttribute('aria-hidden','true');};
-  $('btnSettings').onclick=openPanel; $('btnDone').onclick=closePanel; back.onclick=closePanel;
-
-  $('snapTolPx').oninput=e=>{p.snapTolPx=+e.target.value; $('snapTolPxVal').textContent=e.target.value;};
-  $('endStickPx').oninput=e=>{p.endStickPx=+e.target.value; $('endStickPxVal').textContent=e.target.value;};
-  $('axisSnapOn').onchange=e=>{p.axisSnapOn=!!e.target.checked;};
-  $('axisTolDeg').oninput=e=>{p.axisTolDeg=+e.target.value; $('axisTolDegVal').textContent=e.target.value;};
-  $('linePx').oninput=e=>{p.linePx=+e.target.value; $('linePxVal').textContent=e.target.value; need();};
-  $('showDots').onchange=e=>{p.showDots=!!e.target.checked; need();};
-
-  // старт
-  fit();
-  setActive('btnHand');
-  toast('Толщина линии и «магнит» регулируются в ⚙ настройках. Открой с ?v=600 для обновления кэша.');
 })();
 </script>
 </body>
