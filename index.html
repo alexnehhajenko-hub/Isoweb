@@ -3,18 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — надёжный pinch (v730)</title>
+<title>Pro Trace — pinch + точки (v735)</title>
 <style>
   :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  /* ВАЖНО: touch-action:none, чтобы iOS/Android не перехватывали жест */
   canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
   .bar{position:fixed;left:8px;right:8px;top:8px;z-index:1000;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:42px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
 
-  /* Поповер толщины */
   .pop{position:fixed;top:56px;right:8px;z-index:1001;background:#fff;border:1px solid var(--border);
        border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:10px;display:none;width:min(92vw,360px)}
   .pop.show{display:block}
@@ -45,22 +43,20 @@
     <button id="btnThickness" class="btn ghost">⚙ Толщина</button>
   </div>
 
-  <!-- Поповер толщины -->
   <div id="thPop" class="pop" role="dialog" aria-modal="true" aria-label="Толщина линии">
     <div class="row">
       <label>Толщина линии (px)</label>
       <input id="linePx" type="range" min="2" max="24" value="10">
       <span id="linePxVal" class="val">10</span>
     </div>
-    <p style="margin:8px 0 0;font-size:12px;color:#666">И зум, и пан — <b>двумя пальцами</b>.</p>
+    <p style="margin:8px 0 0;font-size:12px;color:#666">И зум, и пан — <b>двумя пальцами</b>. Одним — ставишь точки.</p>
   </div>
 
   <div id="toast" class="toast"></div>
 
 <script>
 (()=>{
-  // ---------- утилиты ----------
-  const toast=(t,ms=1600)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
+  const toast=(t,ms=1500)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
   window.addEventListener('error',ev=>{console.error(ev.error||ev.message);toast('Ошибка: '+(ev?.message||'unknown'));});
   window.addEventListener('unhandledrejection',ev=>{console.error(ev.reason);toast('Ошибка: '+(ev?.reason?.message||'promise'));});
 
@@ -68,7 +64,6 @@
   const cv=document.getElementById('cv');
   const ctx=cv.getContext('2d',{alpha:false});
 
-  // правильные координаты относительно канваса (для мыши и тача)
   function getCanvasPointXY(clientX, clientY){
     const r=cv.getBoundingClientRect();
     return {
@@ -77,10 +72,10 @@
     };
   }
 
-  // ---------- сцена ----------
   const view={scale:1,tx:0,ty:0};
   let bg=null,bw=0,bh=0;
-  const segs=[]; let mode='hand'; let first=null, prev=null;
+  const segs=[]; let mode='hand';
+  let first=null, prev=null; // первая точка и превью второй
   const params={ linePx:10 };
 
   function fit(){
@@ -100,14 +95,11 @@
   function draw(){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-
-    if(bg){
-      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-      ctx.drawImage(bg,0,0,bw,bh);
-    }
+    if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
 
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
 
+    // сегменты
     for(const s of segs){
       ctx.strokeStyle='#5b00bf'; ctx.globalAlpha=.7; ctx.lineWidth=(params.linePx+2)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
@@ -115,6 +107,15 @@
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
 
+    // первая точка — явный маркер
+    if(first){
+      const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0);
+      ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#ffffff'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    }
+
+    // превью
     if(first && prev){
       ctx.setLineDash([12/view.scale,8/view.scale]);
       ctx.strokeStyle='#16a34a'; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
@@ -126,34 +127,28 @@
   }
   let raf=0,dirty=false; const need=()=>{dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}};
 
-  // ---------- ЖЕСТЫ ----------
-  // На тач-устройствах используем исключительно Touch Events (максимальная совместимость iOS).
-  // Двумя пальцами — и масштаб, и пан. Одним — только рисуем.
-  let touches=new Map(); // id -> {sx,sy}
+  // ===== ЖЕСТЫ (чистые Touch Events для телефонов) =====
+  let touches=new Map();
   let prevCenter=null, prevDist=null;
+  const touchCount=()=>touches.size;
+  const centroid=()=>{
+    const arr=[...touches.values()]; if(!arr.length) return null;
+    let sx=0,sy=0; for(const t of arr){ sx+=t.sx; sy+=t.sy; } return {sx:sx/arr.length, sy:sy/arr.length};
+  };
+  const distance2=(a,b)=>Math.hypot(a.sx-b.sx, a.sy-b.sy);
 
-  function touchCount(){ return touches.size; }
-  function centroid(){
-    const arr=[...touches.values()]; if(arr.length===0) return null;
-    let sx=0,sy=0; for(const t of arr){ sx+=t.sx; sy+=t.sy; }
-    return {sx:sx/arr.length, sy:sy/arr.length};
-  }
-  function distance2(a,b){ return Math.hypot(a.sx-b.sx, a.sy-b.sy); }
-
-  // важно: все touch* слушатели — {passive:false}
   cv.addEventListener('touchstart', e=>{
     e.preventDefault();
     for(const t of e.changedTouches){
       const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
       touches.set(t.identifier,{sx,sy});
     }
-    // если появилась вторая точка — инициализируем pinch
+    // инициализация pinch
     if(touchCount()===2){
       const arr=[...touches.values()];
-      prevCenter=centroid();
-      prevDist=distance2(arr[0],arr[1]);
+      prevCenter=centroid(); prevDist=distance2(arr[0],arr[1]);
     }
-    // одиночным пальцем ставим первую точку в режиме линии
+    // первый тап в режиме «Линия» — ставим старт
     if(touchCount()===1 && mode==='line' && !first){
       const only=[...touches.values()][0];
       first = s2w(only.sx, only.sy);
@@ -164,7 +159,6 @@
 
   cv.addEventListener('touchmove', e=>{
     e.preventDefault();
-    // обновляем точки
     for(const t of e.changedTouches){
       if(!touches.has(t.identifier)) continue;
       const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
@@ -172,7 +166,6 @@
     }
 
     if(touchCount()===2){
-      // pinch + pan (масштаб вокруг центра + перенос на смещение центра)
       const arr=[...touches.values()];
       const nowCenter=centroid();
       const nowDist=distance2(arr[0],arr[1]);
@@ -182,10 +175,9 @@
         view.tx = prevCenter.sx - k*(prevCenter.sx - view.tx);
         view.ty = prevCenter.sy - k*(prevCenter.sy - view.ty);
         view.scale = Math.max(0.2, Math.min(8, view.scale*k));
-        // перенос на delta центра
-        const dx = nowCenter.sx - prevCenter.sx;
-        const dy = nowCenter.sy - prevCenter.sy;
-        view.tx += dx; view.ty += dy;
+        // перенос на смещение центра
+        view.tx += (nowCenter.sx - prevCenter.sx);
+        view.ty += (nowCenter.sy - prevCenter.sy);
         need();
       }
       prevCenter=nowCenter; prevDist=nowDist;
@@ -195,21 +187,23 @@
     if(touchCount()===1){
       const only=[...touches.values()][0];
       if(mode==='line' && first){
-        prev = s2w(only.sx, only.sy); need();
+        prev = s2w(only.sx, only.sy);
+        need();
       }
-      // режим "рука" только двумя пальцами по твоей просьбе, одним не двигаем
+      // пан одним пальцем отключён по просьбе
     }
   }, {passive:false});
 
   cv.addEventListener('touchend', e=>{
     e.preventDefault();
-    // если завершили одиночный тап в режиме линии — замыкаем сегмент
+    // второй тап в режиме «Линия» — завершает отрезок
     if(e.changedTouches.length===1 && touchCount()===1 && mode==='line' && first){
       const t=e.changedTouches[0];
       const {sx,sy}=getCanvasPointXY(t.clientX,t.clientY);
       const w=s2w(sx,sy);
       segs.push({a:first,b:w});
-      first=null; prev=null; mode='hand';
+      first=null; prev=null;
+      // остаёмся в режиме «Линия», можно сразу ставить следующий
       need();
     }
     for(const t of e.changedTouches){ touches.delete(t.identifier); }
@@ -222,10 +216,9 @@
     if(touchCount()<2){ prevCenter=null; prevDist=null; }
   }, {passive:false});
 
-  // мышь/трекпад: поддержим тоже
-  const hasTouch = 'ontouchstart' in window;
+  // ===== МЫШЬ (desktop) =====
+  const hasTouch='ontouchstart' in window;
   if(!hasTouch){
-    // колесо — зум
     cv.addEventListener('wheel', e=>{
       e.preventDefault();
       const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
@@ -235,33 +228,31 @@
       view.scale = Math.max(0.2, Math.min(8, view.scale*k));
       need();
     }, {passive:false});
-    // мышью рисуем
-    let mouseDown=false;
+
+    let down=false;
     cv.addEventListener('mousedown', e=>{
-      mouseDown=true;
+      down=true;
+      if(mode!=='line') return;
       const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
-      if(mode==='line'){
-        const w=s2w(sx,sy);
-        if(!first){ first=w; prev=null; need(); }
-        else{ segs.push({a:first,b:w}); first=null; prev=null; mode='hand'; need(); }
-      }
+      const w=s2w(sx,sy);
+      if(!first){ first=w; prev=null; need(); }
+      else{ segs.push({a:first,b:w}); first=null; prev=null; need(); }
     });
     cv.addEventListener('mousemove', e=>{
-      if(!mouseDown) return;
+      if(!down||!first||mode!=='line') return;
       const {sx,sy}=getCanvasPointXY(e.clientX,e.clientY);
-      if(mode==='line' && first){ prev=s2w(sx,sy); need(); }
+      prev=s2w(sx,sy); need();
     });
-    addEventListener('mouseup', ()=>{ mouseDown=false; });
+    addEventListener('mouseup', ()=>{ down=false; });
   }
 
-  // ---------- кнопки ----------
+  // ===== КНОПКИ =====
   const $=id=>document.getElementById(id);
-  $('btnLine').onclick=()=>{mode='line';first=null;prev=null;toast('Режим: линия');};
-  $('btnHand').onclick=()=>{mode='hand';first=null;prev=null;toast('Режим: рука (пан/зум — 2 пальца)');};
+  $('btnLine').onclick=()=>{mode='line'; first=null; prev=null; toast('Режим: линия');};
+  $('btnHand').onclick=()=>{mode='hand'; first=null; prev=null; toast('Режим: рука (пан/зум — 2 пальца)');};
   $('btnUndo').onclick=()=>{ if(first){first=null;prev=null;} else segs.pop(); need(); };
   $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
 
-  // фото
   const loadImageFile=f=>{
     if(!f) return;
     const img=new Image(); img.onload=()=>{
@@ -278,7 +269,6 @@
   $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
 
-  // поповер толщины
   const thPop=document.getElementById('thPop');
   const lineRange=document.getElementById('linePx');
   const lineVal=document.getElementById('linePxVal');
@@ -290,7 +280,7 @@
 
   // старт
   fit();
-  toast('Двумя пальцами — и зум, и пан. Одним — ставь точки для линии.');
+  toast('📐 Линия: первый тап — красная точка, второй — завершение. Пан/зум — двумя пальцами.');
 })();
 </script>
 </body>
