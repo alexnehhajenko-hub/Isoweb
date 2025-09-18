@@ -1,5 +1,4 @@
-// Элементы (корпус = 10 мм). Компактные силуэты + РЫЧАГ.
-// Локальные координаты: X вдоль трубы, (0,0) — центр вставки.
+// Элементы (корпус = 10 мм). Компактные силуэты + рычаг.
 (function(){
   const TAU = Math.PI*2;
   const mm = (ppm, n) => n*ppm;
@@ -23,7 +22,6 @@
     ctx.arcTo(x,  y,  x+w,y,   rr);
     ctx.closePath();
   }
-  // Рычаг: top — горизонтальная труба (вид сверху); front — вертикаль (вид «в лицо»)
   function lever(ctx, orientation, ppm){
     ctx.save();
     ctx.lineWidth = Math.max(1, mm(ppm,0.45));
