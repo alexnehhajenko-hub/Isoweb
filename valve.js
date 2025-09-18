@@ -1,5 +1,5 @@
 // Элементы (корпус = 10 мм). Компактные силуэты + РЫЧАГ.
-// Локальные координаты: ось X вдоль трубы; (0,0) — центр вставки.
+// Локальные координаты: X вдоль трубы, (0,0) — центр вставки.
 (function(){
   const TAU = Math.PI*2;
   const mm = (ppm, n) => n*ppm;
@@ -23,7 +23,7 @@
     ctx.arcTo(x,  y,  x+w,y,   rr);
     ctx.closePath();
   }
-  // РЫЧАГ
+  // Рычаг: top — горизонтальная труба (вид сверху); front — вертикаль (вид «в лицо»)
   function lever(ctx, orientation, ppm){
     ctx.save();
     ctx.lineWidth = Math.max(1, mm(ppm,0.45));
@@ -86,7 +86,8 @@
     ctx.save(); ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, mm(ppm,0.45));
     ctx.beginPath(); ctx.rect(-L/2, -H/2, L, H); ctx.stroke();
     ctx.beginPath(); ctx.arc(0,0, mm(ppm,2.3), 0, TAU); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-L/2,0); ctx.lineTo(-mm(ppm,2),0); ctx.moveTo(L/2,0); ctx.lineTo(mm(ppm,2),0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-L/2,0); ctx.lineTo(-mm(ppm,2),0);
+    ctx.moveTo(L/2,0); ctx.lineTo(mm(ppm,2),0); ctx.stroke();
     ctx.restore();
     label(ctx, 'PUMP 10mm', ppm);
   }
