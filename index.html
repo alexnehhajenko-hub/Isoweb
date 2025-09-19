@@ -109,7 +109,7 @@
   function clampView(){ if(!bg) return; const W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; const minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); const minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
   const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
 
-  // ===== draw =====
+  // ===== draw helpers =====
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
@@ -141,32 +141,30 @@
   // ===== components (fixed size) =====
   function drawValve(seg,t){
     const b=compBasis(seg,t);
-    const base = 1.2*params.linePx;      // фиксированная «толщина» детали
-    const len  = base*6.0;               // длина корпуса
-    const h    = base*2.4;               // высота символа
+    const base = 1.2*params.linePx;
+    const len  = base*6.0;
+    const h    = base*2.4;
     const lw   = Math.max(1.1, base*0.9);
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     ctx.strokeStyle='#111'; ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round';
-    // прямоугольный корпус
     const Ax=b.x - b.ux*len/2, Ay=b.y - b.uy*len/2;
     const Bx=b.x + b.ux*len/2, By=b.y + b.uy*len/2;
     const px=b.nx*(h*0.7), py=b.ny*(h*0.7);
     ctx.beginPath(); ctx.moveTo(Ax-px,Ay-py); ctx.lineTo(Bx-px,By-py); ctx.lineTo(Bx+px,By+py); ctx.lineTo(Ax+px,Ay+py); ctx.closePath(); ctx.stroke();
-    // «X» внутри
     ctx.beginPath(); ctx.moveTo(Ax-px,Ay-py); ctx.lineTo(Bx+px,By+py); ctx.moveTo(Ax+px,Ay+py); ctx.lineTo(Bx-px,By-py); ctx.stroke();
     ctx.restore();
 
-    // РУЧКА: горизонтальная при почти горизонтальной трубе, иначе короткая «Т» спереди
     const S = w2s(b.x,b.y);
     const horiz = Math.abs(b.uy) < 0.35;
     ctx.setTransform(1,0,0,1,0,0);
     ctx.strokeStyle='#111';
-    const handlePix = base*1.8*view.scale;
-    const handleTh  = Math.max(1.5, base*0.9*view.scale);
+    const basePix = base*view.scale;
+    const handlePix = 1.8*basePix;
+    const handleTh  = Math.max(1.5, 0.9*basePix);
 
     if(horiz){
-      const lift = base*2.1*view.scale;
+      const lift = 2.1*basePix;
       ctx.lineWidth=handleTh; ctx.lineCap='round';
       ctx.beginPath(); ctx.moveTo(S.x - handlePix*0.7, S.y - lift); ctx.lineTo(S.x + handlePix*0.7, S.y - lift); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(S.x, S.y - lift); ctx.lineTo(S.x, S.y - lift + handlePix*0.35); ctx.stroke();
@@ -192,15 +190,12 @@
     const Lx=b.x - b.ux*seatLen/2, Ly=b.y - b.uy*seatLen/2;
     const Rx=b.x + b.ux*seatLen/2, Ry=b.y + b.uy*seatLen/2;
 
-    // фланцы (кольца)
     ctx.beginPath(); ctx.arc(Lx,Ly,flangeR,0,Math.PI*2); ctx.stroke();
     ctx.beginPath(); ctx.arc(Rx,Ry,flangeR,0,Math.PI*2); ctx.stroke();
 
-    // перемычка
     ctx.lineWidth=Math.max(1, base*0.7);
     ctx.beginPath(); ctx.moveTo(Lx,Ly); ctx.lineTo(Rx,Ry); ctx.stroke();
 
-    // символ «два треугольника»
     ctx.lineWidth=Math.max(1, base*0.9);
     const symLen = base*3.2, symW = base*2.2, ax=b.ux, ay=b.uy;
     const A = { x:b.x - ax*symLen/2 - b.nx*symW/2, y:b.y - ay*symLen/2 - b.ny*symW/2 };
@@ -223,7 +218,6 @@
     ctx.fillStyle='#fff'; ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, base*1.1);
     ctx.beginPath(); ctx.arc(b.x,b.y,R,0,Math.PI*2); ctx.fill(); ctx.stroke();
 
-    // «лопасть»
     const aLen=R*0.9, aW=Math.max(1, base*1.2);
     ctx.strokeStyle='#111'; ctx.lineWidth=aW; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(b.x - b.ux*aLen*0.4, b.y - b.uy*aLen*0.4); ctx.lineTo(b.x + b.ux*aLen*0.5, b.y + b.uy*aLen*0.5); ctx.stroke();
@@ -236,29 +230,39 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
 
+  // ===== main draw (единственная версия) =====
   function draw(){
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
     drawSegments();
 
-    // components
     for(const c of comps){ const seg=segs[c.segIndex]; if(!seg) continue;
       if(c.type==='valve') drawValve(seg,c.t);
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
     }
 
-    // markers/preview
-    if(first){ const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
+    if(first){
+      const p=w2s(first.x,first.y);
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    }
     if(first && preview){
       ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
-      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]);
-      const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
+      ctx.setLineDash([12/view.scale,8/view.scale]);
+      ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
+      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke();
+      ctx.setLineDash([]);
+      const p=w2s(preview.x,preview.y);
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.fillStyle=params.lineColor;
+      ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
     }
     if(mode==='edit' && editing){ const s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
   }
-  let raf=0, dirty=false; const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
+  let raf=0, dirty=false;
+  const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
 
   // ===== hit & snap =====
   function allNodes(){ const out=[]; for(const s of segs){ out.push(s.a,s.b);} return out; }
@@ -285,7 +289,7 @@
     return null;
   }
 
-  // ===== input: Pointer Events (двумя пальцами — зум, одной — пан/тап) =====
+  // ===== input: Pointer Events =====
   const TAP_TIME=300, TAP_MOVE=14*DPR, HOLD_MS=500;
   const pointers=new Map();     // id -> {sx,sy}
   const downs=new Map();        // id -> {t0,sx,sy}
@@ -377,28 +381,6 @@
     clearTimeout(holdTimer); holdTimer=null; holdId=null;
   }, {passive:false});
 
-  function draw(){
-    ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-    if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
-    drawSegments();
-
-    for(const c of comps){ const seg=segs[c.segIndex]; if(!seg) continue;
-      if(c.type==='valve') drawValve(seg,c.t);
-      else if(c.type==='check') drawCheckValve(seg,c.t);
-      else if(c.type==='pump') drawPump(seg,c.t);
-    }
-
-    if(first){ const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
-    if(first && preview){
-      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
-      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]);
-      const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
-    }
-    if(mode==='edit' && editing){ const s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
-  }
-  let raf=0, dirty=false; const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
-
   // ===== UI =====
   const $=id=>document.getElementById(id);
   $('btnLine').onclick=()=>{ mode='line'; first=null; preview=null; toast('Режим: линия (тап-тап)'); };
@@ -412,10 +394,30 @@
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
   // Фото
-  function loadImageFile(f){ if(!f) return; const img=new Image(); img.onload=()=>{ const maxSide=Math.max(img.naturalWidth,img.naturalHeight); let w=img.naturalWidth,h=img.naturalHeight; if(maxSide>2200){ const sc=2200/maxSide; w=Math.round(w*sc); h=Math.round(h*sc); } const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h); bg=c; bw=w; bh=h; fitToScreen(); need(); toast('Фото добавлено'); }; img.src=URL.createObjectURL(f); }
-  document.getElementById('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
-  document.getElementById('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
-  document.getElementById('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
+  function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
+  function loadImageFile(f){
+    if(!f) return;
+    const img=new Image();
+    const url=URL.createObjectURL(f);
+    img.onload=()=>{ 
+      const maxSide=Math.max(img.naturalWidth,img.naturalHeight);
+      let w=img.naturalWidth,h=img.naturalHeight;
+      if(maxSide>2200){ const sc=2200/maxSide; w=Math.round(w*sc); h=Math.round(h*sc); }
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
+      bg=c; bw=w; bh=h; fitToScreen(); need(); toast('Фото добавлено');
+      URL.revokeObjectURL(url);
+      resetInputs();
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); resetInputs(); toast('Не удалось загрузить изображение'); };
+    img.src=url;
+  }
+  $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
+  $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
+  $('btnExport').onclick=()=>{
+    const url=cv.toDataURL('image/png',0.95);
+    const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click();
+  };
 
   // Арматура
   let currentComp='valve';
