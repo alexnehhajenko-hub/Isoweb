@@ -470,7 +470,8 @@
   $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('btnExport').onclick=()=>{
-    const url=cv.toDataURL('image/png',0.95);
+    const url=cv.toDa
+    taURL('image/png',0.95);
     const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click();
   };
 
