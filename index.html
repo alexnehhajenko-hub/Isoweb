@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace v816</title>
+<title>Pro Trace — v815 stable</title>
 <style>
   :root{--violet:#8000ff; --violet2:#7618ff}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -14,16 +14,6 @@
 
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:6px 10px;border-radius:10px;opacity:0;transition:.25s;z-index:1100}
   .toast.show{opacity:1}
-
-  .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
-  .panel-wrap.open{display:block}
-  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.2)}
-  .panel{position:absolute;top:60px;right:8px;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,340px);max-height:80vh;overflow:auto}
-  .panel h4{margin:6px 0 8px 0;font-size:15px}
-  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
-  .row label{min-width:120px;font-size:13px;color:#555}
-  .row input[type="range"],.row input[type="color"]{flex:1}
-  .close{position:absolute;top:6px;right:8px;line-height:1;border:none;background:transparent;font-size:20px;color:#666}
 </style>
 </head>
 <body>
@@ -34,28 +24,15 @@
     <button id="btnHand">Рука</button>
     <button id="btnUndo">↩</button>
     <button id="btnValve">Вентиль</button>
-    <button id="btnValve2">Клапан</button>
+    <button id="btnCheck">Клапан</button>
     <button id="btnPump">Насос</button>
     <button id="btnPhoto">Фото</button>
     <button id="btnExport">PNG</button>
-    <button id="btnSettings">⚙</button>
   </div>
 
   <input id="fileGallery" type="file" accept="image/*" hidden />
 
   <div id="toast" class="toast"></div>
-
-  <div id="panelWrap" class="panel-wrap">
-    <div id="panelBackdrop" class="panel-backdrop"></div>
-    <div class="panel">
-      <button id="panelClose" class="close">×</button>
-      <h4>Линия</h4>
-      <div class="row"><label>Толщина</label><input id="lineWidth" type="range" min="2" max="24" value="6"></div>
-      <div class="row"><label>Цвет</label><input id="lineColor" type="color" value="#8000ff"></div>
-      <h4>Сетка</h4>
-      <div class="row"><label>Показать 3D</label><input id="gridOn" type="checkbox" checked></div>
-    </div>
-  </div>
 
 <script>
 (function(){
@@ -71,8 +48,6 @@
   const comps=[];
   let lineWidth=6;
   let lineColor='#8000ff';
-  let gridOn=true;
-
   const photo={img:null,w:0,h:0,cx:0,cy:0,s:1};
 
   function fit(){cv.width=innerWidth*DPR;cv.height=innerHeight*DPR;draw();}
@@ -88,7 +63,7 @@
     ctx.clearRect(0,0,cv.width,cv.height);
     ctx.fillStyle="#fff";ctx.fillRect(0,0,cv.width,cv.height);
     if(photo.img){ctx.drawImage(photo.img,photo.cx-photo.w/2*photo.s,photo.cy-photo.h/2*photo.s,photo.w*photo.s,photo.h*photo.s);}
-    if(gridOn) drawGrid();
+    drawGrid();
 
     ctx.lineCap='round';ctx.lineJoin='round';
     for(const s of segs){
@@ -96,7 +71,6 @@
       const A=worldToScreen(s.a.x,s.a.y),B=worldToScreen(s.b.x,s.b.y);
       ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
     }
-
     for(const c of comps){drawComp(c);}
   }
 
@@ -114,7 +88,6 @@
       ctx.strokeRect(-12,-6,24,12);
       ctx.beginPath();ctx.moveTo(-8,-4);ctx.lineTo(0,4);ctx.lineTo(8,-4);ctx.stroke();
       ctx.beginPath();ctx.moveTo(-8,4);ctx.lineTo(0,-4);ctx.lineTo(8,4);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(-4,-12);ctx.lineTo(4,-12);ctx.lineTo(0,-18);ctx.closePath();ctx.fill();ctx.stroke();
       ctx.fillText("Вентиль", -16,20);
     }
     if(c.type==='check'){
@@ -144,7 +117,7 @@
   $('btnHand').onclick=()=>{mode='hand';};
   $('btnUndo').onclick=()=>{if(segs.length)segs.pop();else if(comps.length)comps.pop();draw();};
   $('btnValve').onclick=()=>{mode='valve';toast('Поставь вентиль');};
-  $('btnValve2').onclick=()=>{mode='check';toast('Поставь клапан');};
+  $('btnCheck').onclick=()=>{mode='check';toast('Поставь клапан');};
   $('btnPump').onclick=()=>{mode='pump';toast('Поставь насос');};
   $('btnPhoto').onclick=()=>$('fileGallery').click();
   $('fileGallery').onchange=e=>{
@@ -154,15 +127,6 @@
     img.src=url;
   };
   $('btnExport').onclick=()=>{const url=cv.toDataURL('image/png');const a=document.createElement('a');a.href=url;a.download='ProTrace.png';a.click();};
-
-  const wrap=$('panelWrap');
-  $('btnSettings').onclick=()=>{wrap.classList.add('open');};
-  $('panelClose').onclick=()=>{wrap.classList.remove('open');};
-  $('panelBackdrop').onclick=()=>{wrap.classList.remove('open');};
-
-  $('lineWidth').oninput=e=>{lineWidth=+e.target.value;draw();};
-  $('lineColor').oninput=e=>{lineColor=e.target.value;draw();};
-  $('gridOn').onchange=e=>{gridOn=e.target.checked;draw();};
 
   draw();
 })();
