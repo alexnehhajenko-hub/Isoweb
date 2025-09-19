@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v818</title>
+<title>Pro Trace — v819</title>
 <style>
   :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -106,7 +106,7 @@
     lineColor:'#1f6bff',
     snapRadiusPx:22
   };
-  let compScale = 1.0;        // общий множитель размера арматуры (масштабируется с трубой)
+  let compScale = 1.0;        // множитель размера арматуры (масштабируется вместе с трубой)
 
   const sPx = (px)=>px/view.scale; // экранные пиксели -> мировые единицы
   const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
@@ -150,45 +150,72 @@
 
   // ===== components (масштабируются вместе с трубой) =====
   function drawBallValve(seg,t){
-    // Шаровый кран: прямоуг. корпус, круг "шар", шейка и рычаг
+    // Реалистичный шаровый кран: капсула (скруглённые торцы), шар, шейка и утолщённый рычаг
     const b=compBasis(seg,t);
-    const base = sPx(params.linePx);       // базовая «единица» в мире
-    const len  = base * 10 * compScale;    // длина корпуса
-    const half = base * 3.0 * compScale;   // половина толщины корпуса
-    const ballR= base * 2.2 * compScale;   // радиус шара
-    const neckH= base * 3.0 * compScale;   // шейка вверх
-    const hndl = base * 6.0 * compScale;   // длина ручки
-    const lw   = Math.max(1, sPx(2.0));    // толщина линий деталей
+    const base = sPx(params.linePx);
+    const len   = base * 12 * compScale;   // длина корпуса (капсулы)
+    const radY  = base * 3.4 * compScale;  // радиус поперёк трубы (толщина корпуса)
+    const ballR = base * 2.3 * compScale;  // радиус шара
+    const neckH = base * 2.6 * compScale;  // высота шейки
+    const neckR = base * 1.0 * compScale;  // радиус шейки
+    const hndlL = base * 7.0 * compScale;  // длина ручки
+    const hndlW = base * 0.9 * compScale;  // толщина ручки
+    const lw    = Math.max(1, sPx(2.0));
 
-    const Lx=b.x - b.ux*len/2, Ly=b.y - b.uy*len/2;
-    const Rx=b.x + b.ux*len/2, Ry=b.y + b.uy*len/2;
+    const Lx=b.x - b.ux*len/2, Ly=b.y - b.uy*len/2; // центр левого торца
+    const Rx=b.x + b.ux*len/2, Ry=b.y + b.uy*len/2; // центр правого торца
+    const theta = Math.atan2(b.ny, b.nx);           // угол нормали (перпендикуляр к трубе)
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    ctx.save();
+    ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     ctx.strokeStyle='#111'; ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // Корпус (прямоугольник, ориентированный по трубе)
-    const nx=b.nx, ny=b.ny;
+    // Корпус-капсула (два полуокружности + две параллельные стороны)
     ctx.beginPath();
-    ctx.moveTo(Lx - nx*half, Ly - ny*half);
-    ctx.lineTo(Rx - nx*half, Ry - ny*half);
-    ctx.lineTo(Rx + nx*half, Ry + ny*half);
-    ctx.lineTo(Lx + nx*half, Ly + ny*half);
-    ctx.closePath(); ctx.stroke();
+    // нижняя прямая (с -normal стороны)
+    ctx.moveTo(Lx - b.nx*radY, Ly - b.ny*radY);
+    ctx.lineTo(Rx - b.nx*radY, Ry - b.ny*radY);
+    // правый торец (полуокружность от -normal к +normal)
+    ctx.arc(Rx, Ry, radY, theta - Math.PI/2, theta + Math.PI/2, false);
+    // верхняя прямая (с +normal стороны)
+    ctx.lineTo(Lx + b.nx*radY, Ly + b.ny*radY);
+    // левый торец (полуокружность от +normal к -normal)
+    ctx.arc(Lx, Ly, radY, theta + Math.PI/2, theta - Math.PI/2, false);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Небольшие «переходы» к трубе (тонкие фаски)
+    const cham = base*1.4*compScale;
+    ctx.beginPath();
+    ctx.moveTo(Lx - b.nx*(radY*0.65), Ly - b.ny*(radY*0.65));
+    ctx.lineTo(Lx - b.ux*cham - b.nx*(radY*0.45), Ly - b.uy*cham - b.ny*(radY*0.45));
+    ctx.moveTo(Lx + b.nx*(radY*0.65), Ly + b.ny*(radY*0.65));
+    ctx.lineTo(Lx - b.ux*cham + b.nx*(radY*0.45), Ly - b.uy*cham + b.ny*(radY*0.45));
+    ctx.moveTo(Rx - b.nx*(radY*0.65), Ry - b.ny*(radY*0.65));
+    ctx.lineTo(Rx + b.ux*cham - b.nx*(radY*0.45), Ry + b.uy*cham - b.ny*(radY*0.45));
+    ctx.moveTo(Rx + b.nx*(radY*0.65), Ry + b.ny*(radY*0.65));
+    ctx.lineTo(Rx + b.ux*cham + b.nx*(radY*0.45), Ry + b.uy*cham + b.ny*(radY*0.45));
+    ctx.stroke();
 
     // Шар
     ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.stroke();
 
-    // Шейка вверх от крышки
-    const topX=b.x + nx*half, topY=b.y + ny*half;
-    ctx.beginPath(); ctx.moveTo(topX,topY); ctx.lineTo(topX + nx*neckH, topY + ny*neckH); ctx.stroke();
+    // Шейка (круглая «крышка» + стойка по нормали вверх)
+    const topX=b.x + b.nx*radY, topY=b.y + b.ny*radY;
+    ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(topX,topY); ctx.stroke();
 
-    // Рычаг
+    // Рычаг (утолщённый)
+    ctx.save();
+    ctx.lineWidth=hndlW;
     ctx.beginPath();
-    ctx.moveTo(topX + nx*neckH, topY + ny*neckH);
-    ctx.lineTo(topX + nx*neckH + b.ux*hndl, topY + ny*neckH + b.uy*hndl);
+    ctx.moveTo(topX, topY);
+    ctx.lineTo(topX + b.ux*hndlL, topY + b.uy*hndlL);
     ctx.stroke();
+    ctx.restore();
 
     ctx.restore();
+
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
@@ -231,7 +258,7 @@
   function drawPump(seg,t){
     const b=compBasis(seg,t);
     const base = sPx(params.linePx);
-    const R = base*8*0.5*compScale;
+    const R = base*4.0*compScale;
     const lw = Math.max(1, sPx(2.4));
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
@@ -295,7 +322,7 @@
     for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
       if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
-      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
+      if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
     }
     return best;
   }
@@ -303,7 +330,7 @@
     for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
       const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
-      const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
+      const pxs=A.x+vx*t, pys=A.y+vy*t, d=Math.hypot(pxs-sx,pys-sy);
       if(d<bd){ bd=d; bestI=i; bt=t; }
     }
     if(bestI!==-1 && bd<=maxDistPx) return {segIndex:bestI,t:bt};
@@ -327,7 +354,9 @@
     pointers.set(e.pointerId,{sx,sy});
     downs.set(e.pointerId,{t0:performance.now(),sx,sy});
     if(pointers.size===2){
-      const arr=[...pointers.values()]; prevCenter=centroid(); prevDist=dist2(arr[0],arr[1]);
+      prevCenter=centroid();
+      const arr=[...pointers.values()];
+      prevDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
       clearTimeout(holdTimer); holdTimer=null; holdId=null;
     }else if(pointers.size===1 && !first && mode!=='place'){
       holdId=e.pointerId;
@@ -347,7 +376,9 @@
     pointers.set(e.pointerId,{sx,sy});
 
     if(pointers.size===2){
-      const arr=[...pointers.values()]; const nowCenter=centroid(), nowDist=dist2(arr[0],arr[1]);
+      const arr=[...pointers.values()];
+      const nowCenter=centroid();
+      const nowDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
       if(prevCenter && prevDist && nowCenter){
         const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
         view.tx = nowCenter.sx - k*(nowCenter.sx - view.tx);
@@ -414,8 +445,9 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  // версионирование в тосте
-  const ver = new URLSearchParams(location.search).get('v') || 'v818';
+  // версия из URL
+  const ver = new URLSearchParams(location.search).get('v') || 'v819';
+
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
   function loadImageFile(f){
@@ -454,7 +486,7 @@
 
   // старт
   fit();
-  toast(`${ver}: шаровый кран масштабируется — увеличивай и читай детали.`);
+  toast(`${ver}: шаровый кран — капсула, шар, шейка, утолщённый рычаг. Масштабируется при зуме.`);
 })();
 </script>
 </body>
