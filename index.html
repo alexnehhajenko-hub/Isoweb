@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v820</title>
+<title>Pro Trace — v821</title>
 <style>
-  :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
+  :root{--violet:#6b1dff; --violetDeep:#5414e6; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
   .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px}
-  .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
+  .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
   .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
 
@@ -69,8 +69,8 @@
       </div>
       <div class="row">
         <label for="scale">Масштаб арматуры</label>
-        <input id="scale" type="range" min="60" max="180" step="10" value="100" style="flex:1">
-        <span id="scaleVal" style="width:48px;text-align:right;font-size:12px;color:#555">1.00×</span>
+        <input id="scale" type="range" min="60" max="200" step="10" value="110" style="flex:1">
+        <span id="scaleVal" style="width:48px;text-align:right;font-size:12px;color:#555">1.10×</span>
       </div>
       <div class="row" style="justify-content:flex-end;gap:8px">
         <button id="btnPlaceComp" class="btn">Поставить на трубу</button>
@@ -103,10 +103,10 @@
 
   const params={
     linePx:10,               // толщина трубы (в пикселях экрана)
-    lineColor:'#1f6bff',
+    lineColor:'#1f6bff',     // цвет трубы
     snapRadiusPx:22
   };
-  let compScale = 1.0;        // множитель размера арматуры (масштабируется вместе с трубой)
+  let compScale = 1.1;       // множитель размера арматуры
 
   const sPx = (px)=>px/view.scale; // экранные пиксели -> мировые единицы
   const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
@@ -119,7 +119,7 @@
   const w2s=(x,y)=>({x:x*view.scale+view.tx,y:y*view.scale+view.ty});
   function clampView(){ if(!bg) return; const W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; const minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); const minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
 
-  // ===== geometry helpers =====
+  // ===== drawing helpers =====
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
@@ -150,68 +150,105 @@
 
   // ===== components (масштабируются вместе с трубой) =====
   function drawBallValve(seg,t){
-    // Реалистичный шаровый кран: капсула (скруглённые торцы), шар, шейка и утолщённый рычаг
+    // «Копия» сварного шарового крана: фиолетовый корпус + чёрная ручка.
     const b=compBasis(seg,t);
     const base = sPx(params.linePx);
-    const len   = base * 12 * compScale;   // длина корпуса (капсулы)
-    const radY  = base * 3.4 * compScale;  // радиус поперёк трубы (толщина корпуса)
-    const ballR = base * 2.3 * compScale;  // радиус шара
-    const neckH = base * 2.6 * compScale;  // высота шейки
-    const neckR = base * 1.0 * compScale;  // радиус шейки
-    const hndlL = base * 7.0 * compScale;  // длина ручки
-    const hndlW = base * 0.9 * compScale;  // толщина ручки
-    const lw    = Math.max(1, sPx(2.0));
 
-    const Lx=b.x - b.ux*len/2, Ly=b.y - b.uy*len/2; // центр левого торца
-    const Rx=b.x + b.ux*len/2, Ry=b.y + b.uy*len/2; // центр правого торца
-    const theta = Math.atan2(b.ny, b.nx);           // угол нормали (перпендикуляр к трубе)
+    // пропорции
+    const bodyLen = base * 12.0 * compScale; // длина капсулы
+    const bodyR   = base * 3.2  * compScale; // радиус корпуса
+    const coneL   = base * 3.8  * compScale; // длина конуса
+    const pipeR   = base * 1.6  * compScale; // радиус «патрубка» (под трубу)
+    const ballR   = base * 2.3  * compScale; // шар
+    const neckH   = base * 3.2  * compScale; // шейка
+    const neckR   = base * 1.0  * compScale; // радиус шейки
+    const handleL = base * 7.5  * compScale; // ручка длина
+    const handleW = base * 1.0  * compScale; // ручка толщина
+    const ringW   = Math.max(1, sPx(1.8));   // «сварной поясок»
+    const lw      = Math.max(1, sPx(2.0));
+
+    const nx=b.nx, ny=b.ny, ux=b.ux, uy=b.uy;
+
+    // центры торцов корпуса
+    const C1 = {x:b.x - ux*bodyLen/2, y:b.y - uy*bodyLen/2};
+    const C2 = {x=b.x + ux*bodyLen/2, y=b.y + uy*bodyLen/2};
+    // точки конца конусов (стык с трубой)
+    const P1 = {x:C1.x - ux*coneL, y:C1.y - uy*coneL};
+    const P2 = {x:C2.x + ux*coneL, y:C2.y + uy*coneL};
 
     ctx.save();
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.strokeStyle='#111'; ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // Корпус-капсула (две полуокружности + две параллельные стороны)
+    // --- КОРПУС (капсула) ---
     ctx.beginPath();
-    // нижняя прямая (с -normal стороны)
-    ctx.moveTo(Lx - b.nx*radY, Ly - b.ny*radY);
-    ctx.lineTo(Rx - b.nx*radY, Ry - b.ny*radY);
-    // правый торец (полуокружность от -normal к +normal)
-    ctx.arc(Rx, Ry, radY, theta - Math.PI/2, theta + Math.PI/2, false);
-    // верхняя прямая (с +normal стороны)
-    ctx.lineTo(Lx + b.nx*radY, Ly + b.ny*radY);
-    // левый торец (полуокружность от +normal к -normal)
-    ctx.arc(Lx, Ly, radY, theta + Math.PI/2, theta - Math.PI/2, false);
+    ctx.moveTo(C1.x - nx*bodyR, C1.y - ny*bodyR);
+    ctx.lineTo(C2.x - nx*bodyR, C2.y - ny*bodyR);
+    ctx.arc(C2.x, C2.y, bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
+    ctx.lineTo(C1.x + nx*bodyR, C1.y + ny*bodyR);
+    ctx.arc(C1.x, C1.y, bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
     ctx.closePath();
+    // заливка фиолетовым + тонкая обводка
+    ctx.fillStyle='#6b1dff';
+    ctx.fill();
+    ctx.lineWidth=lw;
+    ctx.strokeStyle='#2b145f';
     ctx.stroke();
 
-    // Небольшие «переходы» к трубе (тонкие фаски)
-    const cham = base*1.4*compScale;
+    // --- КОНУСНЫЕ ПЕРЕХОДЫ к трубе ---
+    // левый
     ctx.beginPath();
-    ctx.moveTo(Lx - b.nx*(radY*0.65), Ly - b.ny*(radY*0.65));
-    ctx.lineTo(Lx - b.ux*cham - b.nx*(radY*0.45), Ly - b.uy*cham - b.ny*(radY*0.45));
-    ctx.moveTo(Lx + b.nx*(radY*0.65), Ly + b.ny*(radY*0.65));
-    ctx.lineTo(Lx - b.ux*cham + b.nx*(radY*0.45), Ly - b.uy*cham + b.ny*(radY*0.45));
-    ctx.moveTo(Rx - b.nx*(radY*0.65), Ry - b.ny*(radY*0.65));
-    ctx.lineTo(Rx + b.ux*cham - b.nx*(radY*0.45), Ry + b.uy*cham - b.ny*(radY*0.45));
-    ctx.moveTo(Rx + b.nx*(radY*0.65), Ry + b.ny*(radY*0.65));
-    ctx.lineTo(Rx + b.ux*cham + b.nx*(radY*0.45), Ry + b.uy*cham + b.ny*(radY*0.45));
-    ctx.stroke();
+    ctx.moveTo(P1.x - nx*pipeR, P1.y - ny*pipeR);
+    ctx.lineTo(C1.x - nx*bodyR, C1.y - ny*bodyR);
+    ctx.lineTo(C1.x + nx*bodyR, C1.y + ny*bodyR);
+    ctx.lineTo(P1.x + nx*pipeR, P1.y + ny*pipeR);
+    ctx.closePath();
+    ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // Шар
-    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.stroke();
+    // правый
+    ctx.beginPath();
+    ctx.moveTo(C2.x - nx*bodyR, C2.y - ny*bodyR);
+    ctx.lineTo(P2.x - nx*pipeR, P2.y - ny*pipeR);
+    ctx.lineTo(P2.x + nx*pipeR, P2.y + ny*pipeR);
+    ctx.lineTo(C2.x + nx*bodyR, C2.y + ny*bodyR);
+    ctx.closePath();
+    ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // Шейка и рычаг
-    const topX=b.x + b.nx*radY, topY=b.y + b.ny*radY;
+    // сварные «кольца» на стыке конуса и трубы
+    ctx.lineWidth=ringW; ctx.strokeStyle='#221a41';
+    ctx.beginPath(); ctx.moveTo(P1.x - nx*pipeR, P1.y - ny*pipeR); ctx.lineTo(P1.x + nx*pipeR, P1.y + ny*pipeR); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(P2.x - nx*pipeR, P2.y - ny*pipeR); ctx.lineTo(P2.x + nx*pipeR, P2.y + ny*pipeR); ctx.stroke();
+
+    // --- ШАР внутри ---
+    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2);
+    ctx.fillStyle='#ffffff'; ctx.fill();
+    ctx.lineWidth=lw; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+
+    // --- ШЕЙКА + ЧЁРНАЯ РУЧКА ---
+    const top = {x:b.x + nx*bodyR, y:b.y + ny*bodyR};
+    const neckTop = {x:top.x + nx*neckH, y:top.y + ny*neckH};
+
+    // шейка (круг крышки + стойка)
+    ctx.lineWidth=lw; ctx.strokeStyle='#1b1b1b';
     ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(topX,topY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
 
+    // ручка (прямоугольная чёрная, немного со скосом)
     ctx.save();
-    ctx.lineWidth=hndlW;
+    ctx.fillStyle='#101015';
     ctx.beginPath();
-    ctx.moveTo(topX, topY);
-    ctx.lineTo(topX + b.ux*hndlL, topY + b.uy*hndlL);
-    ctx.stroke();
+    const hw = handleW/2;
+    // прямоугольник, ориентированный по оси трубы
+    ctx.moveTo(neckTop.x - nx*hw,            neckTop.y - ny*hw);
+    ctx.lineTo(neckTop.x + ux*handleL - nx*hw, neckTop.y + uy*handleL - ny*hw);
+    ctx.lineTo(neckTop.x + ux*handleL + nx*hw, neckTop.y + uy*handleL + ny*hw);
+    ctx.lineTo(neckTop.x + nx*hw,            neckTop.y + ny*hw);
+    ctx.closePath(); ctx.fill();
     ctx.restore();
+
+    // --- СТЫКОВКА С ТРУБОЙ ---
+    // Ничего специально не подрезаем: корпус и конусы построены вдоль оси сегмента,
+    // торцы конусов P1 и P2 лежат ровно на оси трубы, поэтому «садится» идеально.
 
     ctx.restore();
 
@@ -257,7 +294,7 @@
   function drawPump(seg,t){
     const b=compBasis(seg,t);
     const base = sPx(params.linePx);
-    const R = base*4.0*compScale;
+    const R = base*4.2*compScale;
     const lw = Math.max(1, sPx(2.4));
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
@@ -324,7 +361,7 @@
       const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
       if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
-      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }  // <-- фикс: двоеточие
+      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
     }
     return best;
   }
@@ -380,7 +417,8 @@
     pointers.set(e.pointerId,{sx,sy});
 
     if(pointers.size===2){
-      const arr=[...pointers.values()]; const nowCenter=centroid();
+      const arr=[...pointers.values()];
+      const nowCenter=centroid();
       const nowDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
       if(prevCenter && prevDist && nowCenter){
         const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
@@ -449,7 +487,7 @@
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
   // версия из URL
-  const ver = new URLSearchParams(location.search).get('v') || 'v820';
+  const ver = new URLSearchParams(location.search).get('v') || 'v821';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -489,7 +527,7 @@
 
   // старт
   fit();
-  toast(`${ver}: фиксы, шаровый кран + масштабируемая арматура.`);
+  toast(`${ver}: фиолетовый шаровый кран с чёрной ручкой, точная стыковка с трубой.`);
 })();
 </script>
 </body>
