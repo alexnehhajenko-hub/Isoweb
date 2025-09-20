@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v819</title>
+<title>Pro Trace — v820</title>
 <style>
   :root{--violet:#8000ff; --violet2:#6b1dff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -170,7 +170,7 @@
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     ctx.strokeStyle='#111'; ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // Корпус-капсула (два полуокружности + две параллельные стороны)
+    // Корпус-капсула (две полуокружности + две параллельные стороны)
     ctx.beginPath();
     // нижняя прямая (с -normal стороны)
     ctx.moveTo(Lx - b.nx*radY, Ly - b.ny*radY);
@@ -200,12 +200,11 @@
     // Шар
     ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.stroke();
 
-    // Шейка (круглая «крышка» + стойка по нормали вверх)
+    // Шейка и рычаг
     const topX=b.x + b.nx*radY, topY=b.y + b.ny*radY;
     ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(topX,topY); ctx.stroke();
 
-    // Рычаг (утолщённый)
     ctx.save();
     ctx.lineWidth=hndlW;
     ctx.beginPath();
@@ -318,19 +317,25 @@
     for(const n of allNodes()){ const d=Math.hypot(n.x-raw.x,n.y-raw.y); if(d<bd){ bd=d; best=n; } }
     if(best && bd<=R) return {x:best.x,y:best.y}; return raw;
   }
-  function findEndpointNear(sx,sy,rPx=20){ let best=null,bd=Infinity;
-    for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+  function findEndpointNear(sx,sy,rPx=20){
+    let best=null,bd=Infinity;
+    for(let i=0;i<segs.length;i++){
+      const s=segs[i];
+      const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
       if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
-      if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
+      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }  // <-- фикс: двоеточие
     }
     return best;
   }
-  function findNearestSegment(sx,sy,maxDistPx=28){ let bestI=-1,bd=Infinity,bt=0;
-    for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+  function findNearestSegment(sx,sy,maxDistPx=28){
+    let bestI=-1,bd=Infinity,bt=0;
+    for(let i=0;i<segs.length;i++){
+      const s=segs[i];
+      const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
       const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
-      const pxs=A.x+vx*t, pys=A.y+vy*t, d=Math.hypot(pxs-sx,pys-sy);
+      const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
       if(d<bd){ bd=d; bestI=i; bt=t; }
     }
     if(bestI!==-1 && bd<=maxDistPx) return {segIndex:bestI,t:bt};
@@ -345,7 +350,6 @@
   let holdTimer=null, holdId=null;
 
   function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
-  function dist2(a,b){ return Math.hypot(a.sx-b.sx,a.sy-b.sy); }
   function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 
   cv.addEventListener('pointerdown', e=>{
@@ -354,8 +358,8 @@
     pointers.set(e.pointerId,{sx,sy});
     downs.set(e.pointerId,{t0:performance.now(),sx,sy});
     if(pointers.size===2){
-      prevCenter=centroid();
       const arr=[...pointers.values()];
+      prevCenter=centroid();
       prevDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
       clearTimeout(holdTimer); holdTimer=null; holdId=null;
     }else if(pointers.size===1 && !first && mode!=='place'){
@@ -376,8 +380,7 @@
     pointers.set(e.pointerId,{sx,sy});
 
     if(pointers.size===2){
-      const arr=[...pointers.values()];
-      const nowCenter=centroid();
+      const arr=[...pointers.values()]; const nowCenter=centroid();
       const nowDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
       if(prevCenter && prevDist && nowCenter){
         const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
@@ -446,7 +449,7 @@
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
   // версия из URL
-  const ver = new URLSearchParams(location.search).get('v') || 'v819';
+  const ver = new URLSearchParams(location.search).get('v') || 'v820';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -470,8 +473,7 @@
   $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('btnExport').onclick=()=>{
-    const url=cv.toDa
-    taURL('image/png',0.95);
+    const url=cv.toDataURL('image/png',0.95);
     const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click();
   };
 
@@ -487,7 +489,7 @@
 
   // старт
   fit();
-  toast(`${ver}: шаровый кран — капсула, шар, шейка, утолщённый рычаг. Масштабируется при зуме.`);
+  toast(`${ver}: фиксы, шаровый кран + масштабируемая арматура.`);
 })();
 </script>
 </body>
