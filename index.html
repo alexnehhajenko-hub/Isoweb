@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v828</title>
+<title>Pro Trace — v829</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -98,13 +98,10 @@
   let first=null, preview=null, editing=null;
 
   const params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
-  let compScale=1.1;             // общий масштаб арматуры
+  let compScale=1.1;             // общий относительный масштаб арматуры
 
-  // экранные px -> мировые (учёт зума)
-  const sPx=(px)=>px/view.scale;
+  // утилиты координат
   const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
-
-  // ===== fit / coords =====
   function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); if(bg && view.scale===1 && view.tx===0 && view.ty===0) fitToScreen(); need(); }
   addEventListener('resize',fit);
   function fitToScreen(){ if(!bg) return; const k=Math.min(cv.width/bw,cv.height/bh); view.scale=k; view.tx=(cv.width-bw*k)/2; view.ty=(cv.height-bh*k)/2; }
@@ -112,13 +109,15 @@
   const w2s=(x,y)=>({x:x*view.scale+view.tx,y:y*view.scale+view.ty});
   function clampView(){ if(!bg) return; const W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; const minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); const minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
 
-  // ===== draw primitives =====
+  // ===== рисование труб =====
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
     for(const s of segs){
+      // тень
       ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+      // основная линия (толщина поддерживается в экранных px)
       ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=(params.linePx)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
@@ -140,10 +139,12 @@
     ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt, x+padH, y+h/2);
   }
 
-  // ===== components =====
+  // ===== КОМПОНЕНТЫ (масштабируются с зумом) =====
+  // ВАЖНО: все размеры считаем в МИРОВЫХ ед.: base = params.linePx * compScale
+  // Линии обводки держим «читаемыми»: lineWidth = (px)/view.scale
   function drawBallValve(seg,t){
     const b=compBasis(seg,t);
-    const base=sPx(params.linePx)*compScale;
+    const base = params.linePx * compScale;
 
     const bodyLen=base*10.5, bodyR=base*2.6;
     const coneL =base*3.2,  pipeR=base*1.4;
@@ -151,14 +152,14 @@
     const neckH =base*2.6,  neckR=base*0.9;
     const handleL=base*6.5, handleW=base*0.9;
 
-    const nx=b.nx, ny=b.ny, ux=b.ux, uy=b.uy;
+    const {ux,uy,nx,ny}=b;
     const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
     const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
-    const lw=Math.max(1,sPx(2));
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // корпус-капсула
+    // корпус
     ctx.beginPath();
     ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
     ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -167,13 +168,14 @@
     ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
     ctx.closePath();
     ctx.fillStyle='#6b1dff'; ctx.fill();
-    ctx.lineWidth=lw; ctx.strokeStyle='#2b145f'; ctx.stroke();
+    ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
 
-    // переходы к трубе
+    // конусы
     ctx.beginPath();
     ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
     ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+
     ctx.beginPath();
     ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
@@ -184,7 +186,7 @@
 
     // шейка + ручка
     const top={x:b.x+nx*bodyR, y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH, y:top.y+ny*neckH};
-    ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=lw; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
 
     const hw=handleW/2;
@@ -200,23 +202,22 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
-  // === CHECK (масштаб 1:1 с вентилем): капсульный корпус + конусные патрубки, стрелка-треугольник по потоку
+  // Клапан (капсульный, масштаб 1:1 с вентилем), внутри стрелка-треугольник по потоку
   function drawCheckValve(seg,t){
     const b=compBasis(seg,t);
-    const base=sPx(params.linePx)*compScale;  // те же размеры, что у вентиля
+    const base = params.linePx * compScale;
 
-    // берём такие же пропорции, слегка короче корпуса
     const bodyLen=base*9.5,  bodyR=base*2.4;
     const coneL =base*3.2,   pipeR=base*1.4;
-    const lw=Math.max(1,sPx(2));
 
-    const nx=b.nx, ny=b.ny, ux=b.ux, uy=b.uy;
+    const {ux,uy,nx,ny}=b;
     const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
     const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // корпус-капсула
+    // корпус
     ctx.beginPath();
     ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
     ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -225,19 +226,20 @@
     ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
     ctx.closePath();
     ctx.fillStyle='#6b1dff'; ctx.fill();
-    ctx.lineWidth=lw; ctx.strokeStyle='#2b145f'; ctx.stroke();
+    ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
 
-    // конусные переходы
+    // конусы
     ctx.beginPath();
     ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
     ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+
     ctx.beginPath();
     ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // символ направления: треугольник вдоль оси (в сторону +ux,+uy)
+    // стрелка (треугольник) по направлению потока (в сторону +ux,+uy)
     const triLen=bodyLen*0.45, triHalf=bodyR*0.55;
     const A={x:b.x + ux*triLen/2, y:b.y + uy*triLen/2};
     const B={x:b.x - ux*triLen/2 + nx*triHalf, y:b.y - uy*triLen/2 + ny*triHalf};
@@ -251,11 +253,14 @@
   }
 
   function drawPump(seg,t){
-    const b=compBasis(seg,t), base=sPx(params.linePx)*compScale, R=base*4.0, lw=Math.max(1,sPx(2.2));
+    const b=compBasis(seg,t);
+    const base = params.linePx * compScale;
+    const R=base*4.0;
+
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.fillStyle='#fff'; ctx.strokeStyle='#111'; ctx.lineWidth=lw;
+    ctx.fillStyle='#fff'; ctx.strokeStyle='#111'; ctx.lineWidth=2.2/view.scale;
     ctx.beginPath(); ctx.arc(b.x,b.y,R,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    const a=R*0.9; ctx.lineWidth=Math.max(1,sPx(2.0)); ctx.lineCap='round';
+    const a=R*0.9; ctx.lineWidth=2.0/view.scale; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(b.x-b.ux*a*0.4,b.y-b.uy*a*0.4); ctx.lineTo(b.x+b.ux*a*0.5,b.y+b.uy*a*0.5); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(b.x+b.ux*a*0.5,b.y+b.uy*a*0.5);
     ctx.lineTo(b.x+b.ux*a*0.28+(-b.uy)*a*0.22,b.y+b.uy*a*0.28+( b.ux)*a*0.22);
@@ -265,7 +270,7 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
 
-  // ===== main draw =====
+  // ===== главный цикл =====
   function draw(){
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
@@ -307,7 +312,7 @@
       const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
       if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
-      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
+      if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
     }
     return best;
   }
@@ -323,7 +328,7 @@
     return (bestI!==-1 && bd<=maxDistPx) ? {segIndex:bestI,t:bt} : null;
   }
 
-  // ===== input =====
+  // ===== ввод =====
   const TAP_TIME=300, TAP_MOVE=14*DPR, HOLD_MS=500;
   const pointers=new Map(); const downs=new Map();
   let prevCenter=null, prevDist=null, holdTimer=null, holdId=null;
@@ -425,7 +430,7 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v828';
+  const ver = new URLSearchParams(location.search).get('v') || 'v829';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -457,7 +462,7 @@
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit(); toast(`${ver}: клапан и вентиль масштабируются одинаково.`);
+  fit(); toast(`${ver}: арматура масштабируется вместе с трубой; размер регулируется ползунком.`);
 })();
 </script>
 </body>
