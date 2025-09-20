@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v824</title>
+<title>Pro Trace — v825</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -176,7 +176,7 @@
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
     // шар
-    ctx.beginPath(); ctx.arc(b.x,b.y,base*2.3*compScale,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
     // шейка + чёрная ручка
     const top={x:b.x+nx*bodyR, y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH, y:top.y+ny*neckH};
@@ -196,42 +196,58 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
-  // === НОВЫЙ CHECK: два фланца + один треугольник между ними ===
+  // === КЛАПАН: два прямоугольных фланца и треугольник между ними ===
   function drawCheckValve(seg,t){
     const b=compBasis(seg,t), base=sPx(params.linePx);
-    const seatLen = base*10.0*compScale;                 // расстояние между центрами фланцев
-    const flangeR = base*2.8*compScale;                  // радиус фланца
-    const Lc={x:b.x-b.ux*seatLen/2, y:b.y-b.uy*seatLen/2};
-    const Rc={x:b.x+b.ux*seatLen/2, y:b.y+b.uy*seatLen/2};
+    const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
 
-    // внутренние «края» фланцев (где начинается зазор под треугольник)
-    const Li={x:Lc.x + b.ux*flangeR, y:Lc.y + b.uy*flangeR};
-    const Ri={x:Rc.x - b.ux*flangeR, y:Rc.y - b.uy*flangeR};
-    const innerLen = Math.hypot(Ri.x-Li.x, Ri.y-Li.y);
+    // размеры фланцев и зазора
+    const flangeLen = base*6.0*compScale;   // длина бруска вдоль оси
+    const flangeH   = base*3.0*compScale;   // половина высоты бруска поперёк оси
+    const gapLen    = base*6.0*compScale;   // чистый просвет между внутренними гранями
+    const lw        = Math.max(1, sPx(2.0));
 
-    // размеры треугольника
-    const triLen = Math.min(innerLen*0.86, base*6.0*compScale); // длина вдоль оси
-    const triHalfH = Math.min(flangeR*0.9, base*2.2*compScale); // половина высоты поперёк оси
+    // центры фланцев
+    const Lc={x:b.x-ux*(gapLen/2+flangeLen/2), y:b.y-uy*(gapLen/2+flangeLen/2)};
+    const Rc={x:b.x+ux*(gapLen/2+flangeLen/2), y:b.y+uy*(gapLen/2+flangeLen/2)};
 
-    // вершины треугольника (основание у левого внутреннего края, нос к правому)
-    const A={x:Li.x + b.nx*triHalfH, y:Li.y + b.ny*triHalfH};
-    const B={x:Li.x - b.nx*triHalfH, y:Li.y - b.ny*triHalfH};
-    const C={x:Li.x + b.ux*triLen,   y:Li.y + b.uy*triLen};
+    // функция рисования ориентированного прямоугольника (центр, длина вдоль оси, полувысота по нормали)
+    function rect(center,len,halfH){
+      const ax=ux*(len/2), ay=uy*(len/2), px=nx*halfH, py=ny*halfH;
+      return [
+        {x:center.x-ax-px, y:center.y-ay-py},
+        {x:center.x+ax-px, y:center.y+ay-py},
+        {x:center.x+ax+px, y:center.y+ay+py},
+        {x:center.x-ax+px, y:center.y-ay+py}
+      ];
+    }
 
-    const lw=Math.max(1,sPx(2.0));
+    // прямоугольные фланцы
+    const Lrect=rect(Lc,flangeLen,flangeH);
+    const Rrect=rect(Rc,flangeLen,flangeH);
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    ctx.lineJoin='round'; ctx.lineCap='round'; ctx.lineWidth=lw; ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
 
-    // фланцы
-    ctx.strokeStyle='#111'; ctx.lineWidth=lw;
-    ctx.beginPath(); ctx.arc(Lc.x,Lc.y,flangeR,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(Rc.x,Rc.y,flangeR,0,Math.PI*2); ctx.stroke();
+    // левый
+    ctx.beginPath(); ctx.moveTo(Lrect[0].x,Lrect[0].y); for(let i=1;i<4;i++) ctx.lineTo(Lrect[i].x,Lrect[i].y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // правый
+    ctx.beginPath(); ctx.moveTo(Rrect[0].x,Rrect[0].y); for(let i=1;i<4;i++) ctx.lineTo(Rrect[i].x,Rrect[i].y); ctx.closePath(); ctx.fill(); ctx.stroke();
 
-    // треугольник
-    ctx.lineJoin='round'; ctx.lineCap='round';
+    // внутренние грани (для опоры треугольника)
+    const Li={x: (Lrect[1].x+Lrect[2].x)/2, y:(Lrect[1].y+Lrect[2].y)/2};  // правая грань левого фланца (середина)
+    const Ri={x: (Rrect[0].x+Rrect[3].x)/2, y:(Rrect[0].y+Rrect[3].y)/2};  // левая грань правого фланца (середина)
+
+    // треугольник (основание на левой внутренней грани, нос в сторону правого фланца)
+    const triHalfH = Math.min(flangeH*0.9, base*2.2*compScale);
+    const triLen   = Math.min(gapLen*0.9,  base*6.2*compScale);
+    const A={x:Li.x + nx*triHalfH, y:Li.y + ny*triHalfH};
+    const B={x:Li.x - nx*triHalfH, y:Li.y - ny*triHalfH};
+    const C={x:Li.x + ux*triLen,   y:Li.y + uy*triLen};
+
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(C.x,C.y); ctx.lineTo(B.x,B.y); ctx.closePath();
-    ctx.fillStyle='#111'; ctx.globalAlpha=0.06; ctx.fill();   // лёгкая заливка
-    ctx.globalAlpha=1; ctx.strokeStyle='#111'; ctx.stroke();
+    ctx.fillStyle='#111'; ctx.globalAlpha=0.06; ctx.fill();
+    ctx.globalAlpha=1; ctx.stroke();
 
     ctx.restore();
 
@@ -413,7 +429,7 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v824';
+  const ver = new URLSearchParams(location.search).get('v') || 'v825';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -445,7 +461,7 @@
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit(); toast(`${ver}: CHECK — два фланца и треугольник между ними.`);
+  fit(); toast(`${ver}: CHECK — два фланца-бруска и треугольник между ними.`);
 })();
 </script>
 </body>
