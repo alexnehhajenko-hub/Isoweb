@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v821</title>
+<title>Pro Trace — v823</title>
 <style>
-  :root{--violet:#6b1dff; --violetDeep:#5414e6; --border:#e7e3f7}
-  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
+  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
   canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
   .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px}
@@ -81,11 +81,9 @@
   <div id="toast" class="toast"></div>
 
 <script>
-(()=>{
-  // ===== helpers & global =====
-  const toast=(t,ms=1600)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
-  window.addEventListener('error', e=>toast('Ошибка: '+(e.message||'unknown')));
-
+(()=>{"use strict";
+  // ===== helpers =====
+  const toast=(t,ms=1400)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
   const DPR=Math.max(1,window.devicePixelRatio||1);
   const cv=document.getElementById('cv');
   const ctx=cv.getContext('2d',{alpha:false});
@@ -94,21 +92,15 @@
   const view={scale:1,tx:0,ty:0};
   let bg=null,bw=0,bh=0;
 
-  const segs=[];              // {a:{x,y}, b:{x,y}}
-  const comps=[];             // {segIndex,t,type}
+  const segs=[];     // {a:{x,y}, b:{x,y}}
+  const comps=[];    // {segIndex,t,type}
+  let mode='hand';   // hand | line | edit | place
+  let first=null, preview=null, editing=null;
 
-  let mode='hand';            // hand | line | edit | place
-  let first=null, preview=null;
-  let editing=null;
+  const params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
+  let compScale=1.1;
 
-  const params={
-    linePx:10,               // толщина трубы (в пикселях экрана)
-    lineColor:'#1f6bff',     // цвет трубы
-    snapRadiusPx:22
-  };
-  let compScale = 1.1;       // множитель размера арматуры
-
-  const sPx = (px)=>px/view.scale; // экранные пиксели -> мировые единицы
+  const sPx=(px)=>px/view.scale;
   const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
 
   // ===== fit / coords =====
@@ -119,7 +111,7 @@
   const w2s=(x,y)=>({x:x*view.scale+view.tx,y:y*view.scale+view.ty});
   function clampView(){ if(!bg) return; const W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; const minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); const minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
 
-  // ===== drawing helpers =====
+  // ===== draw primitives =====
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
@@ -139,177 +131,104 @@
   function compBasis(seg,t){ const g=segGeom(seg); const x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x,y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
 
   function drawBadge(sx,sy,txt){
-    const padH=6, r=7, h=18; ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
+    const padH=6, h=18, r=7; ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
     const w=ctx.measureText(txt).width+padH*2; const x=sx+8, y=sy-8-h;
     ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
     ctx.beginPath(); const rr=Math.min(r,w/2,h/2);
     ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt, x+padH, y+h/2);
+    ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt, x+padH, y+h/2);
   }
 
-  // ===== components (масштабируются вместе с трубой) =====
+  // ===== components =====
   function drawBallValve(seg,t){
-    // «Копия» сварного шарового крана: фиолетовый корпус + чёрная ручка.
-    const b=compBasis(seg,t);
-    const base = sPx(params.linePx);
-
-    // пропорции
-    const bodyLen = base * 12.0 * compScale; // длина капсулы
-    const bodyR   = base * 3.2  * compScale; // радиус корпуса
-    const coneL   = base * 3.8  * compScale; // длина конуса
-    const pipeR   = base * 1.6  * compScale; // радиус «патрубка» (под трубу)
-    const ballR   = base * 2.3  * compScale; // шар
-    const neckH   = base * 3.2  * compScale; // шейка
-    const neckR   = base * 1.0  * compScale; // радиус шейки
-    const handleL = base * 7.5  * compScale; // ручка длина
-    const handleW = base * 1.0  * compScale; // ручка толщина
-    const ringW   = Math.max(1, sPx(1.8));   // «сварной поясок»
-    const lw      = Math.max(1, sPx(2.0));
-
+    const b=compBasis(seg,t), base=sPx(params.linePx);
+    const bodyLen=base*12*compScale, bodyR=base*3.2*compScale;   // капсула
+    const coneL=base*3.8*compScale, pipeR=base*1.6*compScale;    // конусы к трубе
+    const ballR=base*2.3*compScale;                               // шар
+    const neckH=base*3.0*compScale, neckR=base*1.0*compScale;     // шейка
+    const handleL=base*7.0*compScale, handleW=base*1.0*compScale; // ручка
     const nx=b.nx, ny=b.ny, ux=b.ux, uy=b.uy;
+    const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
+    const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+    const lw=Math.max(1,sPx(2));
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // центры торцов корпуса
-    const C1 = {x:b.x - ux*bodyLen/2, y:b.y - uy*bodyLen/2};
-    const C2 = {x=b.x + ux*bodyLen/2, y=b.y + uy*bodyLen/2};
-    // точки конца конусов (стык с трубой)
-    const P1 = {x:C1.x - ux*coneL, y:C1.y - uy*coneL};
-    const P2 = {x:C2.x + ux*coneL, y:C2.y + uy*coneL};
-
-    ctx.save();
-    ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.lineJoin='round'; ctx.lineCap='round';
-
-    // --- КОРПУС (капсула) ---
+    // корпус-капсула
     ctx.beginPath();
-    ctx.moveTo(C1.x - nx*bodyR, C1.y - ny*bodyR);
-    ctx.lineTo(C2.x - nx*bodyR, C2.y - ny*bodyR);
-    ctx.arc(C2.x, C2.y, bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
-    ctx.lineTo(C1.x + nx*bodyR, C1.y + ny*bodyR);
-    ctx.arc(C1.x, C1.y, bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
+    ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
+    ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
+    ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
+    ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
+    ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
     ctx.closePath();
-    // заливка фиолетовым + тонкая обводка
-    ctx.fillStyle='#6b1dff';
-    ctx.fill();
-    ctx.lineWidth=lw;
-    ctx.strokeStyle='#2b145f';
-    ctx.stroke();
+    ctx.fillStyle='#6b1dff'; ctx.fill();
+    ctx.lineWidth=lw; ctx.strokeStyle='#2b145f'; ctx.stroke();
 
-    // --- КОНУСНЫЕ ПЕРЕХОДЫ к трубе ---
-    // левый
+    // конусные переходы
     ctx.beginPath();
-    ctx.moveTo(P1.x - nx*pipeR, P1.y - ny*pipeR);
-    ctx.lineTo(C1.x - nx*bodyR, C1.y - ny*bodyR);
-    ctx.lineTo(C1.x + nx*bodyR, C1.y + ny*bodyR);
-    ctx.lineTo(P1.x + nx*pipeR, P1.y + ny*pipeR);
-    ctx.closePath();
-    ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+    ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
+    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // правый
     ctx.beginPath();
-    ctx.moveTo(C2.x - nx*bodyR, C2.y - ny*bodyR);
-    ctx.lineTo(P2.x - nx*pipeR, P2.y - ny*pipeR);
-    ctx.lineTo(P2.x + nx*pipeR, P2.y + ny*pipeR);
-    ctx.lineTo(C2.x + nx*bodyR, C2.y + ny*bodyR);
-    ctx.closePath();
-    ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+    ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
+    ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // сварные «кольца» на стыке конуса и трубы
-    ctx.lineWidth=ringW; ctx.strokeStyle='#221a41';
-    ctx.beginPath(); ctx.moveTo(P1.x - nx*pipeR, P1.y - ny*pipeR); ctx.lineTo(P1.x + nx*pipeR, P1.y + ny*pipeR); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(P2.x - nx*pipeR, P2.y - ny*pipeR); ctx.lineTo(P2.x + nx*pipeR, P2.y + ny*pipeR); ctx.stroke();
+    // шар
+    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
-    // --- ШАР внутри ---
-    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2);
-    ctx.fillStyle='#ffffff'; ctx.fill();
-    ctx.lineWidth=lw; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
-
-    // --- ШЕЙКА + ЧЁРНАЯ РУЧКА ---
-    const top = {x:b.x + nx*bodyR, y:b.y + ny*bodyR};
-    const neckTop = {x:top.x + nx*neckH, y:top.y + ny*neckH};
-
-    // шейка (круг крышки + стойка)
-    ctx.lineWidth=lw; ctx.strokeStyle='#1b1b1b';
-    ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.stroke();
+    // шейка + чёрная ручка
+    const top={x:b.x+nx*bodyR, y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH, y:top.y+ny*neckH};
+    ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=lw; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
 
-    // ручка (прямоугольная чёрная, немного со скосом)
-    ctx.save();
-    ctx.fillStyle='#101015';
+    const hw=handleW/2;
+    ctx.fillStyle='#111';
     ctx.beginPath();
-    const hw = handleW/2;
-    // прямоугольник, ориентированный по оси трубы
-    ctx.moveTo(neckTop.x - nx*hw,            neckTop.y - ny*hw);
-    ctx.lineTo(neckTop.x + ux*handleL - nx*hw, neckTop.y + uy*handleL - ny*hw);
-    ctx.lineTo(neckTop.x + ux*handleL + nx*hw, neckTop.y + uy*handleL + ny*hw);
-    ctx.lineTo(neckTop.x + nx*hw,            neckTop.y + ny*hw);
+    ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
+    ctx.lineTo(neckTop.x+ux*handleL-nx*hw, neckTop.y+uy*handleL-ny*hw);
+    ctx.lineTo(neckTop.x+ux*handleL+nx*hw, neckTop.y+uy*handleL+ny*hw);
+    ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw);
     ctx.closePath(); ctx.fill();
-    ctx.restore();
-
-    // --- СТЫКОВКА С ТРУБОЙ ---
-    // Ничего специально не подрезаем: корпус и конусы построены вдоль оси сегмента,
-    // торцы конусов P1 и P2 лежат ровно на оси трубы, поэтому «садится» идеально.
 
     ctx.restore();
-
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
   function drawCheckValve(seg,t){
-    const b=compBasis(seg,t);
-    const base = sPx(params.linePx);
-    const seatLen = base*9.0*compScale;
-    const flangeR = base*2.8*compScale;
-    const lw   = Math.max(1, sPx(2.0));
-
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.strokeStyle='#111'; ctx.lineWidth=lw;
-
-    const Lx=b.x - b.ux*seatLen/2, Ly=b.y - b.uy*seatLen/2;
-    const Rx=b.x + b.ux*seatLen/2, Ry=b.y + b.uy*seatLen/2;
-
-    // фланцы
-    ctx.beginPath(); ctx.arc(Lx,Ly,flangeR,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(Rx,Ry,flangeR,0,Math.PI*2); ctx.stroke();
-
-    // перемычка
-    ctx.lineWidth=Math.max(1, sPx(1.8));
-    ctx.beginPath(); ctx.moveTo(Lx,Ly); ctx.lineTo(Rx,Ry); ctx.stroke();
-
-    // символ "двойной треугольник"
-    ctx.lineWidth=Math.max(1, sPx(2.2));
-    const symLen = base*5.8*compScale, symW = base*3.6*compScale, ax=b.ux, ay=b.uy;
-    const A = { x:b.x - ax*symLen/2 - b.nx*symW/2, y:b.y - ay*symLen/2 - b.ny*symW/2 };
-    const B = { x:b.x - ax*symLen/2 + b.nx*symW/2, y:b.y - ay*symLen/2 + b.ny*symW/2 };
-    const C = { x:b.x,                              y:b.y };
-    const D = { x:b.x + ax*symLen/2 + b.nx*symW/2,  y:b.y + ay*symLen/2 + b.ny*symW/2 };
-    const E = { x:b.x + ax*symLen/2 - b.nx*symW/2,  y:b.y + ay*symLen/2 - b.ny*symW/2 };
+    const b=compBasis(seg,t), base=sPx(params.linePx);
+    const len=base*9*compScale, flangeR=base*2.6*compScale, lw=Math.max(1,sPx(2));
+    const L={x:b.x-b.ux*len/2,y:b.y-b.uy*len/2}, R={x:b.x+b.ux*len/2,y:b.y+b.uy*len/2};
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineWidth=lw; ctx.strokeStyle='#111';
+    ctx.beginPath(); ctx.arc(L.x,L.y,flangeR,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(R.x,R.y,flangeR,0,Math.PI*2); ctx.stroke();
+    ctx.lineWidth=Math.max(1,sPx(1.8)); ctx.beginPath(); ctx.moveTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.stroke();
+    // два треугольника
+    const symLen=base*5.6*compScale, symW=base*3.4*compScale, ax=b.ux, ay=b.uy;
+    const A={x:b.x-ax*symLen/2-b.nx*symW/2,y:b.y-ay*symLen/2-b.ny*symW/2};
+    const B={x:b.x-ax*symLen/2+b.nx*symW/2,y:b.y-ay*symLen/2+b.ny*symW/2};
+    const C={x:b.x,y:b.y};
+    const D={x:b.x+ax*symLen/2+b.nx*symW/2,y:b.y+ay*symLen/2+b.ny*symW/2};
+    const E={x:b.x+ax*symLen/2-b.nx*symW/2,y:b.y+ay*symLen/2-b.ny*symW/2};
+    ctx.lineWidth=Math.max(1,sPx(2.2));
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(C.x,C.y); ctx.lineTo(B.x,B.y); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(D.x,D.y); ctx.lineTo(C.x,C.y); ctx.lineTo(E.x,E.y); ctx.stroke();
-
     ctx.restore();
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
 
   function drawPump(seg,t){
-    const b=compBasis(seg,t);
-    const base = sPx(params.linePx);
-    const R = base*4.2*compScale;
-    const lw = Math.max(1, sPx(2.4));
-
+    const b=compBasis(seg,t), base=sPx(params.linePx), R=base*4.2*compScale, lw=Math.max(1,sPx(2.4));
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     ctx.fillStyle='#fff'; ctx.strokeStyle='#111'; ctx.lineWidth=lw;
     ctx.beginPath(); ctx.arc(b.x,b.y,R,0,Math.PI*2); ctx.fill(); ctx.stroke();
-
-    // лопасть
-    const aLen=R*0.9;
-    ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1, sPx(2.2)); ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(b.x - b.ux*aLen*0.4, b.y - b.uy*aLen*0.4); ctx.lineTo(b.x + b.ux*aLen*0.5, b.y + b.uy*aLen*0.5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(b.x + b.ux*aLen*0.5, b.y + b.uy*aLen*0.5);
-    ctx.lineTo(b.x + b.ux*aLen*0.28 + (-b.uy)*aLen*0.22, b.y + b.uy*aLen*0.28 + ( b.ux)*aLen*0.22);
-    ctx.lineTo(b.x + b.ux*aLen*0.28 - (-b.uy)*aLen*0.22, b.y + b.uy*aLen*0.28 - ( b.ux)*aLen*0.22);
+    const a=R*0.9; ctx.lineWidth=Math.max(1,sPx(2.2)); ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(b.x-b.ux*a*0.4,b.y-b.uy*a*0.4); ctx.lineTo(b.x+b.ux*a*0.5,b.y+b.uy*a*0.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.x+b.ux*a*0.5,b.y+b.uy*a*0.5);
+    ctx.lineTo(b.x+b.ux*a*0.28+(-b.uy)*a*0.22,b.y+b.uy*a*0.28+( b.ux)*a*0.22);
+    ctx.lineTo(b.x+b.ux*a*0.28-(-b.uy)*a*0.22,b.y+b.uy*a*0.28-( b.ux)*a*0.22);
     ctx.closePath(); ctx.fillStyle='#111'; ctx.fill();
-
     ctx.restore();
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
@@ -319,13 +238,11 @@
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
     drawSegments();
-
     for(const c of comps){ const seg=segs[c.segIndex]; if(!seg) continue;
       if(c.type==='valve') drawBallValve(seg,c.t);
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
     }
-
     if(first){
       const p=w2s(first.x,first.y);
       ctx.setTransform(1,0,0,1,0,0);
@@ -340,25 +257,22 @@
       ctx.setLineDash([]);
       const p=w2s(preview.x,preview.y);
       ctx.setTransform(1,0,0,1,0,0);
-      ctx.fillStyle=params.lineColor;
-      ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
     }
     if(mode==='edit' && editing){ const s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
   }
-  let raf=0, dirty=false;
-  const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
+  let raf=0, dirty=false; const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
 
   // ===== hit & snap =====
   function allNodes(){ const out=[]; for(const s of segs){ out.push(s.a,s.b);} return out; }
   function snapToNodes(raw){ const R=params.snapRadiusPx/view.scale; let best=null,bd=Infinity;
     for(const n of allNodes()){ const d=Math.hypot(n.x-raw.x,n.y-raw.y); if(d<bd){ bd=d; best=n; } }
-    if(best && bd<=R) return {x:best.x,y:best.y}; return raw;
+    return (best && bd<=R) ? {x:best.x,y:best.y} : raw;
   }
   function findEndpointNear(sx,sy,rPx=20){
     let best=null,bd=Infinity;
     for(let i=0;i<segs.length;i++){
-      const s=segs[i];
-      const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+      const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
       if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
       if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
@@ -368,36 +282,31 @@
   function findNearestSegment(sx,sy,maxDistPx=28){
     let bestI=-1,bd=Infinity,bt=0;
     for(let i=0;i<segs.length;i++){
-      const s=segs[i];
-      const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+      const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
       const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
       const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
       if(d<bd){ bd=d; bestI=i; bt=t; }
     }
-    if(bestI!==-1 && bd<=maxDistPx) return {segIndex:bestI,t:bt};
-    return null;
+    return (bestI!==-1 && bd<=maxDistPx) ? {segIndex:bestI,t:bt} : null;
   }
 
-  // ===== input: Pointer Events =====
+  // ===== input =====
   const TAP_TIME=300, TAP_MOVE=14*DPR, HOLD_MS=500;
-  const pointers=new Map();     // id -> {sx,sy}
-  const downs=new Map();        // id -> {t0,sx,sy}
-  let prevCenter=null, prevDist=null;
-  let holdTimer=null, holdId=null;
+  const pointers=new Map(); const downs=new Map();
+  let prevCenter=null, prevDist=null, holdTimer=null, holdId=null;
 
   function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
   function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 
   cv.addEventListener('pointerdown', e=>{
-    e.preventDefault(); cv.setPointerCapture?.(e.pointerId);
+    e.preventDefault(); try{cv.setPointerCapture(e.pointerId);}catch{}
     const {sx,sy}=canvasXY(e);
     pointers.set(e.pointerId,{sx,sy});
     downs.set(e.pointerId,{t0:performance.now(),sx,sy});
     if(pointers.size===2){
-      const arr=[...pointers.values()];
       prevCenter=centroid();
-      prevDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
+      const arr=[...pointers.values()]; prevDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
       clearTimeout(holdTimer); holdTimer=null; holdId=null;
     }else if(pointers.size===1 && !first && mode!=='place'){
       holdId=e.pointerId;
@@ -413,12 +322,10 @@
 
   cv.addEventListener('pointermove', e=>{
     if(!pointers.has(e.pointerId)) return;
-    const {sx,sy}=canvasXY(e);
-    pointers.set(e.pointerId,{sx,sy});
+    const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
 
     if(pointers.size===2){
-      const arr=[...pointers.values()];
-      const nowCenter=centroid();
+      const arr=[...pointers.values()]; const nowCenter=centroid();
       const nowDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
       if(prevCenter && prevDist && nowCenter){
         const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
@@ -448,7 +355,7 @@
   cv.addEventListener('pointerup', e=>{
     const d=downs.get(e.pointerId);
     const p=pointers.get(e.pointerId)||{sx:0,sy:0};
-    const isTap = !!d && (performance.now()-d.t0<=TAP_TIME) && (Math.hypot(p.sx-d.sx, p.sy-d.sy)<=TAP_MOVE);
+    const isTap=!!d && (performance.now()-d.t0<=TAP_TIME) && (Math.hypot(p.sx-d.sx,p.sy-d.sy)<=TAP_MOVE);
 
     if(mode==='edit' && editing){
       const snap=snapToNodes(s2w(p.sx,p.sy));
@@ -486,15 +393,13 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  // версия из URL
-  const ver = new URLSearchParams(location.search).get('v') || 'v821';
+  const ver = new URLSearchParams(location.search).get('v') || 'v823';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
   function loadImageFile(f){
     if(!f) return;
-    const img=new Image();
-    const url=URL.createObjectURL(f);
+    const img=new Image(); const url=URL.createObjectURL(f);
     img.onload=()=>{ 
       const maxSide=Math.max(img.naturalWidth,img.naturalHeight);
       let w=img.naturalWidth,h=img.naturalHeight;
@@ -502,32 +407,25 @@
       const c=document.createElement('canvas'); c.width=w; c.height=h;
       c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
       bg=c; bw=w; bh=h; fitToScreen(); need(); toast('Фото добавлено');
-      URL.revokeObjectURL(url);
-      resetInputs();
+      URL.revokeObjectURL(url); resetInputs();
     };
     img.onerror=()=>{ URL.revokeObjectURL(url); resetInputs(); toast('Не удалось загрузить изображение'); };
     img.src=url;
   }
   $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
-  $('btnExport').onclick=()=>{
-    const url=cv.toDataURL('image/png',0.95);
-    const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click();
-  };
+  $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
 
   // Арматура
   let currentComp='valve';
   document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
-
   const scaleInput=$('scale'), scaleVal=$('scaleVal');
-  const updateScale=()=>{ compScale = Number(scaleInput.value)/100; scaleVal.textContent = compScale.toFixed(2)+'×'; need(); };
-  scaleInput.addEventListener('input', updateScale); updateScale();
-
+  const updateScale=()=>{ compScale=Number(scaleInput.value)/100; scaleVal.textContent=compScale.toFixed(2)+'×'; need(); };
+  scaleInput.addEventListener('input',updateScale); updateScale();
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit();
-  toast(`${ver}: фиолетовый шаровый кран с чёрной ручкой, точная стыковка с трубой.`);
+  fit(); toast(`${ver}: шаровый кран фиолетовый с чёрной ручкой. Масштабируется и стыкуется с трубой.`);
 })();
 </script>
 </body>
