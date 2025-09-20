@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v827</title>
+<title>Pro Trace — v828</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -100,7 +100,7 @@
   const params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
   let compScale=1.1;             // общий масштаб арматуры
 
-  // экранные px -> мировые ед. (с учётом зума)
+  // экранные px -> мировые (учёт зума)
   const sPx=(px)=>px/view.scale;
   const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
 
@@ -135,17 +135,16 @@
     const padH=6, h=18, r=7; ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
     const w=ctx.measureText(txt).width+padH*2; const x=sx+8, y=sy-8-h;
     ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
-    ctx.beginPath(); const rr=Math.min(r,w/2,h/2);
-    ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
+    const rr=Math.min(r,w/2,h/2);
+    ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
     ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt, x+padH, y+h/2);
   }
 
   // ===== components =====
   function drawBallValve(seg,t){
     const b=compBasis(seg,t);
-    const base=sPx(params.linePx)*compScale;  // привязка к толщине трубы + масштаб
+    const base=sPx(params.linePx)*compScale;
 
-    // пропорции вентиля (компактно, но читаемо)
     const bodyLen=base*10.5, bodyR=base*2.6;
     const coneL =base*3.2,  pipeR=base*1.4;
     const ballR =base*2.0;
@@ -175,7 +174,6 @@
     ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
     ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
-
     ctx.beginPath();
     ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
@@ -202,57 +200,51 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
-  // === CHECK: два «фланца» (утолщённая труба) и большой треугольник между ними
+  // === CHECK (масштаб 1:1 с вентилем): капсульный корпус + конусные патрубки, стрелка-треугольник по потоку
   function drawCheckValve(seg,t){
     const b=compBasis(seg,t);
-    const base=sPx(params.linePx)*compScale;      // всё от толщины линии
-    const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+    const base=sPx(params.linePx)*compScale;  // те же размеры, что у вентиля
 
-    // геометрия фланцев
-    const pipeR = base*0.5;            // «радиус трубы» (примерно половина linePx)
-    const flangeHalfH = pipeR*1.2;     // фланец толще трубы
-    const flangeLen   = base*3.2;      // длина фланца вдоль оси
-    const gapLen      = base*5.2;      // чистый просвет между фланцами
-
-    const Lc={x:b.x-ux*(gapLen/2+flangeLen/2), y:b.y-uy*(gapLen/2+flangeLen/2)};
-    const Rc={x:b.x+ux*(gapLen/2+flangeLen/2), y:b.y+uy*(gapLen/2+flangeLen/2)};
-
-    // ориентированный прямоугольник по центру
-    function rect(center,len,halfH){
-      const ax=ux*(len/2), ay=uy*(len/2), px=nx*halfH, py=ny*halfH;
-      return [
-        {x:center.x-ax-px, y:center.y-ay-py},
-        {x:center.x+ax-px, y:center.y+ay-py},
-        {x:center.x+ax+px, y:center.y+ay+py},
-        {x:center.x-ax+px, y:center.y-ay+py}
-      ];
-    }
-
-    const Lr=rect(Lc,flangeLen,flangeHalfH);
-    const Rr=rect(Rc,flangeLen,flangeHalfH);
-
-    // треугольник (крупный, почти на весь зазор). Ориентируем ВВЕРХ ЭКРАНА.
-    const triH = base*3.8;
-    const triW = base*4.6;
-    const mid={x:b.x, y:b.y};
-    const A={x:mid.x,           y:mid.y - triH};
-    const B={x:mid.x - triW/2,  y:mid.y + triH*0.55};
-    const C={x:mid.x + triW/2,  y:mid.y + triH*0.55};
-
+    // берём такие же пропорции, слегка короче корпуса
+    const bodyLen=base*9.5,  bodyR=base*2.4;
+    const coneL =base*3.2,   pipeR=base*1.4;
     const lw=Math.max(1,sPx(2));
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.lineJoin='round'; ctx.lineCap='round'; ctx.lineWidth=lw; ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
+    const nx=b.nx, ny=b.ny, ux=b.ux, uy=b.uy;
+    const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
+    const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
 
-    // левый фланец
-    ctx.beginPath(); ctx.moveTo(Lr[0].x,Lr[0].y); for(let i=1;i<4;i++) ctx.lineTo(Lr[i].x,Lr[i].y); ctx.closePath(); ctx.fill(); ctx.stroke();
-    // правый фланец
-    ctx.beginPath(); ctx.moveTo(Rr[0].x,Rr[0].y); for(let i=1;i<4;i++) ctx.lineTo(Rr[i].x,Rr[i].y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
 
-    // треугольник
+    // корпус-капсула
+    ctx.beginPath();
+    ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
+    ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
+    ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
+    ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
+    ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
+    ctx.closePath();
+    ctx.fillStyle='#6b1dff'; ctx.fill();
+    ctx.lineWidth=lw; ctx.strokeStyle='#2b145f'; ctx.stroke();
+
+    // конусные переходы
+    ctx.beginPath();
+    ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
+    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
+    ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+
+    // символ направления: треугольник вдоль оси (в сторону +ux,+uy)
+    const triLen=bodyLen*0.45, triHalf=bodyR*0.55;
+    const A={x:b.x + ux*triLen/2, y:b.y + uy*triLen/2};
+    const B={x:b.x - ux*triLen/2 + nx*triHalf, y:b.y - uy*triLen/2 + ny*triHalf};
+    const C={x:b.x - ux*triLen/2 - nx*triHalf, y:b.y - uy*triLen/2 - ny*triHalf};
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.lineTo(C.x,C.y); ctx.closePath();
-    ctx.fillStyle='rgba(17,17,17,0.08)'; ctx.fill();
-    ctx.strokeStyle='#111'; ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill();
+    ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
     ctx.restore();
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
@@ -433,7 +425,7 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v827';
+  const ver = new URLSearchParams(location.search).get('v') || 'v828';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -465,7 +457,7 @@
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit(); toast(`${ver}: клапан крупнее и пропорционален трубе; вентиль масштабируется корректно.`);
+  fit(); toast(`${ver}: клапан и вентиль масштабируются одинаково.`);
 })();
 </script>
 </body>
