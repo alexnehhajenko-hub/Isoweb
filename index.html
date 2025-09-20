@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v829</title>
+<title>Pro Trace — v830</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -114,14 +114,13 @@
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
     for(const s of segs){
-      // тень
       ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-      // основная линия (толщина поддерживается в экранных px)
       ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=(params.linePx)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
   }
+
   function drawHandleMarker(pt){
     const p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2;
@@ -140,8 +139,9 @@
   }
 
   // ===== КОМПОНЕНТЫ (масштабируются с зумом) =====
-  // ВАЖНО: все размеры считаем в МИРОВЫХ ед.: base = params.linePx * compScale
-  // Линии обводки держим «читаемыми»: lineWidth = (px)/view.scale
+  // Все размеры считаем в мировых ед.: base = params.linePx * compScale
+  // Толщины линий делаем читаемыми: lineWidth = px / view.scale
+
   function drawBallValve(seg,t){
     const b=compBasis(seg,t);
     const base = params.linePx * compScale;
@@ -202,7 +202,6 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
-  // Клапан (капсульный, масштаб 1:1 с вентилем), внутри стрелка-треугольник по потоку
   function drawCheckValve(seg,t){
     const b=compBasis(seg,t);
     const base = params.linePx * compScale;
@@ -239,7 +238,7 @@
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // стрелка (треугольник) по направлению потока (в сторону +ux,+uy)
+    // стрелка (треугольник) по потоку
     const triLen=bodyLen*0.45, triHalf=bodyR*0.55;
     const A={x:b.x + ux*triLen/2, y:b.y + uy*triLen/2};
     const B={x:b.x - ux*triLen/2 + nx*triHalf, y:b.y - uy*triLen/2 + ny*triHalf};
@@ -252,20 +251,100 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
 
+  // === НОВЫЙ PUMP: мотор сверху, «улитка» и два фланца по оси трубы
   function drawPump(seg,t){
     const b=compBasis(seg,t);
     const base = params.linePx * compScale;
-    const R=base*4.0;
+
+    // геометрия
+    const volR   = base*4.2;   // улитка
+    const flLen  = base*2.6;   // длина фланца вдоль оси
+    const flHalf = base*1.6;   // «радиус» фланца
+    const motorW = base*5.2;   // ширина двигателя
+    const motorH = base*7.2;   // высота двигателя
+    const sockH  = base*1.4;   // «переход» между улиткой и мотором
+
+    const {ux,uy,nx,ny}=b;
+
+    // центры фланцев по оси трубы
+    const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)};
+    const Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.fillStyle='#fff'; ctx.strokeStyle='#111'; ctx.lineWidth=2.2/view.scale;
-    ctx.beginPath(); ctx.arc(b.x,b.y,R,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    const a=R*0.9; ctx.lineWidth=2.0/view.scale; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(b.x-b.ux*a*0.4,b.y-b.uy*a*0.4); ctx.lineTo(b.x+b.ux*a*0.5,b.y+b.uy*a*0.5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(b.x+b.ux*a*0.5,b.y+b.uy*a*0.5);
-    ctx.lineTo(b.x+b.ux*a*0.28+(-b.uy)*a*0.22,b.y+b.uy*a*0.28+( b.ux)*a*0.22);
-    ctx.lineTo(b.x+b.ux*a*0.28-(-b.uy)*a*0.22,b.y+b.uy*a*0.28-( b.ux)*a*0.22);
-    ctx.closePath(); ctx.fillStyle='#111'; ctx.fill();
+    ctx.lineJoin='round'; ctx.lineCap='round';
+
+    // УЛИТКА
+    ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.2/view.scale;
+    ctx.beginPath(); ctx.arc(b.x,b.y,volR,0,Math.PI*2); ctx.fill(); ctx.stroke();
+
+    // Крышка улитки (обводка потоньше)
+    ctx.beginPath(); ctx.arc(b.x,b.y,volR*0.6,0,Math.PI*2);
+    ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
+
+    // ДВА ФЛАНЦА (прямоугольники с отверстиями)
+    function flange(cx,cy){
+      const ax=ux*(flLen/2), ay=uy*(flLen/2), px=nx*flHalf, py=ny*flHalf;
+      // тело фланца
+      ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
+      ctx.beginPath();
+      ctx.moveTo(cx-ax-px, cy-ay-py);
+      ctx.lineTo(cx+ax-px, cy+ay-py);
+      ctx.lineTo(cx+ax+px, cy+ay+py);
+      ctx.lineTo(cx-ax+px, cy-ay+py);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      // «отверстие»
+      ctx.beginPath(); ctx.arc(cx,cy,flHalf*0.45,0,Math.PI*2);
+      ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
+    }
+    flange(Lc.x,Lc.y);
+    flange(Rc.x,Rc.y);
+
+    // МОТОР (прямоугольник с рёбрами) — смещён вверх по нормали
+    const baseTop = {x:b.x+nx*(volR+sockH), y:b.y+ny*(volR+sockH)};
+    const mL = {x:baseTop.x - nx*(motorW/2), y:baseTop.y - ny*(motorW/2)};
+    const mR = {x:baseTop.x + nx*(motorW/2), y:baseTop.y + ny*(motorW/2)};
+    const mT = {x:baseTop.x + nx*(motorW/2) + ux*motorH, y:baseTop.y + ny*(motorW/2) + uy*motorH};
+    const mB = {x:baseTop.x - nx*(motorW/2) + ux*motorH, y:baseTop.y - ny*(motorW/2) + uy*motorH};
+
+    // корпус мотора
+    ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
+    ctx.beginPath();
+    ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // рёбра охлаждения (несколько линий)
+    ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.2/view.scale;
+    const ribs=6;
+    for(let i=1;i<ribs;i++){
+      const t=i/ribs;
+      const a={x:mL.x + ux*motorH*t, y:mL.y + uy*motorH*t};
+      const bpt={x:mR.x + ux*motorH*t, y:mR.y + uy*motorH*t};
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke();
+    }
+
+    // маленькая клеммная коробка сбоку
+    const kW=motorW*0.5, kH=motorH*0.35;
+    const kC={x:baseTop.x + nx*(motorW*0.65), y:baseTop.y + ny*(motorW*0.65)};
+    ctx.fillStyle='#26355a'; ctx.strokeStyle='#0e1833'; ctx.lineWidth=1.6/view.scale;
+    ctx.beginPath();
+    ctx.moveTo(kC.x - nx*(kW/2), kC.y - ny*(kW/2));
+    ctx.lineTo(kC.x - nx*(kW/2) + ux*kH, kC.y - ny*(kW/2) + uy*kH);
+    ctx.lineTo(kC.x + nx*(kW/2) + ux*kH, kC.y + ny*(kW/2) + uy*kH);
+    ctx.lineTo(kC.x + nx*(kW/2), kC.y + ny*(kW/2));
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    // стрелка-поток на улитке
+    const aLen=volR*0.9, aW=1.8/view.scale;
+    ctx.strokeStyle='#111'; ctx.lineWidth=aW; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(b.x - ux*aLen*0.35, b.y - uy*aLen*0.35);
+    ctx.lineTo(b.x + ux*aLen*0.45, b.y + uy*aLen*0.45); ctx.stroke();
+    ctx.beginPath();
+    const ex={x:b.x + ux*aLen*0.45, y:b.y + uy*aLen*0.45};
+    ctx.moveTo(ex.x + (-uy)*aLen*0.16, ex.y + ( ux)*aLen*0.16);
+    ctx.lineTo(ex.x, ex.y);
+    ctx.lineTo(ex.x - (-uy)*aLen*0.16, ex.y - ( ux)*aLen*0.16);
+    ctx.stroke();
+
     ctx.restore();
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
@@ -312,7 +391,7 @@
       const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
       if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
-      if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
+      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
     }
     return best;
   }
@@ -430,7 +509,7 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v829';
+  const ver = new URLSearchParams(location.search).get('v') || 'v830';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -462,7 +541,7 @@
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit(); toast(`${ver}: арматура масштабируется вместе с трубой; размер регулируется ползунком.`);
+  fit(); toast(`${ver}: насос добавлен; вся арматура масштабируется вместе с трубой.`);
 })();
 </script>
 </body>
