@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v823</title>
+<title>Pro Trace — v824</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -176,7 +176,7 @@
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
     // шар
-    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x,b.y,base*2.3*compScale,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
     // шейка + чёрная ручка
     const top={x:b.x+nx*bodyR, y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH, y:top.y+ny*neckH};
@@ -196,25 +196,45 @@
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
+  // === НОВЫЙ CHECK: два фланца + один треугольник между ними ===
   function drawCheckValve(seg,t){
     const b=compBasis(seg,t), base=sPx(params.linePx);
-    const len=base*9*compScale, flangeR=base*2.6*compScale, lw=Math.max(1,sPx(2));
-    const L={x:b.x-b.ux*len/2,y:b.y-b.uy*len/2}, R={x:b.x+b.ux*len/2,y:b.y+b.uy*len/2};
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineWidth=lw; ctx.strokeStyle='#111';
-    ctx.beginPath(); ctx.arc(L.x,L.y,flangeR,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(R.x,R.y,flangeR,0,Math.PI*2); ctx.stroke();
-    ctx.lineWidth=Math.max(1,sPx(1.8)); ctx.beginPath(); ctx.moveTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.stroke();
-    // два треугольника
-    const symLen=base*5.6*compScale, symW=base*3.4*compScale, ax=b.ux, ay=b.uy;
-    const A={x:b.x-ax*symLen/2-b.nx*symW/2,y:b.y-ay*symLen/2-b.ny*symW/2};
-    const B={x:b.x-ax*symLen/2+b.nx*symW/2,y:b.y-ay*symLen/2+b.ny*symW/2};
-    const C={x:b.x,y:b.y};
-    const D={x:b.x+ax*symLen/2+b.nx*symW/2,y:b.y+ay*symLen/2+b.ny*symW/2};
-    const E={x:b.x+ax*symLen/2-b.nx*symW/2,y:b.y+ay*symLen/2-b.ny*symW/2};
-    ctx.lineWidth=Math.max(1,sPx(2.2));
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(C.x,C.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(D.x,D.y); ctx.lineTo(C.x,C.y); ctx.lineTo(E.x,E.y); ctx.stroke();
+    const seatLen = base*10.0*compScale;                 // расстояние между центрами фланцев
+    const flangeR = base*2.8*compScale;                  // радиус фланца
+    const Lc={x:b.x-b.ux*seatLen/2, y:b.y-b.uy*seatLen/2};
+    const Rc={x:b.x+b.ux*seatLen/2, y:b.y+b.uy*seatLen/2};
+
+    // внутренние «края» фланцев (где начинается зазор под треугольник)
+    const Li={x:Lc.x + b.ux*flangeR, y:Lc.y + b.uy*flangeR};
+    const Ri={x:Rc.x - b.ux*flangeR, y:Rc.y - b.uy*flangeR};
+    const innerLen = Math.hypot(Ri.x-Li.x, Ri.y-Li.y);
+
+    // размеры треугольника
+    const triLen = Math.min(innerLen*0.86, base*6.0*compScale); // длина вдоль оси
+    const triHalfH = Math.min(flangeR*0.9, base*2.2*compScale); // половина высоты поперёк оси
+
+    // вершины треугольника (основание у левого внутреннего края, нос к правому)
+    const A={x:Li.x + b.nx*triHalfH, y:Li.y + b.ny*triHalfH};
+    const B={x:Li.x - b.nx*triHalfH, y:Li.y - b.ny*triHalfH};
+    const C={x:Li.x + b.ux*triLen,   y:Li.y + b.uy*triLen};
+
+    const lw=Math.max(1,sPx(2.0));
+
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+
+    // фланцы
+    ctx.strokeStyle='#111'; ctx.lineWidth=lw;
+    ctx.beginPath(); ctx.arc(Lc.x,Lc.y,flangeR,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(Rc.x,Rc.y,flangeR,0,Math.PI*2); ctx.stroke();
+
+    // треугольник
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(C.x,C.y); ctx.lineTo(B.x,B.y); ctx.closePath();
+    ctx.fillStyle='#111'; ctx.globalAlpha=0.06; ctx.fill();   // лёгкая заливка
+    ctx.globalAlpha=1; ctx.strokeStyle='#111'; ctx.stroke();
+
     ctx.restore();
+
     const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
 
@@ -393,7 +413,7 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v823';
+  const ver = new URLSearchParams(location.search).get('v') || 'v824';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -425,7 +445,7 @@
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit(); toast(`${ver}: шаровый кран фиолетовый с чёрной ручкой. Масштабируется и стыкуется с трубой.`);
+  fit(); toast(`${ver}: CHECK — два фланца и треугольник между ними.`);
 })();
 </script>
 </body>
