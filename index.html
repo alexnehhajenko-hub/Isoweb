@@ -3,18 +3,35 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v856-sizes</title>
+<title>Pro Trace — v857-settings</title>
 <style>
-  :root{--violet:#6b1dff; --violet2:#7c5bff}
+  :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+
   .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
   .zoom{position:fixed;right:8px;top:8px;z-index:11;display:flex;gap:8px}
-  .sizecol{position:fixed;right:8px;top:64px;z-index:11;display:flex;flex-direction:column;gap:8px}
-  .zbtn,.sbtn{height:44px;min-width:44px;border:0;border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.1);font-size:16px;padding:0 10px}
+  .zbtn{height:44px;min-width:44px;border:0;border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.1);font-size:18px}
+
+  .gear{position:fixed;right:8px;top:64px;z-index:12;height:44px;width:44px;border:1px solid var(--border);border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.08);font-size:20px}
+
   .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.70);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11;max-width:92vw}
+
+  /* Панель настроек */
+  .panel-wrap{position:fixed;inset:0;z-index:20;display:none}
+  .panel-wrap.open{display:block}
+  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
+  .panel{position:absolute;top:64px;right:8px;background:#fff;border:1px solid var(--border);
+         border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:12px;width:min(92vw,360px);
+         max-height:80vh;overflow:auto}
+  .panel h4{margin:6px 0 10px 0;font-size:15px}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .row label{min-width:140px;font-size:13px;color:#444}
+  .close{position:sticky;top:0;margin:-6px -6px 6px auto;background:#fff;border:1px solid var(--border);width:32px;height:32px;border-radius:8px}
+  input[type=range]{width:100%}
+  .num{font-variant-numeric:tabular-nums;color:#111;font-weight:700}
 </style>
 </head>
 <body>
@@ -34,11 +51,27 @@
     <button id="btnPlus"  class="zbtn" title="Увеличить">+</button>
   </div>
 
-  <div class="sizecol">
-    <button id="btnThicker" class="sbtn" title="Толще линия">Толще</button>
-    <button id="btnThinner" class="sbtn" title="Тоньше линия">Тоньше</button>
-    <button id="btnCompPlus" class="sbtn" title="Арматура больше">Арматура +</button>
-    <button id="btnCompMinus" class="sbtn" title="Арматура меньше">Арматура −</button>
+  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
+
+  <!-- Панель настроек -->
+  <div id="panelWrap" class="panel-wrap" aria-hidden="true">
+    <div id="panelBackdrop" class="panel-backdrop"></div>
+    <div id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="hSettings">
+      <button id="btnClosePanel" class="close" title="Закрыть">✕</button>
+      <h4 id="hSettings">Настройки</h4>
+
+      <div class="row">
+        <label for="rangeLine">Толщина линии</label>
+        <input id="rangeLine" type="range" min="2" max="56" step="1">
+        <span id="lineVal" class="num">10</span>
+      </div>
+
+      <div class="row">
+        <label for="rangeComp">Арматура ×</label>
+        <input id="rangeComp" type="range" min="0.5" max="3.0" step="0.01">
+        <span id="compVal" class="num">1.15</span>
+      </div>
+    </div>
   </div>
 
   <div id="status" class="status">Статус: Загрузка…</div>
@@ -69,7 +102,7 @@ let mode='line';         // line | place | hand
 let currentComp='valve'; // valve | check | pump
 let first=null, preview=null;
 
-/* базовая шкала: толщина трубы и масштаб арматуры */
+/* базовая шкала */
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
 function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
 function updateStatus(extra=''){
@@ -180,14 +213,14 @@ function drawCheck(seg,t){
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
   ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);
   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
-  ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+  ctx.closePath(); ctx.fillStyle:'#6b1dff'; ctx.fill(); ctx.stroke();
 
   ctx.beginPath();
   ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);
   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
   ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR);
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
-  ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+  ctx.closePath(); ctx.fillStyle:'#6b1dff'; ctx.fill(); ctx.stroke();
 
   // треугольник «вверх» по нормали
   const triBase = base*3.2, triRise = base*3.0;
@@ -219,7 +252,7 @@ function drawPump(seg,t){
   const mL={x:b.x + nx*(volR*0.6) - nx*(motorW/2), y:b.y + ny*(volR*0.6) - ny*(motorW/2)};
   const mR={x:b.x + nx*(volR*0.6) + nx*(motorW/2), y:b.y + ny*(volR*0.6) + ny*(motorW/2)};
   const mT={x:mR.x + ux*motorH, y:mR.y + uy*motorH};
-  const mB={x:mL.x + ux*motorH, y:mL.y + uy*motorH};
+  const mB={x=mL.x + ux*motorH, y=mL.y + uy*motorH};
   ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore(); badgeWorld(b.x,b.y,'PUMP');
 }
@@ -329,7 +362,6 @@ $('btnUndo').onclick =()=>{
   if(last==='seg' && segs.length) segs.pop(); else if(last==='comp' && comps.length) comps.pop();
   need(); updateStatus('Отменено');
 };
-
 /* зум-кнопки */
 function zoomAt(factor){
   const cx=cv.width/2, cy=cv.height/2;
@@ -341,15 +373,29 @@ function zoomAt(factor){
 $('btnPlus').onclick =()=>zoomAt(1.2);
 $('btnMinus').onclick=()=>zoomAt(1/1.2);
 
-/* РАЗМЕРЫ: толщина линии и масштаб арматуры */
-$('btnThicker').onclick =()=>{ params.linePx=clamp(params.linePx+2,2,56); need(); updateStatus('Линия толще'); };
-$('btnThinner').onclick =()=>{ params.linePx=clamp(params.linePx-2,2,56); need(); updateStatus('Линия тоньше'); };
-$('btnCompPlus').onclick =()=>{ params.compScale=clamp(params.compScale*1.12,0.5,3.0); need(); updateStatus('Арматура больше'); };
-$('btnCompMinus').onclick=()=>{ params.compScale=clamp(params.compScale/1.12,0.5,3.0); need(); updateStatus('Арматура меньше'); };
+/* ===== Панель настроек ===== */
+const wrap=$('panelWrap'), backdrop=document.getElementById('panelBackdrop'), panel=document.getElementById('panel');
+const btnSettings=$('btnSettings'), btnClose=document.getElementById('btnClosePanel');
+const rangeLine=document.getElementById('rangeLine'), rangeComp=document.getElementById('rangeComp');
+const lineVal=document.getElementById('lineVal'), compVal=document.getElementById('compVal');
+
+function openPanel(){ wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false'); }
+function closePanel(){ wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); }
+
+btnSettings.onclick=openPanel; btnClose.onclick=closePanel; backdrop.onclick=closePanel;
+['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
+
+/* начальные значения в слайдерах */
+rangeLine.value=params.linePx; lineVal.textContent=params.linePx.toString();
+rangeComp.value=params.compScale; compVal.textContent=params.compScale.toFixed(2);
+
+/* живое обновление параметров */
+rangeLine.oninput=()=>{ params.linePx=clamp(parseInt(rangeLine.value,10)||10,2,56); lineVal.textContent=params.linePx; need(); updateStatus('Толщина обновлена'); };
+rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15,0.5,3.0); compVal.textContent=params.compScale.toFixed(2); need(); updateStatus('Масштаб арматуры обновлён'); };
 
 /* ===== старт ===== */
 fit(); need();
-updateStatus('Готово (v856-sizes)');
+updateStatus('Готово (v857-settings)');
 
 })();
 </script>
