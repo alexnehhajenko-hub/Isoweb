@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v831</title>
+<title>Pro Trace — v832</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -88,8 +88,8 @@
       </div>
       <div class="row">
         <label>Магнит к узлам</label>
-        <div id="magSwitch" class="switch on" role="switch" aria-checked="true" title="Вкл/Выкл"></div>
-        <span class="hint" style="min-width:70px">Вкл</span>
+        <div id="magSwitch" class="switch on" role="switch" aria-checked="true"></div>
+        <span id="magState" class="hint" style="min-width:70px">Вкл</span>
       </div>
       <div class="row">
         <label for="snap">Радиус магнита</label>
@@ -107,8 +107,9 @@
 
 <script>
 (()=>{"use strict";
-  // ===== helpers =====
-  const toast=(t,ms=1400)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
+  // ===== safety / debug =====
+  const toast=(t,ms=1600)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
+  window.addEventListener('error',e=>toast('Ошибка: '+(e.message||'unknown')));
   const DPR=Math.max(1,window.devicePixelRatio||1);
   const cv=document.getElementById('cv');
   const ctx=cv.getContext('2d',{alpha:false});
@@ -147,17 +148,14 @@
     return raw;
   }
 
-  // ===== draw =====
-  let hoverSnap=null; // точка для подсказки «магнита»
-
+  // ===== draw helpers =====
+  let hoverSnap=null; // точка подсказки «магнита»
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
     for(const s of segs){
-      // тень
       ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-      // основная
       ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=(params.linePx)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
     }
@@ -172,41 +170,26 @@
   }
   function drawHandleMarker(pt){ const p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
 
-  // ===== components (как в v830, без изменений геометрии) =====
+  // ===== components =====
   function drawBallValve(seg,t){
-    const b=compBasis(seg,t);
-    const base = params.linePx * compScale;
-
-    const bodyLen=base*10.5, bodyR=base*2.6;
-    const coneL =base*3.2,  pipeR=base*1.4;
-    const ballR =base*2.0;
-    const neckH =base*2.6,  neckR=base*0.9;
-    const handleL=base*6.5, handleW=base*0.9;
-
+    const b=compBasis(seg,t), base=params.linePx*compScale;
+    const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
     const {ux,uy,nx,ny}=b;
     const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
     const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.lineJoin='round'; ctx.lineCap='round';
-
-    ctx.beginPath();
-    ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
-    ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
     ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
     ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
     ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
-    ctx.closePath();
-    ctx.fillStyle='#6b1dff'; ctx.fill();
-    ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
 
-    ctx.beginPath();
-    ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
-    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
+    ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
+    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR); ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    ctx.beginPath();
-    ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
+    ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
@@ -216,54 +199,37 @@
     ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
 
-    const hw=handleW/2;
-    ctx.fillStyle='#111';
-    ctx.beginPath();
+    const hw=handleW/2; ctx.fillStyle='#111'; ctx.beginPath();
     ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
     ctx.lineTo(neckTop.x+ux*handleL-nx*hw, neckTop.y+uy*handleL-ny*hw);
     ctx.lineTo(neckTop.x+ux*handleL+nx*hw, neckTop.y+uy*handleL+ny*hw);
-    ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw);
-    ctx.closePath(); ctx.fill();
+    ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw); ctx.closePath(); ctx.fill();
 
-    ctx.restore();
-    const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
+    ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
   function drawCheckValve(seg,t){
-    const b=compBasis(seg,t);
-    const base = params.linePx * compScale;
-
-    const bodyLen=base*9.5,  bodyR=base*2.4;
-    const coneL =base*3.2,   pipeR=base*1.4;
-
+    const b=compBasis(seg,t), base=params.linePx*compScale;
+    const bodyLen=base*9.5, bodyR=base*2.4, coneL=base*3.2, pipeR=base*1.4;
     const {ux,uy,nx,ny}=b;
     const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
     const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.lineJoin='round'; ctx.lineCap='round';
-
-    ctx.beginPath();
-    ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
-    ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
     ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
     ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
     ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
-    ctx.closePath();
-    ctx.fillStyle='#6b1dff'; ctx.fill();
-    ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
 
-    ctx.beginPath();
-    ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
-    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
+    ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
+    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR); ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    ctx.beginPath();
-    ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
+    ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    // треугольник-направление
     const triLen=bodyLen*0.45, triHalf=bodyR*0.55;
     const A={x:b.x + b.ux*triLen/2, y:b.y + b.uy*triLen/2};
     const B={x:b.x - b.ux*triLen/2 + b.nx*triHalf, y:b.y - b.uy*triLen/2 + b.ny*triHalf};
@@ -272,41 +238,26 @@
     ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill();
     ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
-    ctx.restore();
-    const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
+    ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
 
   function drawPump(seg,t){
-    const b=compBasis(seg,t);
-    const base = params.linePx * compScale;
-
-    const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6;
-    const motorW=base*5.2, motorH=base*7.2, sockH=base*1.4;
-
+    const b=compBasis(seg,t), base=params.linePx*compScale;
+    const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2, sockH=base*1.4;
     const {ux,uy,nx,ny}=b;
-    const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)};
-    const Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
+    const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)}, Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
 
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.lineJoin='round'; ctx.lineCap='round';
-
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.2/view.scale;
     ctx.beginPath(); ctx.arc(b.x,b.y,volR,0,Math.PI*2); ctx.fill(); ctx.stroke();
-
-    ctx.beginPath(); ctx.arc(b.x,b.y,volR*0.6,0,Math.PI*2);
-    ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x,b.y,volR*0.6,0,Math.PI*2); ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
 
     function flange(cx,cy){
       const ax=ux*(flLen/2), ay=uy*(flLen/2), px=nx*flHalf, py=ny*flHalf;
       ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
-      ctx.beginPath();
-      ctx.moveTo(cx-ax-px, cy-ay-py);
-      ctx.lineTo(cx+ax-px, cy+ay-py);
-      ctx.lineTo(cx+ax+px, cy+ay+py);
-      ctx.lineTo(cx-ax+px, cy-ay+py);
+      ctx.beginPath(); ctx.moveTo(cx-ax-px, cy-ay-py); ctx.lineTo(cx+ax-px, cy+ay-py); ctx.lineTo(cx+ax+px, cy+ay+py); ctx.lineTo(cx-ax+px, cy-ay+py);
       ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx,cy,flHalf*0.45,0,Math.PI*2);
-      ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx,cy,flHalf*0.45,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
     }
     flange(Lc.x,Lc.y); flange(Rc.x,Rc.y);
 
@@ -320,52 +271,29 @@
     ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
 
     ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.2/view.scale;
-    const ribs=6;
-    for(let i=1;i<ribs;i++){
-      const t=i/ribs;
-      const a={x:mL.x + ux*motorH*t, y:mL.y + uy*motorH*t};
-      const bpt={x:mR.x + ux*motorH*t, y:mR.y + uy*motorH*t};
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke();
-    }
+    for(let i=1;i<6;i++){ const t=i/6; const a={x:mL.x + ux*motorH*t, y:mL.y + uy*motorH*t}; const bpt={x:mR.x + ux*motorH*t, y:mR.y + uy*motorH*t}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
 
-    ctx.restore();
-    const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
+    ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
 
+  // ===== main draw =====
   function draw(){
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
     drawSegments();
-
     for(const c of comps){ const seg=segs[c.segIndex]; if(!seg) continue;
       if(c.type==='valve') drawBallValve(seg,c.t);
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
     }
-
-    // подсказка «магнита»
-    if(hoverSnap && hoverSnap._snapped){
-      const p=w2s(hoverSnap.x,hoverSnap.y);
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    }
-
-    if(first){
-      const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0);
-      ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    }
-    if(first && preview){
-      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
-      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]);
-      const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
-    }
+    if(hoverSnap && hoverSnap._snapped){ const p=w2s(hoverSnap.x,hoverSnap.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
+    if(first){ const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
+    if(first && preview){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale; ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]); const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); }
     if(mode==='edit' && editing){ const s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
   }
   let raf=0, dirty=false; const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
 
-  // ===== hit finders =====
+  // ===== finders =====
   function findEndpointNear(sx,sy,rPx=20){ let best=null,bd=Infinity;
     for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
@@ -483,7 +411,7 @@
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v831';
+  const ver = new URLSearchParams(location.search).get('v') || 'v832';
 
   // Фото
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
@@ -506,31 +434,31 @@
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
 
-  // Панель: арматура scale
+  // Панель
   let currentComp='valve';
   document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
 
   const scaleInput=$('scale'), scaleVal=$('scaleVal');
   const thickInput=$('thick'), thickVal=$('thickVal');
   const snapInput=$('snap'), snapVal=$('snapVal');
-  const magSwitch=$('magSwitch');
+  const magSwitch=$('magSwitch'), magState=$('magState');
 
   function updateScale(){ compScale=Number(scaleInput.value)/100; scaleVal.textContent=compScale.toFixed(2)+'×'; need(); }
   function updateThick(){ params.linePx=Number(thickInput.value); thickVal.textContent=params.linePx+' px'; need(); }
   function updateSnap(){ params.snapRadiusPx=Number(snapInput.value); snapVal.textContent=params.snapRadiusPx+' px'; }
-  function toggleMag(){ magnet=!magnet; magSwitch.classList.toggle('on',magnet); magSwitch.setAttribute('aria-checked',magnet?'true':'false'); magSwitch.nextElementSibling.textContent=magnet?'Вкл':'Выкл'; }
+  function toggleMag(){ magnet=!magnet; magSwitch.classList.toggle('on',magnet); magSwitch.setAttribute('aria-checked',magnet?'true':'false'); magState.textContent=magnet?'Вкл':'Выкл'; }
 
   scaleInput.addEventListener('input',updateScale);
   thickInput.addEventListener('input',updateThick);
   snapInput.addEventListener('input',updateSnap);
-  magSwitch.addEventListener('click',()=>{ toggleMag(); });
+  magSwitch.addEventListener('click',toggleMag);
 
-  updateScale(); updateThick(); updateSnap(); magSwitch.classList.add('on');
+  updateScale(); updateThick(); updateSnap(); toggleMag(); toggleMag(); // синхронизируем надпись без смены состояния
 
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
   // старт
-  fit(); toast(`${ver}: добавлены толщина линии и «магнит» для удобного соединения.`);
+  fit(); toast(`${ver}: стабильная сборка, «толщина линии» и «магнит» работают.`);
 })();
 </script>
 </body>
