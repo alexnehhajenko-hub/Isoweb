@@ -3,17 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v835 (mobile-safe)</title>
+<title>Pro Trace — v836 (undo-stack)</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
   canvas{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
-
   .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px;pointer-events:auto}
   .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,var(--violet));color:#fff;font-weight:800;cursor:pointer}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
   .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001;cursor:pointer}
-
   .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
   .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
@@ -28,10 +26,8 @@
   .radio-row{display:flex;gap:10px;flex-wrap:wrap}
   .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;cursor:pointer}
   .radio input{accent-color:#6b1dff}
-
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1200;pointer-events:none;max-width:92vw;text-align:center}
   .toast.show{opacity:1}
-
   .status{position:fixed;left:8px;bottom:8px;z-index:1201;background:rgba(0,0,0,.65);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;max-width:92vw}
 </style>
 </head>
@@ -117,6 +113,8 @@
   var view={scale:1, tx:0, ty:0};
   var bg=null,bw=0,bh=0;
   var segs=[], comps=[];
+  const history=[]; // <-- единый стек: 'seg' | 'comp'
+
   var mode='hand';
   var first=null, preview=null, editing=null;
   var params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
@@ -136,7 +134,6 @@
   function w2s(x,y){ return {x:x*view.scale+view.tx, y:y*view.scale+view.ty}; }
   function clampView(){ if(!bg) return; var W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; var minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); var minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
 
-  // ✔ FIXED: без опечатки
   function segGeom(seg){
     var vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y;
     var L = Math.hypot ? Math.hypot(vx,vy) : Math.sqrt(vx*vx+vy*vy);
@@ -147,7 +144,7 @@
 
   function allNodes(){ var out=[]; for(var i=0;i<segs.length;i++){ var s=segs[i]; out.push(s.a,s.b);} return out; }
   function snapToNodes(raw){ if(!magnetOn) return raw; var R=params.snapRadiusPx/view.scale; var best=null,bd=1e9;
-    var nodes=allNodes(); for(var i=0;i<nodes.length;i++){ var n=nodes[i]; var d=Math.hypot?Math.hypot(n.x-raw.x,n.y-raw.y):Math.sqrt((n.x-raw.x)**2+(n.y-raw.y)**2); if(d<bd){ bd=d; best=n; } }
+    var nodes=allNodes(); for(var i=0;i<nodes.length;i++){ var n=nodes[i]; var dx=n.x-raw.x, dy=n.y-raw.y; var d=Math.sqrt(dx*dx+dy*dy); if(d<bd){ bd=d; best=n; } }
     return (best && bd<=R) ? {x:best.x,y:best.y,_snapped:true} : raw;
   }
 
@@ -172,12 +169,7 @@
   }
   function drawHandleMarker(pt){ var p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
 
-  // === компоненты (кран/клапан/насос) — как в v834 ===
-  function drawBallValve(seg,t){ /* ... тот же код как ранее ... */ }
-  function drawCheckValve(seg,t){ /* ... тот же код как ранее ... */ }
-  function drawPump(seg,t){ /* ... тот же код как ранее ... */ }
-
-  // Чтобы ответ был самодостаточным — вставляю полностью:
+  // === компоненты (упрощённый «Lowara»-стиль) ===
   function drawBallValve(seg,t){
     var b=compBasis(seg,t), base=params.linePx*compScale;
     var bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
@@ -208,6 +200,7 @@
     ctx.closePath(); ctx.fill();
     ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
+
   function drawCheckValve(seg,t){
     var b=compBasis(seg,t), base=params.linePx*compScale;
     var bodyLen=base*9.5, bodyR=base*2.4, coneL=base*3.2, pipeR=base*1.4;
@@ -234,6 +227,7 @@
     ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
     ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
+
   function drawPump(seg,t){
     var b=compBasis(seg,t), base=params.linePx*compScale;
     var volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2, sockH=base*1.4;
@@ -294,7 +288,7 @@
       var s=segs[i], A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       var dA=Math.sqrt(Math.pow(A.x-sx,2)+Math.pow(A.y-sy,2));
       var dB=Math.sqrt(Math.pow(B.x-sx,2)+Math.pow(B.y-sy,2));
-      if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; } if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
+      if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; } if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
     } return best;
   }
   function findNearestSegment(sx,sy,maxDistPx){ if(maxDistPx===void 0) maxDistPx=28;
@@ -367,10 +361,10 @@
     }else if(isTap && mode==='line'){
       var W3=snapToNodes(s2w(p.sx,p.sy));
       if(!first){ first={x:W3.x,y:W3.y}; preview=null; hoverSnap=W3._snapped?W3:null; need(); }
-      else{ segs.push({a:first,b:{x:W3.x,y:W3.y}}); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов. Нажми «Линия» для следующего.'); }
+      else{ segs.push({a:first,b:{x:W3.x,y:W3.y}}); history.push('seg'); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов'); }
     }else if(isTap && mode==='place'){
       var near=findNearestSegment(p.sx,p.sy,28*Math.max(1,window.devicePixelRatio||1));
-      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); mode='hand'; need(); toast('Арматура установлена'); } else { toast('Ткни по линии, чтобы поставить арматуру'); }
+      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); history.push('comp'); mode='hand'; need(); toast('Арматура установлена'); } else { toast('Ткни по линии, чтобы поставить арматуру'); }
     }
     downs.delete(e.pointerId); pointers.delete(e.pointerId);
     if(pointers.size<2){ prevCenter=null; prevDist=null; }
@@ -385,11 +379,24 @@
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(function(ev){ panel.addEventListener(ev, function(e){ e.stopPropagation(); }, {passive:false}); });
 
   $('btnLine').onclick=function(){ mode='line'; first=null; preview=null; hoverSnap=null; toast('Режим: линия (тап-тап)'); };
-  $('btnUndo').onclick=function(){ if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; } if(mode==='place'){ mode='hand'; toast('Отмена'); return; } if(first){ first=null; preview=null; } else if(comps.length){ comps.pop(); } else if(segs.length){ segs.pop(); } hoverSnap=null; need(); };
+
+  // ЕДИНЫЙ UNDO
+  $('btnUndo').onclick=function(){
+    if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; }
+    if(mode==='place'){ mode='hand'; toast('Отмена'); return; }
+    if(first){ first=null; preview=null; hoverSnap=null; need(); return; }
+    const last = history.pop();
+    if(!last){ toast('Нечего отменять'); return; }
+    if(last==='seg' && segs.length){ segs.pop(); }
+    else if(last==='comp' && comps.length){ comps.pop(); }
+    need();
+  };
+
   $('btnHand').onclick=function(){ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
 
   var currentComp='valve';
   Array.prototype.forEach.call(document.querySelectorAll('input[name="comp"]'), function(r){ r.addEventListener('change', function(){ currentComp=this.value; }); });
+
   var scaleInput=$('scale'), scaleVal=$('scaleVal');
   var thickInput=$('thick'), thickVal=$('thickVal');
   var snapInput=$('snap'),  snapVal=$('snapVal');
@@ -422,7 +429,7 @@
 
   $('btnPlaceComp').onclick=function(){ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
-  fit(); status('Готово'); toast('Готово: v835');
+  fit(); status('Готово'); toast('Готово: v836');
 })();
 </script>
 </body>
