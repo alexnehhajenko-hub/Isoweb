@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v836 (undo-stack)</title>
+<title>Pro Trace — v837</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
   canvas{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+
   .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px;pointer-events:auto}
   .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,var(--violet));color:#fff;font-weight:800;cursor:pointer}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
   .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001;cursor:pointer}
+
   .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
   .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
@@ -23,30 +25,33 @@
   .row label{min-width:150px;font-size:13px;color:#444}
   .hr{height:1px;background:#eee;margin:10px 0}
   .close{position:sticky;top:0;margin:-6px -6px 6px auto;background:#fff;border:1px solid var(--border);width:32px;height:32px;border-radius:8px;cursor:pointer}
+
   .radio-row{display:flex;gap:10px;flex-wrap:wrap}
   .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;cursor:pointer}
   .radio input{accent-color:#6b1dff}
+
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1200;pointer-events:none;max-width:92vw;text-align:center}
   .toast.show{opacity:1}
+
   .status{position:fixed;left:8px;bottom:8px;z-index:1201;background:rgba(0,0,0,.65);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;max-width:92vw}
 </style>
 </head>
 <body>
-  <canvas id="cv" aria-label="Рабочее поле"></canvas>
+  <canvas id="cv"></canvas>
 
-  <div class="bar" aria-hidden="false">
+  <div class="bar">
     <button id="btnLine" class="btn">📐 Линия</button>
     <button id="btnUndo" class="btn ghost">↩ Назад</button>
     <button id="btnHand" class="btn ghost">🖐 Рука</button>
   </div>
-  <button id="btnSettings" class="gear" title="Настройки" aria-haspopup="dialog">⚙</button>
+  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
 
   <div id="panelWrap" class="panel-wrap" aria-hidden="true">
     <div id="panelBackdrop" class="panel-backdrop"></div>
-    <div id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="panelTitle">
+    <div id="panel" class="panel" role="dialog" aria-modal="true">
       <button id="btnClosePanel" class="close" title="Закрыть">✕</button>
 
-      <h4 id="panelTitle">Фото</h4>
+      <h4>Фото</h4>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <label class="btn ghost" style="position:relative;min-width:120px;display:inline-flex;justify-content:center;cursor:pointer">📷 Камера
           <input id="fileCam" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0">
@@ -94,7 +99,7 @@
     </div>
   </div>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast"></div>
   <div id="status" class="status">Статус: Загрузка…</div>
 
 <script>
@@ -103,27 +108,25 @@
   function $(id){ return document.getElementById(id); }
   var toastEl=$('toast'), statusEl=$('status');
   function toast(t,ms){ if(ms===void 0) ms=1600; toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(function(){ toastEl.classList.remove('show'); }, ms); }
-  function status(t){ statusEl.textContent='Статус: ' + t; }
-  window.addEventListener('error', function(e){ try{ status('Ошибка: ' + (e.message||'unknown')); toast('Ошибка: ' + (e.message||'unknown'), 2200); }catch(_){}});
+  function status(t){ statusEl.textContent='Статус: '+t; }
+  window.addEventListener('error', function(e){ try{ status('Ошибка: '+(e.message||'unknown')); toast('Ошибка: '+(e.message||'unknown'),2200);}catch(_){}});
 
   var cv=$('cv'); var ctx=cv.getContext && cv.getContext('2d',{alpha:false});
-  if(!ctx){ status('Canvas 2D не поддерживается'); alert('Canvas 2D не поддерживается'); return; }
+  if(!ctx){ status('Canvas 2D не поддерживается'); return; }
 
-  var DPR=Math.max(1, window.devicePixelRatio||1);
-  var view={scale:1, tx:0, ty:0};
+  var DPR=Math.max(1,window.devicePixelRatio||1);
+  var view={scale:1,tx:0,ty:0};
   var bg=null,bw=0,bh=0;
-  var segs=[], comps=[];
-  const history=[]; // <-- единый стек: 'seg' | 'comp'
 
-  var mode='hand';
-  var first=null, preview=null, editing=null;
+  var segs=[], comps=[], history=[];
+  var mode='hand', first=null, preview=null, editing=null;
   var params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
   var compScale=1.1, magnetOn=true, hoverSnap=null;
 
   function darker(hex,k){ if(k===void 0) k=0.45;
     var m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333';
     var r=parseInt(m[1],16), g=parseInt(m[2],16), b=parseInt(m[3],16);
-    r=Math.max(0, Math.floor(r*(1-k))); g=Math.max(0, Math.floor(g*(1-k))); b=Math.max(0, Math.floor(b*(1-k)));
+    r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k)));
     function h(v){ var s=v.toString(16); return s.length===1?('0'+s):s; } return '#'+h(r)+h(g)+h(b);
   }
 
@@ -136,23 +139,22 @@
 
   function segGeom(seg){
     var vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y;
-    var L = Math.hypot ? Math.hypot(vx,vy) : Math.sqrt(vx*vx+vy*vy);
-    if(!L) L=1;
+    var L = (Math.hypot?Math.hypot(vx,vy):Math.sqrt(vx*vx+vy*vy)); if(!L) L=1;
     return {vx:vx,vy:vy,L:L,nx:vx/L,ny:vy/L};
   }
   function compBasis(seg,t){ var g=segGeom(seg); var x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x:x,y:y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
 
-  function allNodes(){ var out=[]; for(var i=0;i<segs.length;i++){ var s=segs[i]; out.push(s.a,s.b);} return out; }
-  function snapToNodes(raw){ if(!magnetOn) return raw; var R=params.snapRadiusPx/view.scale; var best=null,bd=1e9;
-    var nodes=allNodes(); for(var i=0;i<nodes.length;i++){ var n=nodes[i]; var dx=n.x-raw.x, dy=n.y-raw.y; var d=Math.sqrt(dx*dx+dy*dy); if(d<bd){ bd=d; best=n; } }
+  function allNodes(){ var out=[],i; for(i=0;i<segs.length;i++){ var s=segs[i]; out.push(s.a,s.b);} return out; }
+  function snapToNodes(raw){ if(!magnetOn) return raw; var R=params.snapRadiusPx/view.scale; var best=null,bd=1e9,i;
+    var nodes=allNodes(); for(i=0;i<nodes.length;i++){ var n=nodes[i]; var dx=n.x-raw.x,dy=n.y-raw.y; var d=Math.sqrt(dx*dx+dy*dy); if(d<bd){ bd=d; best=n; } }
     return (best && bd<=R) ? {x:best.x,y:best.y,_snapped:true} : raw;
   }
 
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    var col=params.lineColor, sh=darker(col,0.45);
-    for(var i=0;i<segs.length;i++){
-      var s=segs[i];
+    var col=params.lineColor, sh=darker(col,0.45), i,s;
+    for(i=0;i<segs.length;i++){
+      s=segs[i];
       ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
       ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=(params.linePx)/view.scale;
@@ -162,20 +164,21 @@
   function drawBadge(sx,sy,txt){
     ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
     var pad=6,h=18,r=7, w=ctx.measureText(txt).width+pad*2, x=sx+8, y=sy-8-h;
-    ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
     var rr=Math.min(r,w/2,h/2);
-    ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
-    ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
+    ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
   }
   function drawHandleMarker(pt){ var p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
 
-  // === компоненты (упрощённый «Lowara»-стиль) ===
+  /* ==== арматура (как в прошлой версии) ==== */
   function drawBallValve(seg,t){
     var b=compBasis(seg,t), base=params.linePx*compScale;
     var bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
     var ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
     var L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
-    var P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+    var P1={x=L.x-ux*coneL,y=L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
     ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
@@ -206,7 +209,7 @@
     var bodyLen=base*9.5, bodyR=base*2.4, coneL=base*3.2, pipeR=base*1.4;
     var ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
     var L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
-    var P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+    var P1={x=L.x-ux*coneL,y=L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
     ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
@@ -253,7 +256,7 @@
     ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
     ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.2/view.scale;
-    for(var i=1;i<6;i++){ var tpos=i/6; var a={x:mL.x + ux*motorH*tpos, y:mL.y + uy*motorH*tpos}; var bpt={x:mR.x + ux*motorH*tpos, y:mR.y + uy*motorH*tpos}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
+    var i; for(i=1;i<6;i++){ var tpos=i/6; var a={x:mL.x + ux*motorH*tpos, y:mL.y + uy*motorH*tpos}; var bpt={x:mR.x + ux*motorH*tpos, y:mR.y + uy*motorH*tpos}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
     ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
 
@@ -261,8 +264,9 @@
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
     drawSegments();
-    for(var i=0;i<comps.length;i++){
-      var c=comps[i], seg=segs[c.segIndex]; if(!seg) continue;
+    var i,c,seg;
+    for(i=0;i<comps.length;i++){
+      c=comps[i]; seg=segs[c.segIndex]; if(!seg) continue;
       if(c.type==='valve') drawBallValve(seg,c.t);
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
@@ -283,17 +287,15 @@
   var raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(function(){ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
   function findEndpointNear(sx,sy,rPx){ if(rPx===void 0) rPx=20;
-    var best=null,bd=1e9;
-    for(var i=0;i<segs.length;i++){
+    var best=null,bd=1e9,i; for(i=0;i<segs.length;i++){
       var s=segs[i], A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       var dA=Math.sqrt(Math.pow(A.x-sx,2)+Math.pow(A.y-sy,2));
       var dB=Math.sqrt(Math.pow(B.x-sx,2)+Math.pow(B.y-sy,2));
-      if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; } if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
+      if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; } if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
     } return best;
   }
   function findNearestSegment(sx,sy,maxDistPx){ if(maxDistPx===void 0) maxDistPx=28;
-    var bestI=-1,bd=1e9,bt=0;
-    for(var i=0;i<segs.length;i++){
+    var bestI=-1,bd=1e9,bt=0,i; for(i=0;i<segs.length;i++){
       var s=segs[i], A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       var vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
       var t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
@@ -303,27 +305,32 @@
     return (bestI!==-1 && bd<=maxDistPx) ? {segIndex:bestI,t:bt} : null;
   }
 
-  var TAP_TIME=300, TAP_MOVE=14*Math.max(1,window.devicePixelRatio||1), HOLD_MS=500;
+  var TAP_TIME=300, TAP_MOVE=14*DPR, HOLD_MS=500;
   var pointers=new Map(), downs=new Map();
   var prevCenter=null, prevDist=null, holdTimer=null, holdId=null;
 
-  function centroid(){ var a=Array.from(pointers.values()); if(!a.length) return null; var sx=0,sy=0; for(var i=0;i<a.length;i++){ sx+=a[i].sx; sy+=a[i].sy; } return {sx:sx/a.length, sy:sy/a.length}; }
+  function centroid(){ var a=Array.from(pointers.values()); if(!a.length) return null; var i,sx=0,sy=0; for(i=0;i<a.length;i++){ sx+=a[i].sx; sy+=a[i].sy; } return {sx:sx/a.length, sy:sy/a.length}; }
   function canvasXY(e){ var r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 
   cv.addEventListener('pointerdown', function(e){
     e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){}
-    var pos=canvasXY(e); pointers.set(e.pointerId,{sx:pos.sx,sy:pos.sy}); downs.set(e.pointerId,{t0:performance.now(),sx:pos.sx,sy:pos.sy});
+    var pos=canvasXY(e);
+    pointers.set(e.pointerId,{sx:pos.sx,sy:pos.sy});
+    downs.set(e.pointerId,{t0:performance.now(),sx:pos.sx,sy:pos.sy});
     if(pointers.size===2){
-      prevCenter=centroid(); var arr=Array.from(pointers.values()); prevDist=Math.sqrt(Math.pow(arr[0].sx-arr[1].sx,2)+Math.pow(arr[0].sy-arr[1].sy,2));
+      var arr=Array.from(pointers.values()); prevCenter=centroid();
+      prevDist=Math.sqrt(Math.pow(arr[0].sx-arr[1].sx,2)+Math.pow(arr[0].sy-arr[1].sy,2));
       clearTimeout(holdTimer); holdTimer=null; holdId=null;
     }else if(pointers.size===1 && !first && mode!=='place'){
       holdId=e.pointerId;
-      holdTimer=setTimeout(function(){ var d=downs.get(holdId), pt=pointers.get(holdId); if(!d||!pt) return;
+      holdTimer=setTimeout(function(){
+        var d=downs.get(holdId), pt=pointers.get(holdId); if(!d||!pt) return;
         var mv=Math.sqrt(Math.pow(pt.sx-d.sx,2)+Math.pow(pt.sy-d.sy,2));
-        if(mv<=TAP_MOVE){ var hit=findEndpointNear(pt.sx,pt.sy,24*Math.max(1,window.devicePixelRatio||1));
+        if(mv<=TAP_MOVE){
+          var hit=findEndpointNear(pt.sx,pt.sy,24*DPR);
           if(hit){ mode='edit'; editing=hit; need(); toast('Правка конца: перетащи и отпусти'); }
         }
-      }, HOLD_MS);
+      },HOLD_MS);
     }
   }, {passive:false});
 
@@ -333,7 +340,7 @@
     if(pointers.size===2){
       var arr=Array.from(pointers.values()); var nowCenter=centroid(); var nowDist=Math.sqrt(Math.pow(arr[0].sx-arr[1].sx,2)+Math.pow(arr[0].sy-arr[1].sy,2));
       if(prevCenter && prevDist && nowCenter){
-        var k = (nowDist>0 && prevDist>0) ? (nowDist/prevDist) : 1;
+        var k=(nowDist>0 && prevDist>0)?(nowDist/prevDist):1;
         view.tx = nowCenter.sx - k*(nowCenter.sx - view.tx);
         view.ty = nowCenter.sy - k*(nowCenter.sy - view.ty);
         view.scale = Math.max(0.2, Math.min(8, view.scale*k));
@@ -348,13 +355,15 @@
       var W=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W._snapped?W:null;
       var s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y}; need(); return;
     }
-    if(mode==='hand'){ var d=downs.get(e.pointerId); if(d){ view.tx += (only.sx - d.sx); view.ty += (only.sy - d.sy); d.sx=only.sx; d.sy=only.sy; clampView(); need(); } }
+    if(mode==='hand'){ var d=downs.get(e.pointerId); if(d){ view.tx+=(only.sx-d.sx); view.ty+=(only.sy-d.sy); d.sx=only.sx; d.sy=only.sy; clampView(); need(); } }
     if(mode==='line' && first){ var W2=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W2._snapped?W2:null; preview=W2; need(); } else { hoverSnap=null; }
   }, {passive:false});
 
   cv.addEventListener('pointerup', function(e){
-    var d=downs.get(e.pointerId); var p=pointers.get(e.pointerId)||{sx:0,sy:0};
-    var isTap=!!d && (performance.now()-d.t0<=TAP_TIME) && (Math.sqrt(Math.pow(p.sx-d.sx,2)+Math.pow(p.sy-d.sy,2))<=TAP_MOVE);
+    var d=downs.get(e.pointerId);
+    var p=pointers.get(e.pointerId)||{sx:0,sy:0};
+    var isTap = !!d && (performance.now()-d.t0<=TAP_TIME) && (Math.sqrt(Math.pow(p.sx-d.sx,2)+Math.pow(p.sy-d.sy,2))<=TAP_MOVE);
+
     if(mode==='edit' && editing){
       var W=snapToNodes(s2w(p.sx,p.sy)); var s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y};
       mode='hand'; editing=null; hoverSnap=null; need();
@@ -363,39 +372,45 @@
       if(!first){ first={x:W3.x,y:W3.y}; preview=null; hoverSnap=W3._snapped?W3:null; need(); }
       else{ segs.push({a:first,b:{x:W3.x,y:W3.y}}); history.push('seg'); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов'); }
     }else if(isTap && mode==='place'){
-      var near=findNearestSegment(p.sx,p.sy,28*Math.max(1,window.devicePixelRatio||1));
-      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); history.push('comp'); mode='hand'; need(); toast('Арматура установлена'); } else { toast('Ткни по линии, чтобы поставить арматуру'); }
+      var near=findNearestSegment(p.sx,p.sy,28*DPR);
+      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); history.push('comp'); mode='hand'; need(); toast('Арматура установлена'); }
+      else{ toast('Ткни по линии, чтобы поставить арматуру'); }
     }
+
     downs.delete(e.pointerId); pointers.delete(e.pointerId);
     if(pointers.size<2){ prevCenter=null; prevDist=null; }
     clearTimeout(holdTimer); holdTimer=null; holdId=null;
   }, {passive:false});
-  cv.addEventListener('pointercancel', function(e){ downs.delete(e.pointerId); pointers.delete(e.pointerId); if(pointers.size<2){ prevCenter=null; prevDist=null; } clearTimeout(holdTimer); holdTimer=null; holdId=null; }, {passive:false});
+  cv.addEventListener('pointercancel', function(e){
+    downs.delete(e.pointerId); pointers.delete(e.pointerId);
+    if(pointers.size<2){ prevCenter=null; prevDist=null; }
+    clearTimeout(holdTimer); holdTimer=null; holdId=null;
+  }, {passive:false});
 
+  /* === UI === */
   var panelWrap=$('panelWrap'), backdrop=$('panelBackdrop'), panel=$('panel');
   function openPanel(){ panelWrap.classList.add('open'); panelWrap.setAttribute('aria-hidden','false'); }
   function closePanel(){ panelWrap.classList.remove('open'); panelWrap.setAttribute('aria-hidden','true'); }
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
-  ['pointerdown','pointermove','pointerup','click','wheel'].forEach(function(ev){ panel.addEventListener(ev, function(e){ e.stopPropagation(); }, {passive:false}); });
+  ['pointerdown','pointermove','pointerup','click','wheel'].forEach(function(ev){ panel.addEventListener(ev,function(e){ e.stopPropagation(); },{passive:false}); });
 
   $('btnLine').onclick=function(){ mode='line'; first=null; preview=null; hoverSnap=null; toast('Режим: линия (тап-тап)'); };
+  $('btnHand').onclick=function(){ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
 
-  // ЕДИНЫЙ UNDO
   $('btnUndo').onclick=function(){
     if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; }
     if(mode==='place'){ mode='hand'; toast('Отмена'); return; }
     if(first){ first=null; preview=null; hoverSnap=null; need(); return; }
-    const last = history.pop();
+    var last=history.pop();
     if(!last){ toast('Нечего отменять'); return; }
-    if(last==='seg' && segs.length){ segs.pop(); }
-    else if(last==='comp' && comps.length){ comps.pop(); }
+    if(last==='seg' && segs.length) segs.pop();
+    else if(last==='comp' && comps.length) comps.pop();
     need();
   };
 
-  $('btnHand').onclick=function(){ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
-
   var currentComp='valve';
-  Array.prototype.forEach.call(document.querySelectorAll('input[name="comp"]'), function(r){ r.addEventListener('change', function(){ currentComp=this.value; }); });
+  var radios=document.querySelectorAll('input[name="comp"]');
+  for(var i=0;i<radios.length;i++){ radios[i].addEventListener('change',function(){ currentComp=this.value; }); }
 
   var scaleInput=$('scale'), scaleVal=$('scaleVal');
   var thickInput=$('thick'), thickVal=$('thickVal');
@@ -408,7 +423,8 @@
   snapInput.addEventListener('input',updateSnap);
   updateScale(); updateThick(); updateSnap();
 
-  Array.prototype.forEach.call(document.querySelectorAll('input[name="mag"]'), function(r){ r.addEventListener('change', function(){ magnetOn=(this.value==='on'); }); });
+  var mag=document.querySelectorAll('input[name="mag"]');
+  for(i=0;i<mag.length;i++){ mag[i].addEventListener('change',function(){ magnetOn=(this.value==='on'); }); }
 
   function resetInputs(){ var c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
   function loadImageFile(f){
@@ -429,7 +445,7 @@
 
   $('btnPlaceComp').onclick=function(){ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
-  fit(); status('Готово'); toast('Готово: v836');
+  fit(); status('Готово'); toast('Готово: v837');
 })();
 </script>
 </body>
