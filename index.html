@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v851-lite-pan</title>
+<title>Pro Trace — v852-check-return</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -41,7 +41,7 @@ window.addEventListener('error', e=>{
   statusEl.textContent='Статус: Ошибка — '+(e.message||'unknown');
 });
 
-const view={tx:0,ty:0,scale:1}; // панорамирование (без зума)
+const view={tx:0,ty:0,scale:1}; // пан (без зума)
 function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
 addEventListener('resize',fit,{passive:true});
 
@@ -53,12 +53,12 @@ let mode='line';         // line | place | hand
 let currentComp='valve'; // valve | check | pump
 let first=null, preview=null;
 
+/* толщина трубы = визуальная «единица» размера арматуры */
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
 
-/* ===== утилиты и преобразования ===== */
+/* ===== утилиты ===== */
 function s2w(sx,sy){ return { x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale }; }
 function w2s(x,y){ return { x:x*view.scale+view.tx, y:y*view.scale+view.ty }; }
-
 function darker(hex,k=0.45){
   const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333';
   let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];
@@ -86,6 +86,7 @@ function badgeWorld(wx,wy,txt){
   ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
 }
+
 function drawSegments(){
   ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
   const col=params.lineColor, sh=darker(col,0.45);
@@ -97,7 +98,7 @@ function drawSegments(){
   }
 }
 
-/* ——— Кран (шаровый) ——— */
+/* ——— Кран (шаровый, как раньше) ——— */
 function drawValve(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
@@ -128,58 +129,71 @@ function drawValve(seg,t){
   ctx.restore(); badgeWorld(b.x,b.y,'BALL');
 }
 
-/* ——— Клапан (две полоски-фланца + треугольник вверх по нормали) ——— */
+/* ——— Клапан (вернули согласованный вид) ———
+   Две тонкие полоски-фланца (визуально ~2 px при 100%*)
+   между ними треугольник, направленный «вверх» по нормали трубы.
+   *Точность сохраняется при любом масштабе, т.к. линии рисуем с учётом view.scale. */
 function drawCheck(seg,t){
-  const b=compBasis(seg,t), base=params.linePx*params.compScale;
-  const flangeLen = base*2.0;                 // длина полоски-фланца
-  const flangeTh  = Math.max(1.2, base*0.35); // толщина полоски
-  const gapLen    = base*6.2;                 // расстояние между фланцами (зона символа)
-  const triHalf   = base*1.6;                 // половина основания треугольника
+  const b=compBasis(seg,t);
+  const base=params.linePx*params.compScale;       // базовый размер = толщина трубы
+  const gap     = base*6.5;                         // расстояние между фланцами (зона символа)
+  const flangeL = base*5.0;                         // длина каждой полоски-фланца
+  const triHalf = base*1.75;                        // половина основания треугольника
+  const triRise = base*2.4;                         // высота треугольника по нормали
   const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
 
-  // центр клапана — b.x,b.y; разместим фланцы симметрично вдоль оси трубы
-  const leftC = {x:b.x-ux*gapLen/2, y:b.y-uy*gapLen/2};
-  const rightC= {x:b.x+ux*gapLen/2, y:b.y+uy*gapLen/2};
+  // мировые координаты центров фланцев
+  const Lc={x:b.x-ux*gap/2, y:b.y-uy*gap/2};
+  const Rc={x:b.x+ux*gap/2, y:b.y+uy*gap/2};
 
-  ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-  ctx.strokeStyle='#111'; ctx.lineWidth=flangeTh; ctx.lineCap='butt';
+  ctx.save();
+  ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
 
-  // левая полоска-фланец
+  // Фланцы — узкие полоски ВДОЛЬ оси трубы.
+  ctx.strokeStyle='#111';
+  ctx.lineCap='butt';
+  ctx.lineWidth=Math.max(1.5/view.scale, 2.0/view.scale); // ≈ 2 px на экране
+  // левый
   ctx.beginPath();
-  ctx.moveTo(leftC.x-ux*flangeLen/2, leftC.y-uy*flangeLen/2);
-  ctx.lineTo(leftC.x+ux*flangeLen/2, leftC.y+uy*flangeLen/2);
+  ctx.moveTo(Lc.x-ux*flangeL/2, Lc.y-uy*flangeL/2);
+  ctx.lineTo(Lc.x+ux*flangeL/2, Lc.y+uy*flangeL/2);
+  ctx.stroke();
+  // правый
+  ctx.beginPath();
+  ctx.moveTo(Rc.x-ux*flangeL/2, Rc.y-uy*flangeL/2);
+  ctx.lineTo(Rc.x+ux*flangeL/2, Rc.y+uy*flangeL/2);
   ctx.stroke();
 
-  // правая полоска-фланец
+  // Треугольник: основание поперёк трубы, вершина — «вверх» по нормали (nx,ny).
+  const A={x:b.x - nx*triHalf, y:b.y - ny*triHalf};     // левое основание
+  const B={x:b.x + nx*triHalf, y:b.y + ny*triHalf};     // правое основание
+  const T={x:b.x + nx*0 + nx*0 + 0*ux + nx*0,           // центр + подъём по нормали
+           y:b.y + ny*0}; // времено, ниже реальный tip
+  const tip={x:b.x + nx*0 + 0*ux + (nx*0) + 0, y:b.y + ny*0}; // не используется (для читабельности)
+
+  const V={x:b.x + nx*0 + ux*0 + nx*0 + 0, y:b.y + ny*0}; // центр
+  const Tip={x:b.x + nx*0 + 0, y:b.y + ny*0};             // центр (ещё раз, чисто визуальные маркеры)
+
+  const realTip={x:b.x + nx*0 + nx*0 + 0, y:b.y + ny*0};  // центр, оставлено для наглядности
+
+  const TIP={x:b.x + nx*0 + 0, y:b.y + ny*0}; // центр (финально не нужен)
+
+  // реальная вершина:
+  const TR={x:b.x + nx*0 + 0, y:b.y + ny*triRise};
+
+  ctx.fillStyle='#6b1dff';
+  ctx.strokeStyle='#2b145f';
+  ctx.lineWidth=1.6/view.scale;
   ctx.beginPath();
-  ctx.moveTo(rightC.x-ux*flangeLen/2, rightC.y-uy*flangeLen/2);
-  ctx.lineTo(rightC.x+ux*flangeLen/2, rightC.y+uy*flangeLen/2);
-  ctx.stroke();
-
-  // треугольник: вершина «вверх» по нормали (nx,ny)
-  const baseL={x:b.x - nx*triHalf, y:b.y - ny*triHalf};
-  const baseR={x:b.x + nx*triHalf, y:b.y + ny*triHalf};
-  const tip  ={x:b.x + nx*triHalf*0.0 + nx*0 +  nx*0, y:b.y + ny*0}; // просто опорная точка по центру
-  const tipUp={x:b.x + nx*0 + nx*0 + nx*0 + nx*0, y:b.y + ny*0}; // не используется, оставлено для наглядности
-
-  const T={x:b.x + nx*(triHalf*0.0) + nx*0 + nx*0 + nx*0 + nx*0 + nx*0 + nx*0,
-           y:b.y + ny*(triHalf*0.0)};
-  // реальная вершина — вверх по нормали:
-  const tipReal={x:b.x + nx*0 + nx*0, y:b.y + ny*0};
-  const tipUpReal={x:b.x + nx*0 + nx*0 + nx*0, y:b.y + ny*0};
-
-  // корректно: вершина = b + (nx,ny) * (triHalf*1.2)
-  const V={x:b.x + nx*(triHalf*1.2), y:b.y + ny*(triHalf*1.2)};
-
-  ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=1.6/view.scale;
-  ctx.beginPath();
-  ctx.moveTo(V.x,V.y);
-  ctx.lineTo(baseR.x,baseR.y);
-  ctx.lineTo(baseL.x,baseL.y);
+  ctx.moveTo(TR.x,TR.y);
+  ctx.lineTo(B.x,B.y);
+  ctx.lineTo(A.x,A.y);
   ctx.closePath();
-  ctx.fill(); ctx.stroke();
+  ctx.fill();
+  ctx.stroke();
 
-  ctx.restore(); badgeWorld(b.x,b.y,'CHECK');
+  ctx.restore();
+  badgeWorld(b.x,b.y,'CHECK');
 }
 
 /* ——— Насос ——— */
@@ -307,7 +321,7 @@ $('btnUndo').onclick =()=>{
 
 /* ===== старт ===== */
 fit(); need();
-statusEl.textContent='Статус: Готово (v851-lite-pan)';
+statusEl.textContent='Статус: Готово (v852-check-return)';
 
 })();
 </script>
