@@ -3,17 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v832</title>
+<title>Pro Trace — v833 (stable)</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
-  canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
-
-  .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px}
-  .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,var(--violet));color:#fff;font-weight:800}
+  canvas{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+  .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px;pointer-events:auto}
+  .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,var(--violet));color:#fff;font-weight:800;cursor:pointer}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
-  .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
-
+  .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001;cursor:pointer}
   .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
   .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
@@ -24,43 +22,36 @@
   .row{display:flex;align-items:center;gap:10px;margin:10px 0}
   .row label{min-width:150px;font-size:13px;color:#444}
   .hr{height:1px;background:#eee;margin:10px 0}
-  .close{position:sticky;top:0;margin:-6px -6px 6px auto;background:#fff;border:1px solid var(--border);width:32px;height:32px;border-radius:8px}
-
+  .close{position:sticky;top:0;margin:-6px -6px 6px auto;background:#fff;border:1px solid var(--border);width:32px;height:32px;border-radius:8px;cursor:pointer}
   .radio-row{display:flex;gap:10px;flex-wrap:wrap}
-  .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333}
+  .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;cursor:pointer}
   .radio input{accent-color:#6b1dff}
-
-  .switch{position:relative;width:44px;height:24px;border-radius:999px;background:#d9d9e8;cursor:pointer;flex:0 0 44px}
-  .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:.18s}
-  .switch.on{background:#7b68ee}
-  .switch.on::after{left:23px}
-
   .hint{font-size:12px;color:#666;margin-left:auto}
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1200;pointer-events:none;max-width:92vw;text-align:center}
   .toast.show{opacity:1}
 </style>
 </head>
 <body>
-  <canvas id="cv"></canvas>
+  <canvas id="cv" aria-label="Рабочее поле"></canvas>
 
-  <div class="bar">
+  <div class="bar" aria-hidden="false">
     <button id="btnLine" class="btn">📐 Линия</button>
     <button id="btnUndo" class="btn ghost">↩ Назад</button>
     <button id="btnHand" class="btn ghost">🖐 Рука</button>
   </div>
-  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
+  <button id="btnSettings" class="gear" title="Настройки" aria-haspopup="dialog">⚙</button>
 
   <div id="panelWrap" class="panel-wrap" aria-hidden="true">
     <div id="panelBackdrop" class="panel-backdrop"></div>
-    <div id="panel" class="panel" role="dialog" aria-modal="true">
+    <div id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="panelTitle">
       <button id="btnClosePanel" class="close" title="Закрыть">✕</button>
 
-      <h4>Фото</h4>
+      <h4 id="panelTitle">Фото</h4>
       <div class="row" style="gap:8px;flex-wrap:wrap">
-        <label class="btn ghost" style="position:relative;min-width:120px;display:inline-flex;justify-content:center">📷 Камера
+        <label class="btn ghost" style="position:relative;min-width:120px;display:inline-flex;justify-content:center;cursor:pointer">📷 Камера
           <input id="fileCam" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0">
         </label>
-        <label class="btn ghost" style="position:relative;min-width:120px;display:inline-flex;justify-content:center">📂 Галерея
+        <label class="btn ghost" style="position:relative;min-width:120px;display:inline-flex;justify-content:center;cursor:pointer">📂 Галерея
           <input id="fileGal" type="file" accept="image/*" style="position:absolute;inset:0;opacity:0">
         </label>
         <button id="btnExport" class="btn ghost" style="margin-left:auto">⤓ PNG</button>
@@ -87,14 +78,14 @@
         <span id="thickVal" class="hint">10 px</span>
       </div>
       <div class="row">
-        <label>Магнит к узлам</label>
-        <div id="magSwitch" class="switch on" role="switch" aria-checked="true"></div>
-        <span id="magState" class="hint" style="min-width:70px">Вкл</span>
-      </div>
-      <div class="row">
         <label for="snap">Радиус магнита</label>
         <input id="snap" type="range" min="6" max="40" step="1" value="22" style="flex:1">
         <span id="snapVal" class="hint">22 px</span>
+      </div>
+      <div class="row">
+        <label>Магнит</label>
+        <label class="radio"><input type="radio" name="mag" value="on" checked> Вкл</label>
+        <label class="radio"><input type="radio" name="mag" value="off"> Выкл</label>
       </div>
 
       <div class="row" style="justify-content:flex-end;gap:8px">
@@ -103,34 +94,39 @@
     </div>
   </div>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script>
-(()=>{"use strict";
-  // ===== safety / debug =====
-  const toast=(t,ms=1600)=>{const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);};
-  window.addEventListener('error',e=>toast('Ошибка: '+(e.message||'unknown')));
-  const DPR=Math.max(1,window.devicePixelRatio||1);
-  const cv=document.getElementById('cv');
-  const ctx=cv.getContext('2d',{alpha:false});
-  const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
+(()=>{ "use strict";
+  // ===== toast & safe error =====
+  const toast=(t,ms=1600)=>{const el=document.getElementById('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms);};
+  window.addEventListener('error',e=>{ try{ toast('Ошибка: '+(e.message||'unknown')); }catch{} });
 
-  // ===== scene =====
+  // ===== basic DOM =====
+  const $=id=>document.getElementById(id);
+  const cv=$('cv'); const ctx=cv.getContext && cv.getContext('2d',{alpha:false});
+  if(!ctx){ alert('Canvas 2D не поддерживается'); return; }
+
+  // ===== state =====
+  const DPR=Math.max(1,window.devicePixelRatio||1);
   const view={scale:1,tx:0,ty:0};
   let bg=null,bw=0,bh=0;
-
-  const segs=[];     // {a:{x,y}, b:{x,y}}
-  const comps=[];    // {segIndex,t,type}
+  const segs=[];           // трубы: {a:{x,y}, b:{x,y}}
+  const comps=[];          // арматура: {segIndex,t,type}
   let mode='hand';
   let first=null, preview=null, editing=null;
-
   const params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
   let compScale=1.1;
-  let magnet=true;
+  let magnetOn=true;
 
-  // ===== fit / coords =====
+  // ===== utils =====
+  const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333';
+    let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];
+    r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k)));
+    return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
+
   function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); if(bg && view.scale===1 && view.tx===0 && view.ty===0) fitToScreen(); need(); }
-  addEventListener('resize',fit);
+  addEventListener('resize',fit,{passive:true});
   function fitToScreen(){ if(!bg) return; const k=Math.min(cv.width/bw,cv.height/bh); view.scale=k; view.tx=(cv.width-bw*k)/2; view.ty=(cv.height-bh*k)/2; }
   const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale,y:(sy-view.ty)/view.scale});
   const w2s=(x,y)=>({x:x*view.scale+view.tx,y:y*view.scale+view.ty});
@@ -139,17 +135,14 @@
   // ===== geometry =====
   function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; const L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
   function compBasis(seg,t){ const g=segGeom(seg); const x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x,y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
-
   function allNodes(){ const out=[]; for(const s of segs){ out.push(s.a,s.b);} return out; }
-  function snapToNodes(raw){ if(!magnet) return raw;
+  function snapToNodes(raw){ if(!magnetOn) return raw;
     const R=params.snapRadiusPx/view.scale; let best=null,bd=Infinity;
     for(const n of allNodes()){ const d=Math.hypot(n.x-raw.x,n.y-raw.y); if(d<bd){ bd=d; best=n; } }
-    if(best && bd<=R) return {x:best.x,y:best.y,_snapped:true};
-    return raw;
+    return (best && bd<=R) ? {x:best.x,y:best.y,_snapped:true} : raw;
   }
 
-  // ===== draw helpers =====
-  let hoverSnap=null; // точка подсказки «магнита»
+  // ===== draw pieces =====
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     const col=params.lineColor, sh=darker(col,0.45);
@@ -161,18 +154,18 @@
     }
   }
   function drawBadge(sx,sy,txt){
-    const padH=6, h=18, r=7; ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
-    const w=ctx.measureText(txt).width+padH*2; const x=sx+8, y=sy-8-h;
+    ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
+    const pad=6,h=18,r=7, w=ctx.measureText(txt).width+pad*2, x=sx+8, y=sy-8-h;
     ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
     const rr=Math.min(r,w/2,h/2);
     ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
-    ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt, x+padH, y+h/2);
+    ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
   }
   function drawHandleMarker(pt){ const p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
 
   // ===== components =====
   function drawBallValve(seg,t){
-    const b=compBasis(seg,t), base=params.linePx*compScale;
+    const b=compBasis(seg,t); const base=params.linePx*compScale;
     const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
     const {ux,uy,nx,ny}=b;
     const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
@@ -191,7 +184,7 @@
 
     ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
-    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+    ctx.closePath(); ctx.fillStyle:'#6b1dff'; ctx.fill(); ctx.stroke();
 
     ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
@@ -199,17 +192,17 @@
     ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
 
-    const hw=handleW/2; ctx.fillStyle='#111'; ctx.beginPath();
-    ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
+    const hw=handleW/2; ctx.fillStyle='#111';
+    ctx.beginPath(); ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
     ctx.lineTo(neckTop.x+ux*handleL-nx*hw, neckTop.y+uy*handleL-ny*hw);
     ctx.lineTo(neckTop.x+ux*handleL+nx*hw, neckTop.y+uy*handleL+ny*hw);
-    ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw); ctx.closePath(); ctx.fill();
-
+    ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw);
+    ctx.closePath(); ctx.fill();
     ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
   function drawCheckValve(seg,t){
-    const b=compBasis(seg,t), base=params.linePx*compScale;
+    const b=compBasis(seg,t); const base=params.linePx*compScale;
     const bodyLen=base*9.5, bodyR=base*2.4, coneL=base*3.2, pipeR=base*1.4;
     const {ux,uy,nx,ny}=b;
     const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
@@ -237,12 +230,11 @@
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.lineTo(C.x,C.y); ctx.closePath();
     ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill();
     ctx.strokeStyle='#1b1b1b'; ctx.stroke();
-
     ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
 
   function drawPump(seg,t){
-    const b=compBasis(seg,t), base=params.linePx*compScale;
+    const b=compBasis(seg,t); const base=params.linePx*compScale;
     const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2, sockH=base*1.4;
     const {ux,uy,nx,ny}=b;
     const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)}, Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
@@ -276,7 +268,8 @@
     ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
 
-  // ===== main draw =====
+  // ===== render =====
+  let hoverSnap=null;
   function draw(){
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
@@ -286,14 +279,17 @@
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
     }
-    if(hoverSnap && hoverSnap._snapped){ const p=w2s(hoverSnap.x,hoverSnap.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
+    if(hoverSnap && hoverSnap._snapped){
+      const p=w2s(hoverSnap.x,hoverSnap.y); ctx.setTransform(1,0,0,1,0,0);
+      ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    }
     if(first){ const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
     if(first && preview){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale; ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]); const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); }
     if(mode==='edit' && editing){ const s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
   }
   let raf=0, dirty=false; const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
 
-  // ===== finders =====
+  // ===== hit finders =====
   function findEndpointNear(sx,sy,rPx=20){ let best=null,bd=Infinity;
     for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
       const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
@@ -308,7 +304,7 @@
     } return (bestI!==-1 && bd<=maxDistPx) ? {segIndex:bestI,t:bt} : null;
   }
 
-  // ===== input =====
+  // ===== input (Pointer Events) =====
   const TAP_TIME=300, TAP_MOVE=14*DPR, HOLD_MS=500;
   const pointers=new Map(); const downs=new Map();
   let prevCenter=null, prevDist=null, holdTimer=null, holdId=null;
@@ -317,12 +313,13 @@
   function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 
   cv.addEventListener('pointerdown', e=>{
-    e.preventDefault(); try{cv.setPointerCapture(e.pointerId);}catch{}
+    e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch{}
     const {sx,sy}=canvasXY(e);
     pointers.set(e.pointerId,{sx,sy});
     downs.set(e.pointerId,{t0:performance.now(),sx,sy});
     if(pointers.size===2){
-      prevCenter=centroid(); const arr=[...pointers.values()]; prevDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
+      prevCenter=centroid();
+      const arr=[...pointers.values()]; prevDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
       clearTimeout(holdTimer); holdTimer=null; holdId=null;
     }else if(pointers.size===1 && !first && mode!=='place'){
       holdId=e.pointerId;
@@ -338,12 +335,13 @@
 
   cv.addEventListener('pointermove', e=>{
     if(!pointers.has(e.pointerId)) return;
-    const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
+    const {sx,sy}=canvasXY(e);
+    pointers.set(e.pointerId,{sx,sy});
 
     if(pointers.size===2){
-      const arr=[...pointers.values()]; const nowCenter=centroid(); const nowDist=Math.hypot(arr[0].sx-arr[1].sx, arr[0].sy-arr[1].sy);
+      const arr=[...pointers.values()]; const nowCenter=centroid(); const nowDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
       if(prevCenter && prevDist && nowCenter){
-        const k= nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
+        const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
         view.tx = nowCenter.sx - k*(nowCenter.sx - view.tx);
         view.ty = nowCenter.sy - k*(nowCenter.sy - view.ty);
         view.scale = Math.max(0.2, Math.min(8, view.scale*k));
@@ -352,22 +350,20 @@
         clampView(); need();
       }
       prevCenter=nowCenter; prevDist=nowDist;
-      clearTimeout(holdTimer); holdTimer=null; holdId=null; return;
+      clearTimeout(holdTimer); holdTimer=null; holdId=null;
+      return;
     }
 
     const only=[...pointers.values()][0];
     if(mode==='edit' && editing){
-      let W=s2w(only.sx,only.sy); W=snapToNodes(W); hoverSnap=W._snapped?W:null;
+      let W=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W._snapped?W:null;
       const s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y}; need(); return;
     }
     if(mode==='hand'){
       const d=downs.get(e.pointerId); if(d){ view.tx += (only.sx - d.sx); view.ty += (only.sy - d.sy); d.sx=only.sx; d.sy=only.sy; clampView(); need(); }
     }
-    if(mode==='line' && first){
-      let W=s2w(only.sx,only.sy); W=snapToNodes(W); hoverSnap=W._snapped?W:null; preview=W; need();
-    } else {
-      hoverSnap=null;
-    }
+    if(mode==='line' && first){ let W=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W._snapped?W:null; preview=W; need(); }
+    else { hoverSnap=null; }
   }, {passive:false});
 
   cv.addEventListener('pointerup', e=>{
@@ -376,11 +372,11 @@
     const isTap=!!d && (performance.now()-d.t0<=TAP_TIME) && (Math.hypot(p.sx-d.sx,p.sy-d.sy)<=TAP_MOVE);
 
     if(mode==='edit' && editing){
-      let W=s2w(p.sx,p.sy); W=snapToNodes(W);
+      let W=snapToNodes(s2w(p.sx,p.sy));
       const s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y};
       mode='hand'; editing=null; hoverSnap=null; need();
     }else if(isTap && mode==='line'){
-      let W=s2w(p.sx,p.sy); W=snapToNodes(W);
+      let W=snapToNodes(s2w(p.sx,p.sy));
       if(!first){ first={x:W.x,y:W.y}; preview=null; hoverSnap=W._snapped?W:null; need(); }
       else{ segs.push({a:first,b:{x:W.x,y:W.y}}); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов. Нажми «Линия» для следующего.'); }
     }else if(isTap && mode==='place'){
@@ -393,27 +389,39 @@
     if(pointers.size<2){ prevCenter=null; prevDist=null; }
     clearTimeout(holdTimer); holdTimer=null; holdId=null;
   }, {passive:false});
+
   cv.addEventListener('pointercancel', e=>{
     downs.delete(e.pointerId); pointers.delete(e.pointerId);
     if(pointers.size<2){ prevCenter=null; prevDist=null; }
     clearTimeout(holdTimer); holdTimer=null; holdId=null;
   }, {passive:false});
 
-  // ===== UI =====
-  const $=id=>document.getElementById(id);
+  // ===== UI panel =====
+  const panelWrap=$('panelWrap'), backdrop=$('panelBackdrop'), panel=$('panel');
+  const openPanel=()=>{ panelWrap.classList.add('open'); panelWrap.setAttribute('aria-hidden','false'); };
+  const closePanel=()=>{ panelWrap.classList.remove('open'); panelWrap.setAttribute('aria-hidden','true'); };
+  $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
+  ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
+
   $('btnLine').onclick=()=>{ mode='line'; first=null; preview=null; hoverSnap=null; toast('Режим: линия (тап-тап)'); };
   $('btnUndo').onclick=()=>{ if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; } if(mode==='place'){ mode='hand'; toast('Отмена'); return; } if(first){ first=null; preview=null; } else if(comps.length){ comps.pop(); } else if(segs.length){ segs.pop(); } hoverSnap=null; need(); };
   $('btnHand').onclick=()=>{ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
 
-  const wrap=$('panelWrap'), backdrop=$('panelBackdrop'), panel=$('panel');
-  const openPanel=()=>{ wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false'); };
-  const closePanel=()=>{ wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); };
-  $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
-  ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
+  // controls
+  let currentComp='valve';
+  document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
+  const scaleInput=$('scale'), scaleVal=$('scaleVal');
+  const thickInput=$('thick'), thickVal=$('thickVal');
+  const snapInput=$('snap'),  snapVal=$('snapVal');
+  function updateScale(){ compScale=Number(scaleInput.value)/100; scaleVal.textContent=compScale.toFixed(2)+'×'; need(); }
+  function updateThick(){ params.linePx=Number(thickInput.value); thickVal.textContent=params.linePx+' px'; need(); }
+  function updateSnap(){ params.snapRadiusPx=Number(snapInput.value); snapVal.textContent=params.snapRadiusPx+' px'; }
+  scaleInput.addEventListener('input',updateScale);
+  thickInput.addEventListener('input',updateThick);
+  snapInput.addEventListener('input',updateSnap);
+  updateScale(); updateThick(); updateSnap();
 
-  const ver = new URLSearchParams(location.search).get('v') || 'v832';
-
-  // Фото
+  // photo
   function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
   function loadImageFile(f){
     if(!f) return;
@@ -422,8 +430,7 @@
       const maxSide=Math.max(img.naturalWidth,img.naturalHeight);
       let w=img.naturalWidth,h=img.naturalHeight;
       if(maxSide>2200){ const sc=2200/maxSide; w=Math.round(w*sc); h=Math.round(h*sc); }
-      const c=document.createElement('canvas'); c.width=w; c.height=h;
-      c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
+      const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
       bg=c; bw=w; bh=h; fitToScreen(); need(); toast('Фото добавлено');
       URL.revokeObjectURL(url); resetInputs();
     };
@@ -432,34 +439,13 @@
   }
   $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
   $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
-  $('btnExport').onclick=()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); };
-
-  // Панель
-  let currentComp='valve';
-  document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
-
-  const scaleInput=$('scale'), scaleVal=$('scaleVal');
-  const thickInput=$('thick'), thickVal=$('thickVal');
-  const snapInput=$('snap'), snapVal=$('snapVal');
-  const magSwitch=$('magSwitch'), magState=$('magState');
-
-  function updateScale(){ compScale=Number(scaleInput.value)/100; scaleVal.textContent=compScale.toFixed(2)+'×'; need(); }
-  function updateThick(){ params.linePx=Number(thickInput.value); thickVal.textContent=params.linePx+' px'; need(); }
-  function updateSnap(){ params.snapRadiusPx=Number(snapInput.value); snapVal.textContent=params.snapRadiusPx+' px'; }
-  function toggleMag(){ magnet=!magnet; magSwitch.classList.toggle('on',magnet); magSwitch.setAttribute('aria-checked',magnet?'true':'false'); magState.textContent=magnet?'Вкл':'Выкл'; }
-
-  scaleInput.addEventListener('input',updateScale);
-  thickInput.addEventListener('input',updateThick);
-  snapInput.addEventListener('input',updateSnap);
-  magSwitch.addEventListener('click',toggleMag);
-
-  updateScale(); updateThick(); updateSnap(); toggleMag(); toggleMag(); // синхронизируем надпись без смены состояния
+  $('btnExport').onclick=()=>{ try{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); }catch(e){ toast('Экспорт не поддерживается'); } };
 
   $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
-  // старт
-  fit(); toast(`${ver}: стабильная сборка, «толщина линии» и «магнит» работают.`);
-})();
-</script>
+  // ===== start =====
+  fit();
+  toast('Готово: v833');
+})();</script>
 </body>
 </html>
