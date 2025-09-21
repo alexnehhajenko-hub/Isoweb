@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v833 (stable)</title>
+<title>Pro Trace — v834 (mobile-safe)</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
-  canvas{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+
   .bar{position:fixed;left:8px;right:56px;top:8px;z-index:1000;display:flex;gap:8px;pointer-events:auto}
   .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,var(--violet));color:#fff;font-weight:800;cursor:pointer}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
   .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#5b30c2;font-weight:800;z-index:1001;cursor:pointer}
+
   .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
   .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
@@ -26,9 +28,11 @@
   .radio-row{display:flex;gap:10px;flex-wrap:wrap}
   .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;cursor:pointer}
   .radio input{accent-color:#6b1dff}
-  .hint{font-size:12px;color:#666;margin-left:auto}
+
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:1200;pointer-events:none;max-width:92vw;text-align:center}
   .toast.show{opacity:1}
+
+  .status{position:fixed;left:8px;bottom:8px;z-index:1201;background:rgba(0,0,0,.65);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;max-width:92vw}
 </style>
 </head>
 <body>
@@ -67,7 +71,7 @@
       <div class="row">
         <label for="scale">Масштаб арматуры</label>
         <input id="scale" type="range" min="50" max="250" step="5" value="110" style="flex:1">
-        <span id="scaleVal" class="hint">1.10×</span>
+        <span id="scaleVal" style="font-size:12px;color:#666">1.10×</span>
       </div>
 
       <div class="hr"></div>
@@ -75,12 +79,12 @@
       <div class="row">
         <label for="thick">Толщина линии</label>
         <input id="thick" type="range" min="2" max="28" step="1" value="10" style="flex:1">
-        <span id="thickVal" class="hint">10 px</span>
+        <span id="thickVal" style="font-size:12px;color:#666">10 px</span>
       </div>
       <div class="row">
         <label for="snap">Радиус магнита</label>
         <input id="snap" type="range" min="6" max="40" step="1" value="22" style="flex:1">
-        <span id="snapVal" class="hint">22 px</span>
+        <span id="snapVal" style="font-size:12px;color:#666">22 px</span>
       </div>
       <div class="row">
         <label>Магнит</label>
@@ -95,58 +99,81 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="status" class="status">Статус: Загрузка…</div>
 
 <script>
-(()=>{ "use strict";
-  // ===== toast & safe error =====
-  const toast=(t,ms=1600)=>{const el=document.getElementById('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms);};
-  window.addEventListener('error',e=>{ try{ toast('Ошибка: '+(e.message||'unknown')); }catch{} });
+(function(){
+  "use strict";
+  // ===== helpers =====
+  function $(id){ return document.getElementById(id); }
+  var toastEl=$('toast'), statusEl=$('status');
+  function toast(t,ms){ if(ms===void 0) ms=1600; toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(function(){ toastEl.classList.remove('show'); }, ms); }
+  function status(t){ statusEl.textContent='Статус: ' + t; }
 
-  // ===== basic DOM =====
-  const $=id=>document.getElementById(id);
-  const cv=$('cv'); const ctx=cv.getContext && cv.getContext('2d',{alpha:false});
-  if(!ctx){ alert('Canvas 2D не поддерживается'); return; }
+  // ловим любые падения
+  window.addEventListener('error', function(e){
+    try{ status('Ошибка: ' + (e.message||'unknown')); toast('Ошибка: ' + (e.message||'unknown'), 2200); }catch(_){}
+  });
+
+  // ===== canvas =====
+  var cv=$('cv');
+  var ctx=cv.getContext && cv.getContext('2d',{alpha:false});
+  if(!ctx){ status('Canvas 2D не поддерживается'); alert('Canvas 2D не поддерживается'); return; }
 
   // ===== state =====
-  const DPR=Math.max(1,window.devicePixelRatio||1);
-  const view={scale:1,tx:0,ty:0};
-  let bg=null,bw=0,bh=0;
-  const segs=[];           // трубы: {a:{x,y}, b:{x,y}}
-  const comps=[];          // арматура: {segIndex,t,type}
-  let mode='hand';
-  let first=null, preview=null, editing=null;
-  const params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
-  let compScale=1.1;
-  let magnetOn=true;
+  var DPR=Math.max(1, window.devicePixelRatio||1);
+  var view={scale:1, tx:0, ty:0};
+  var bg=null,bw=0,bh=0;
+  var segs=[];            // трубы
+  var comps=[];           // арматура
+  var mode='hand';
+  var first=null, preview=null, editing=null;
+  var params={ linePx:10, lineColor:'#1f6bff', snapRadiusPx:22 };
+  var compScale=1.1;
+  var magnetOn=true;
+  var hoverSnap=null;
 
   // ===== utils =====
-  const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333';
-    let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];
-    r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k)));
-    return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
-
-  function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); if(bg && view.scale===1 && view.tx===0 && view.ty===0) fitToScreen(); need(); }
-  addEventListener('resize',fit,{passive:true});
-  function fitToScreen(){ if(!bg) return; const k=Math.min(cv.width/bw,cv.height/bh); view.scale=k; view.tx=(cv.width-bw*k)/2; view.ty=(cv.height-bh*k)/2; }
-  const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale,y:(sy-view.ty)/view.scale});
-  const w2s=(x,y)=>({x:x*view.scale+view.tx,y:y*view.scale+view.ty});
-  function clampView(){ if(!bg) return; const W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; const minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); const minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
-
-  // ===== geometry =====
-  function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; const L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
-  function compBasis(seg,t){ const g=segGeom(seg); const x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x,y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
-  function allNodes(){ const out=[]; for(const s of segs){ out.push(s.a,s.b);} return out; }
-  function snapToNodes(raw){ if(!magnetOn) return raw;
-    const R=params.snapRadiusPx/view.scale; let best=null,bd=Infinity;
-    for(const n of allNodes()){ const d=Math.hypot(n.x-raw.x,n.y-raw.y); if(d<bd){ bd=d; best=n; } }
-    return (best && bd<=R) ? {x:best.x,y:best.y,_snapped:true} : raw;
+  function darker(hex,k){ if(k===void 0) k=0.45;
+    var m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if(!m) return '#333';
+    var r=parseInt(m[1],16), g=parseInt(m[2],16), b=parseInt(m[3],16);
+    r=Math.max(0, Math.floor(r*(1-k)));
+    g=Math.max(0, Math.floor(g*(1-k)));
+    b=Math.max(0, Math.floor(b*(1-k)));
+    function h(v){ var s=v.toString(16); return s.length===1?('0'+s):s; }
+    return '#'+h(r)+h(g)+h(b);
   }
 
-  // ===== draw pieces =====
+  function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); if(bg && view.scale===1 && view.tx===0 && view.ty===0) fitToScreen(); need(); }
+  window.addEventListener('resize', fit, {passive:true});
+  function fitToScreen(){ if(!bg) return; var k=Math.min(cv.width/bw, cv.height/bh); view.scale=k; view.tx=(cv.width-bw*k)/2; view.ty=(cv.height-bh*k)/2; }
+  function s2w(sx,sy){ return {x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale}; }
+  function w2s(x,y){ return {x:x*view.scale+view.tx, y:y*view.scale+view.ty}; }
+  function clampView(){ if(!bg) return; var W=cv.width,H=cv.height,CW=bw*view.scale,CH=bh*view.scale; var minTx=Math.min(0,W-CW),maxTx=Math.max(0,W-CW); var minTy=Math.min(0,H-CH),maxTy=Math.max(0,H-CH); view.tx=Math.min(maxTx,Math.max(minTx,view.tx)); view.ty=Math.min(maxTy,Math.max(minTy,view.ty)); }
+
+  function segGeom(seg){ var vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; var L=Math.hypot?v=Math.hypot(vx,vy):Math.sqrt(vx*vx+vy*vy); if(!L) L=1; return {vx:vx,vy:vy,L:L,nx:vx/L,ny:vy/L}; }
+  function compBasis(seg,t){ var g=segGeom(seg); var x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x:x,y:y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
+
+  function allNodes(){ var out=[]; for(var i=0;i<segs.length;i++){ var s=segs[i]; out.push(s.a,s.b); } return out; }
+  function snapToNodes(raw){
+    if(!magnetOn) return raw;
+    var R=params.snapRadiusPx/view.scale; var best=null,bd=1e9;
+    var nodes=allNodes();
+    for(var i=0;i<nodes.length;i++){
+      var n=nodes[i]; var dx=n.x-raw.x, dy=n.y-raw.y; var d=Math.sqrt(dx*dx+dy*dy);
+      if(d<bd){ bd=d; best=n; }
+    }
+    if(best && bd<=R) return {x:best.x,y:best.y,_snapped:true};
+    return raw;
+  }
+
+  // ===== draw =====
   function drawSegments(){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    const col=params.lineColor, sh=darker(col,0.45);
-    for(const s of segs){
+    var col=params.lineColor, sh=darker(col,0.45);
+    for(var i=0;i<segs.length;i++){
+      var s=segs[i];
       ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
       ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
       ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=(params.linePx)/view.scale;
@@ -154,22 +181,23 @@
     }
   }
   function drawBadge(sx,sy,txt){
-    ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
-    const pad=6,h=18,r=7, w=ctx.measureText(txt).width+pad*2, x=sx+8, y=sy-8-h;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
+    var pad=6,h=18,r=7, w=ctx.measureText(txt).width+pad*2, x=sx+8, y=sy-8-h;
     ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
-    const rr=Math.min(r,w/2,h/2);
+    var rr=Math.min(r,w/2,h/2);
     ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
     ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
   }
-  function drawHandleMarker(pt){ const p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
+  function drawHandleMarker(pt){ var p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
 
-  // ===== components =====
+  // ==== components ====
   function drawBallValve(seg,t){
-    const b=compBasis(seg,t); const base=params.linePx*compScale;
-    const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
-    const {ux,uy,nx,ny}=b;
-    const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
-    const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+    var b=compBasis(seg,t), base=params.linePx*compScale;
+    var bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
+    var ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+    var L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
+    var P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -184,29 +212,29 @@
 
     ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
-    ctx.closePath(); ctx.fillStyle:'#6b1dff'; ctx.fill(); ctx.stroke();
+    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
     ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
 
-    const top={x:b.x+nx*bodyR, y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH, y:top.y+ny*neckH};
+    var top={x:b.x+nx*bodyR, y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH, y:top.y+ny*neckH};
     ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
 
-    const hw=handleW/2; ctx.fillStyle='#111';
+    var hw=handleW/2; ctx.fillStyle='#111';
     ctx.beginPath(); ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
     ctx.lineTo(neckTop.x+ux*handleL-nx*hw, neckTop.y+uy*handleL-ny*hw);
     ctx.lineTo(neckTop.x+ux*handleL+nx*hw, neckTop.y+uy*handleL+ny*hw);
     ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw);
     ctx.closePath(); ctx.fill();
-    ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
+    ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'BALL');
   }
 
   function drawCheckValve(seg,t){
-    const b=compBasis(seg,t); const base=params.linePx*compScale;
-    const bodyLen=base*9.5, bodyR=base*2.4, coneL=base*3.2, pipeR=base*1.4;
-    const {ux,uy,nx,ny}=b;
-    const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
-    const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+    var b=compBasis(seg,t), base=params.linePx*compScale;
+    var bodyLen=base*9.5, bodyR=base*2.4, coneL=base*3.2, pipeR=base*1.4;
+    var ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+    var L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
+    var P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -223,21 +251,20 @@
     ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
     ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-    const triLen=bodyLen*0.45, triHalf=bodyR*0.55;
-    const A={x:b.x + b.ux*triLen/2, y:b.y + b.uy*triLen/2};
-    const B={x:b.x - b.ux*triLen/2 + b.nx*triHalf, y:b.y - b.uy*triLen/2 + b.ny*triHalf};
-    const C={x:b.x - b.ux*triLen/2 - b.nx*triHalf, y:b.y - b.uy*triLen/2 - b.ny*triHalf};
+    var triLen=bodyLen*0.45, triHalf=bodyR*0.55;
+    var A={x:b.x + b.ux*triLen/2, y:b.y + b.uy*triLen/2};
+    var B={x:b.x - b.ux*triLen/2 + b.nx*triHalf, y:b.y - b.uy*triLen/2 + b.ny*triHalf};
+    var C={x:b.x - b.ux*triLen/2 - b.nx*triHalf, y:b.y - b.uy*triLen/2 - b.ny*triHalf};
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.lineTo(C.x,C.y); ctx.closePath();
-    ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill();
-    ctx.strokeStyle='#1b1b1b'; ctx.stroke();
-    ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
+    ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'CHECK');
   }
 
   function drawPump(seg,t){
-    const b=compBasis(seg,t); const base=params.linePx*compScale;
-    const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2, sockH=base*1.4;
-    const {ux,uy,nx,ny}=b;
-    const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)}, Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
+    var b=compBasis(seg,t), base=params.linePx*compScale;
+    var volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2, sockH=base*1.4;
+    var ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+    var Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)}, Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
 
     ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.2/view.scale;
@@ -245,7 +272,7 @@
     ctx.beginPath(); ctx.arc(b.x,b.y,volR*0.6,0,Math.PI*2); ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.6/view.scale; ctx.stroke();
 
     function flange(cx,cy){
-      const ax=ux*(flLen/2), ay=uy*(flLen/2), px=nx*flHalf, py=ny*flHalf;
+      var ax=ux*(flLen/2), ay=uy*(flLen/2), px=nx*flHalf, py=ny*flHalf;
       ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
       ctx.beginPath(); ctx.moveTo(cx-ax-px, cy-ay-py); ctx.lineTo(cx+ax-px, cy+ay-py); ctx.lineTo(cx+ax+px, cy+ay+py); ctx.lineTo(cx-ax+px, cy-ay+py);
       ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -253,95 +280,122 @@
     }
     flange(Lc.x,Lc.y); flange(Rc.x,Rc.y);
 
-    const baseTop={x:b.x+nx*(volR+sockH), y:b.y+ny*(volR+sockH)};
-    const mL={x:baseTop.x - nx*(motorW/2), y:baseTop.y - ny*(motorW/2)};
-    const mR={x:baseTop.x + nx*(motorW/2), y:baseTop.y + ny*(motorW/2)};
-    const mT={x:baseTop.x + nx*(motorW/2) + ux*motorH, y:baseTop.y + ny*(motorW/2) + uy*motorH};
-    const mB={x:baseTop.x - nx*(motorW/2) + ux*motorH, y:baseTop.y - ny*(motorW/2) + uy*motorH};
+    var baseTop={x:b.x+nx*(volR+sockH), y:b.y+ny*(volR+sockH)};
+    var mL={x:baseTop.x - nx*(motorW/2), y:baseTop.y - ny*(motorW/2)};
+    var mR={x:baseTop.x + nx*(motorW/2), y:baseTop.y + ny*(motorW/2)};
+    var mT={x:baseTop.x + nx*(motorW/2) + ux*motorH, y:baseTop.y + ny*(motorW/2) + uy*motorH};
+    var mB={x:baseTop.x - nx*(motorW/2) + ux*motorH, y:baseTop.y - ny*(motorW/2) + uy*motorH};
 
     ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
     ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
 
     ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.2/view.scale;
-    for(let i=1;i<6;i++){ const t=i/6; const a={x:mL.x + ux*motorH*t, y:mL.y + uy*motorH*t}; const bpt={x:mR.x + ux*motorH*t, y:mR.y + uy*motorH*t}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
-
-    ctx.restore(); const S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
+    for(var i=1;i<6;i++){ var tpos=i/6; var a={x:mL.x + ux*motorH*tpos, y:mL.y + uy*motorH*tpos}; var bpt={x:mR.x + ux*motorH*tpos, y:mR.y + uy*motorH*tpos}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
+    ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
   }
 
-  // ===== render =====
-  let hoverSnap=null;
   function draw(){
     ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
     if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
     drawSegments();
-    for(const c of comps){ const seg=segs[c.segIndex]; if(!seg) continue;
+    for(var i=0;i<comps.length;i++){
+      var c=comps[i], seg=segs[c.segIndex]; if(!seg) continue;
       if(c.type==='valve') drawBallValve(seg,c.t);
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
     }
+    // подсказки
     if(hoverSnap && hoverSnap._snapped){
-      const p=w2s(hoverSnap.x,hoverSnap.y); ctx.setTransform(1,0,0,1,0,0);
-      ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      var p=w2s(hoverSnap.x,hoverSnap.y);
+      ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
     }
-    if(first){ const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
-    if(first && preview){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale; ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]); const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); }
-    if(mode==='edit' && editing){ const s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
+    if(first){
+      var p2=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p2.x,p2.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    }
+    if(first && preview){
+      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
+      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]);
+      var p3=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p3.x,p3.y,6,0,Math.PI*2); ctx.fill();
+    }
+    if(mode==='edit' && editing){ var s=segs[editing.segIndex]; drawHandleMarker(editing.end==='a'?s.a:s.b); }
   }
-  let raf=0, dirty=false; const need=()=>{ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } };
+  var raf=0, dirty=false;
+  function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(function(){ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
   // ===== hit finders =====
-  function findEndpointNear(sx,sy,rPx=20){ let best=null,bd=Infinity;
-    for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
-      const dA=Math.hypot(A.x-sx,A.y-sy), dB=Math.hypot(B.x-sx,B.y-sy);
-      if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; } if(dB<bd && dB<=rPx){ best={segIndex=i,end:'b'}; bd=dB; }
+  function findEndpointNear(sx,sy,rPx){
+    if(rPx===void 0) rPx=20;
+    var best=null,bd=1e9;
+    for(var i=0;i<segs.length;i++){
+      var s=segs[i], A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+      var dA=Math.sqrt(Math.pow(A.x-sx,2)+Math.pow(A.y-sy,2));
+      var dB=Math.sqrt(Math.pow(B.x-sx,2)+Math.pow(B.y-sy,2));
+      if(dA<bd && dA<=rPx){ best={segIndex:i,end:'a'}; bd=dA; }
+      if(dB<bd && dB<=rPx){ best={segIndex:i,end:'b'}; bd=dB; }
     } return best;
   }
-  function findNearestSegment(sx,sy,maxDistPx=28){ let bestI=-1,bd=Infinity,bt=0;
-    for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
-      const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
-      const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
-      const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy); if(d<bd){ bd=d; bestI=i; bt=t; }
-    } return (bestI!==-1 && bd<=maxDistPx) ? {segIndex:bestI,t:bt} : null;
+  function findNearestSegment(sx,sy,maxDistPx){
+    if(maxDistPx===void 0) maxDistPx=28;
+    var bestI=-1,bd=1e9,bt=0;
+    for(var i=0;i<segs.length;i++){
+      var s=segs[i], A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+      var vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
+      var t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
+      var px=A.x+vx*t, py=A.y+vy*t, d=Math.sqrt(Math.pow(px-sx,2)+Math.pow(py-sy,2));
+      if(d<bd){ bd=d; bestI=i; bt=t; }
+    }
+    if(bestI!==-1 && bd<=maxDistPx) return {segIndex:bestI,t:bt};
+    return null;
   }
 
   // ===== input (Pointer Events) =====
-  const TAP_TIME=300, TAP_MOVE=14*DPR, HOLD_MS=500;
-  const pointers=new Map(); const downs=new Map();
-  let prevCenter=null, prevDist=null, holdTimer=null, holdId=null;
+  var TAP_TIME=300, TAP_MOVE=14*Math.max(1,window.devicePixelRatio||1), HOLD_MS=500;
+  var pointers=new Map(), downs=new Map();
+  var prevCenter=null, prevDist=null, holdTimer=null, holdId=null;
 
-  function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
-  function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
+  function centroid(){
+    var a=Array.from(pointers.values()); if(!a.length) return null;
+    var sx=0,sy=0; for(var i=0;i<a.length;i++){ sx+=a[i].sx; sy+=a[i].sy; }
+    return {sx:sx/a.length, sy:sy/a.length};
+  }
+  function canvasXY(e){
+    var r=cv.getBoundingClientRect();
+    return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) };
+  }
 
-  cv.addEventListener('pointerdown', e=>{
-    e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch{}
-    const {sx,sy}=canvasXY(e);
-    pointers.set(e.pointerId,{sx,sy});
-    downs.set(e.pointerId,{t0:performance.now(),sx,sy});
+  cv.addEventListener('pointerdown', function(e){
+    e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    var pos=canvasXY(e);
+    pointers.set(e.pointerId,{sx:pos.sx,sy:pos.sy});
+    downs.set(e.pointerId,{t0:performance.now(),sx:pos.sx,sy:pos.sy});
     if(pointers.size===2){
       prevCenter=centroid();
-      const arr=[...pointers.values()]; prevDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
+      var arr=Array.from(pointers.values());
+      prevDist=Math.sqrt(Math.pow(arr[0].sx-arr[1].sx,2)+Math.pow(arr[0].sy-arr[1].sy,2));
       clearTimeout(holdTimer); holdTimer=null; holdId=null;
     }else if(pointers.size===1 && !first && mode!=='place'){
       holdId=e.pointerId;
-      holdTimer=setTimeout(()=>{
-        const d=downs.get(holdId), pt=pointers.get(holdId); if(!d||!pt) return;
-        const mv=Math.hypot(pt.sx-d.sx, pt.sy-d.sy);
-        if(mv<=TAP_MOVE){ const hit=findEndpointNear(pt.sx,pt.sy,24*DPR);
+      holdTimer=setTimeout(function(){
+        var d=downs.get(holdId), pt=pointers.get(holdId); if(!d||!pt) return;
+        var mv=Math.sqrt(Math.pow(pt.sx-d.sx,2)+Math.pow(pt.sy-d.sy,2));
+        if(mv<=TAP_MOVE){ var hit=findEndpointNear(pt.sx,pt.sy,24*Math.max(1,window.devicePixelRatio||1));
           if(hit){ mode='edit'; editing=hit; need(); toast('Правка конца: перетащи и отпусти'); }
         }
       }, HOLD_MS);
     }
   }, {passive:false});
 
-  cv.addEventListener('pointermove', e=>{
+  cv.addEventListener('pointermove', function(e){
     if(!pointers.has(e.pointerId)) return;
-    const {sx,sy}=canvasXY(e);
-    pointers.set(e.pointerId,{sx,sy});
+    var pos=canvasXY(e);
+    pointers.set(e.pointerId,{sx:pos.sx,sy:pos.sy});
 
     if(pointers.size===2){
-      const arr=[...pointers.values()]; const nowCenter=centroid(); const nowDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
+      var arr=Array.from(pointers.values()); var nowCenter=centroid();
+      var nowDist=Math.sqrt(Math.pow(arr[0].sx-arr[1].sx,2)+Math.pow(arr[0].sy-arr[1].sy,2));
       if(prevCenter && prevDist && nowCenter){
-        const k = nowDist>0 && prevDist>0 ? (nowDist/prevDist) : 1;
+        var k = (nowDist>0 && prevDist>0) ? (nowDist/prevDist) : 1;
         view.tx = nowCenter.sx - k*(nowCenter.sx - view.tx);
         view.ty = nowCenter.sy - k*(nowCenter.sy - view.ty);
         view.scale = Math.max(0.2, Math.min(8, view.scale*k));
@@ -354,33 +408,36 @@
       return;
     }
 
-    const only=[...pointers.values()][0];
+    var only=Array.from(pointers.values())[0];
     if(mode==='edit' && editing){
-      let W=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W._snapped?W:null;
-      const s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y}; need(); return;
+      var W=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W._snapped?W:null;
+      var s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y}; need(); return;
     }
     if(mode==='hand'){
-      const d=downs.get(e.pointerId); if(d){ view.tx += (only.sx - d.sx); view.ty += (only.sy - d.sy); d.sx=only.sx; d.sy=only.sy; clampView(); need(); }
+      var d=downs.get(e.pointerId); if(d){ view.tx += (only.sx - d.sx); view.ty += (only.sy - d.sy); d.sx=only.sx; d.sy=only.sy; clampView(); need(); }
     }
-    if(mode==='line' && first){ let W=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W._snapped?W:null; preview=W; need(); }
-    else { hoverSnap=null; }
+    if(mode==='line' && first){
+      var W2=snapToNodes(s2w(only.sx,only.sy)); hoverSnap=W2._snapped?W2:null; preview=W2; need();
+    } else {
+      hoverSnap=null;
+    }
   }, {passive:false});
 
-  cv.addEventListener('pointerup', e=>{
-    const d=downs.get(e.pointerId);
-    const p=pointers.get(e.pointerId)||{sx:0,sy:0};
-    const isTap=!!d && (performance.now()-d.t0<=TAP_TIME) && (Math.hypot(p.sx-d.sx,p.sy-d.sy)<=TAP_MOVE);
+  cv.addEventListener('pointerup', function(e){
+    var d=downs.get(e.pointerId);
+    var p=pointers.get(e.pointerId)||{sx:0,sy:0};
+    var isTap=!!d && (performance.now()-d.t0<=TAP_TIME) && (Math.sqrt(Math.pow(p.sx-d.sx,2)+Math.pow(p.sy-d.sy,2))<=TAP_MOVE);
 
     if(mode==='edit' && editing){
-      let W=snapToNodes(s2w(p.sx,p.sy));
-      const s=segs[editing.segIndex]; if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y};
+      var W=snapToNodes(s2w(p.sx,p.sy)); var s=segs[editing.segIndex];
+      if(editing.end==='a') s.a={x:W.x,y:W.y}; else s.b={x:W.x,y:W.y};
       mode='hand'; editing=null; hoverSnap=null; need();
     }else if(isTap && mode==='line'){
-      let W=snapToNodes(s2w(p.sx,p.sy));
-      if(!first){ first={x:W.x,y:W.y}; preview=null; hoverSnap=W._snapped?W:null; need(); }
-      else{ segs.push({a:first,b:{x:W.x,y:W.y}}); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов. Нажми «Линия» для следующего.'); }
+      var W3=snapToNodes(s2w(p.sx,p.sy));
+      if(!first){ first={x:W3.x,y:W3.y}; preview=null; hoverSnap=W3._snapped?W3:null; need(); }
+      else{ segs.push({a:first,b:{x:W3.x,y:W3.y}}); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов. Нажми «Линия» для следующего.'); }
     }else if(isTap && mode==='place'){
-      const near=findNearestSegment(p.sx,p.sy,28*DPR);
+      var near=findNearestSegment(p.sx,p.sy,28*Math.max(1,window.devicePixelRatio||1));
       if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); mode='hand'; need(); toast('Арматура установлена'); }
       else{ toast('Ткни по линии, чтобы поставить арматуру'); }
     }
@@ -390,29 +447,31 @@
     clearTimeout(holdTimer); holdTimer=null; holdId=null;
   }, {passive:false});
 
-  cv.addEventListener('pointercancel', e=>{
+  cv.addEventListener('pointercancel', function(e){
     downs.delete(e.pointerId); pointers.delete(e.pointerId);
     if(pointers.size<2){ prevCenter=null; prevDist=null; }
     clearTimeout(holdTimer); holdTimer=null; holdId=null;
   }, {passive:false});
 
-  // ===== UI panel =====
-  const panelWrap=$('panelWrap'), backdrop=$('panelBackdrop'), panel=$('panel');
-  const openPanel=()=>{ panelWrap.classList.add('open'); panelWrap.setAttribute('aria-hidden','false'); };
-  const closePanel=()=>{ panelWrap.classList.remove('open'); panelWrap.setAttribute('aria-hidden','true'); };
+  // ===== UI =====
+  var panelWrap=$('panelWrap'), backdrop=$('panelBackdrop'), panel=$('panel');
+  function openPanel(){ panelWrap.classList.add('open'); panelWrap.setAttribute('aria-hidden','false'); }
+  function closePanel(){ panelWrap.classList.remove('open'); panelWrap.setAttribute('aria-hidden','true'); }
   $('btnSettings').onclick=openPanel; $('btnClosePanel').onclick=closePanel; backdrop.onclick=closePanel;
-  ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
+  ['pointerdown','pointermove','pointerup','click','wheel'].forEach(function(ev){ panel.addEventListener(ev, function(e){ e.stopPropagation(); }, {passive:false}); });
 
-  $('btnLine').onclick=()=>{ mode='line'; first=null; preview=null; hoverSnap=null; toast('Режим: линия (тап-тап)'); };
-  $('btnUndo').onclick=()=>{ if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; } if(mode==='place'){ mode='hand'; toast('Отмена'); return; } if(first){ first=null; preview=null; } else if(comps.length){ comps.pop(); } else if(segs.length){ segs.pop(); } hoverSnap=null; need(); };
-  $('btnHand').onclick=()=>{ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
+  $('btnLine').onclick=function(){ mode='line'; first=null; preview=null; hoverSnap=null; toast('Режим: линия (тап-тап)'); };
+  $('btnUndo').onclick=function(){ if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; } if(mode==='place'){ mode='hand'; toast('Отмена'); return; } if(first){ first=null; preview=null; } else if(comps.length){ comps.pop(); } else if(segs.length){ segs.pop(); } hoverSnap=null; need(); };
+  $('btnHand').onclick=function(){ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
 
   // controls
-  let currentComp='valve';
-  document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
-  const scaleInput=$('scale'), scaleVal=$('scaleVal');
-  const thickInput=$('thick'), thickVal=$('thickVal');
-  const snapInput=$('snap'),  snapVal=$('snapVal');
+  var currentComp='valve';
+  var compRadios=document.querySelectorAll('input[name="comp"]');
+  for(var i=0;i<compRadios.length;i++){ compRadios[i].addEventListener('change', function(){ currentComp=this.value; }); }
+
+  var scaleInput=$('scale'), scaleVal=$('scaleVal');
+  var thickInput=$('thick'), thickVal=$('thickVal');
+  var snapInput=$('snap'),  snapVal=$('snapVal');
   function updateScale(){ compScale=Number(scaleInput.value)/100; scaleVal.textContent=compScale.toFixed(2)+'×'; need(); }
   function updateThick(){ params.linePx=Number(thickInput.value); thickVal.textContent=params.linePx+' px'; need(); }
   function updateSnap(){ params.snapRadiusPx=Number(snapInput.value); snapVal.textContent=params.snapRadiusPx+' px'; }
@@ -421,31 +480,37 @@
   snapInput.addEventListener('input',updateSnap);
   updateScale(); updateThick(); updateSnap();
 
-  // photo
-  function resetInputs(){ const c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
+  // магниты
+  var magRadios=document.querySelectorAll('input[name="mag"]');
+  for(var j=0;j<magRadios.length;j++){ magRadios[j].addEventListener('change', function(){ magnetOn = (this.value==='on'); }); }
+
+  // фото
+  function resetInputs(){ var c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
   function loadImageFile(f){
     if(!f) return;
-    const img=new Image(); const url=URL.createObjectURL(f);
-    img.onload=()=>{ 
-      const maxSide=Math.max(img.naturalWidth,img.naturalHeight);
-      let w=img.naturalWidth,h=img.naturalHeight;
-      if(maxSide>2200){ const sc=2200/maxSide; w=Math.round(w*sc); h=Math.round(h*sc); }
-      const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
-      bg=c; bw=w; bh=h; fitToScreen(); need(); toast('Фото добавлено');
-      URL.revokeObjectURL(url); resetInputs();
+    var img=new Image(); var url=URL.createObjectURL(f);
+    img.onload=function(){
+      var maxSide=Math.max(img.naturalWidth,img.naturalHeight);
+      var w=img.naturalWidth, h=img.naturalHeight;
+      if(maxSide>2200){ var sc=2200/maxSide; w=Math.round(w*sc); h=Math.round(h*sc); }
+      var c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
+      bg=c; bw=w; bh=h; fitToScreen(); need(); toast('Фото добавлено'); URL.revokeObjectURL(url); resetInputs();
     };
-    img.onerror=()=>{ URL.revokeObjectURL(url); resetInputs(); toast('Не удалось загрузить изображение'); };
+    img.onerror=function(){ URL.revokeObjectURL(url); resetInputs(); toast('Не удалось загрузить изображение'); };
     img.src=url;
   }
-  $('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
-  $('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
-  $('btnExport').onclick=()=>{ try{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); }catch(e){ toast('Экспорт не поддерживается'); } };
+  $('fileCam').onchange=function(e){ loadImageFile(e.target.files && e.target.files[0]); };
+  $('fileGal').onchange=function(e){ loadImageFile(e.target.files && e.target.files[0]); };
+  $('btnExport').onclick=function(){ try{ var url=cv.toDataURL('image/png',0.95); var a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); }catch(e){ toast('Экспорт не поддерживается'); } };
 
-  $('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
+  $('btnPlaceComp').onclick=function(){ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
 
-  // ===== start =====
+  // старт
   fit();
-  toast('Готово: v833');
-})();</script>
+  status('Готово');
+  toast('Готово: v834');
+})();
+</script>
 </body>
 </html>
