@@ -3,17 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v847-core</title>
+<title>Pro Trace — v847b-core (простая версия)</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff}
-  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
+  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
   .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
   .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.65);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11}
-  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:10px 12px;border-radius:12px;opacity:0;transition:.25s;z-index:12;pointer-events:none}
-  .toast.show{opacity:1}
 </style>
 </head>
 <body>
@@ -29,257 +27,185 @@
   </div>
 
   <div id="status" class="status">Статус: Загрузка…</div>
-  <div id="toast" class="toast"></div>
 
 <script>
-(function(){
-  "use strict";
+(()=>{"use strict";
+const DPR=Math.max(1,window.devicePixelRatio||1);
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d',{alpha:false});
+const statusEl=document.getElementById('status');
 
-  // ---------- базовые элементы ----------
-  const DPR=Math.max(1,window.devicePixelRatio||1);
-  const statusEl=document.getElementById('status');
-  const toastEl=document.getElementById('toast');
-  const toast=(t,ms=1300)=>{ toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),ms); };
+function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
+addEventListener('resize',fit,{passive:true});
 
-  window.addEventListener('error', e=>{
-    statusEl.textContent='Статус: Ошибка — '+(e.message||'unknown');
-  });
+const segs=[]; // {a:{x,y}, b:{x,y}}
+const comps=[]; // {segIndex,t,type}
+const stack=[]; // 'seg' | 'comp'
+let mode='line';         // line | place | hand
+let currentComp='valve'; // valve | check | pump
+let first=null, preview=null;
 
-  const cv=document.getElementById('cv');
-  const ctx=cv.getContext && cv.getContext('2d',{alpha:false});
-  if(!ctx){ statusEl.textContent='Статус: Canvas 2D не поддерживается'; return; }
+const params={ linePx:10, lineColor:'#1f6bff', compScale:1.1 };
 
-  // ---------- состояние вида ----------
-  const view={scale:1,tx:0,ty:0};
-  function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
-  addEventListener('resize',fit,{passive:true});
+const w2s=(x,y)=>({x,y});
+const darker=(hex,k=0.45)=>{const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); };
 
-  // ---------- данные сцены ----------
-  const segs=[];                 // {a:{x,y}, b:{x,y}}
-  const comps=[];                // {segIndex,t,type}
-  const stack=[];                // 'seg' | 'comp'
-  let mode='line';               // line | hand | place
-  let currentComp='valve';       // valve | check | pump
-  let first=null, preview=null;
+function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; let L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
+function compBasis(seg,t){ const g=segGeom(seg); const x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x,y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
 
-  // параметры линий
-  const params={ linePx:10, lineColor:'#1f6bff', compScale:1.1 };
-
-  // ---------- утилиты ----------
-  const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale});
-  const w2s=(x,y)=>({x:x*view.scale+view.tx, y:y*view.scale+view.ty});
-  function darker(hex,k=0.45){
-    const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333';
-    let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];
-    r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k)));
-    return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+function findNearestSegment(sx,sy,maxDistPx=28){ let bestI=-1,bd=1e9,bt=0;
+  for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=s.a, B=s.b;
+    const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(!len2) continue;
+    const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
+    const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
+    if(d<bd){ bd=d; bestI=i; bt=t; }
   }
-  function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; let L=Math.hypot(vx,vy); if(!L) L=1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
-  function compBasis(seg,t){ const g=segGeom(seg); const x=seg.a.x+g.nx*g.L*t, y=seg.a.y+g.ny*g.L*t; return {x,y,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
-  function findNearestSegment(sx,sy,maxDistPx=28){ let bestI=-1,bd=1e9,bt=0;
-    for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
-      const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) continue;
-      const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
-      const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
-      if(d<bd){ bd=d; bestI=i; bt=t; }
-    } return (bestI!==-1 && bd<=maxDistPx) ? {segIndex:bestI,t:bt} : null;
-  }
+  return (bestI!==-1 && bd<=maxDistPx)?{segIndex:bestI,t:bt}:null;
+}
 
-  // ---------- рисование ----------
-  function badge(sx,sy,txt){
-    ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
-    const pad=6,h=18,r=7,w=ctx.measureText(txt).width+pad*2,x=sx+8,y=sy-8-h,rr=Math.min(r,w/2,h/2);
-    ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
-  }
+function badge(sx,sy,txt){
+  ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto';
+  const pad=6,h=18,r=7,w=ctx.measureText(txt).width+pad*2,x=sx+8,y=sy-8-h,rr=Math.min(r,w/2,h/2);
+  ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
+}
 
-  function drawSegments(){
-    ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    const col=params.lineColor, sh=darker(col,0.45);
-    for(const s of segs){
-      ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
-      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-      ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=params.linePx/view.scale;
-      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-    }
+function drawSegments(){
+  ctx.setTransform(1,0,0,1,0,0);
+  const col=params.lineColor, sh=darker(col,0.45);
+  for(const s of segs){
+    ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2);
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+    ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=params.linePx;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
   }
-
-  // --- Кран (шаровый) ---
-  function drawValve(seg,t){
-    const b=compBasis(seg,t), base=params.linePx*params.compScale;
-    const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
-    const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
-    const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
-    const P1={x=L.x-ux*coneL,y=L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
-    ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
-    ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
-    ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
-    ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
-    // конусы в трубы
-    ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
-    ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR); ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
-    ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
-    // шар и ручка
-    ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
-    const top={x:b.x+nx*bodyR,y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH,y:top.y+ny*neckH};
-    ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
-    const hw=handleW/2; ctx.fillStyle='#111';
-    ctx.beginPath(); ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
-    ctx.lineTo(neckTop.x+ux*handleL-nx*hw, neckTop.y+uy*handleL-ny*hw);
-    ctx.lineTo(neckTop.x+ux*handleL+nx*hw, neckTop.y+uy*handleL+ny*hw);
-    ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw); ctx.closePath(); ctx.fill();
-    ctx.restore(); const S=w2s(b.x,b.y); badge(S.x,S.y,'BALL');
+}
+function drawValve(seg,t){
+  const b=compBasis(seg,t), base=params.linePx*params.compScale;
+  const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
+  const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+  const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2}, R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
+  const P1={x=L.x-ux*coneL,y=L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR); ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
+  ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
+  ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
+  ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
+  ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#2b145f'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
+  ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR); ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
+  ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+  const top={x:b.x+nx*bodyR,y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH,y:top.y+ny*neckH};
+  ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(neckTop.x,neckTop.y); ctx.stroke();
+  const hw=handleW/2; ctx.fillStyle='#111';
+  ctx.beginPath(); ctx.moveTo(neckTop.x-nx*hw, neckTop.y-ny*hw);
+  ctx.lineTo(neckTop.x+ux*handleL-nx*hw, neckTop.y+uy*handleL-ny*hw);
+  ctx.lineTo(neckTop.x+ux*handleL+nx*hw, neckTop.y+uy*handleL+ny*hw);
+  ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw); ctx.closePath(); ctx.fill();
+  ctx.restore(); const S=w2s(b.x,b.y); badge(S.x,S.y,'BALL');
+}
+function drawCheck(seg,t){
+  const b=compBasis(seg,t), base=params.linePx*params.compScale;
+  const len=base*8.5, flangeL=base*2.2, flangeT=Math.max(1.2, base*0.35), triW=base*3.2;
+  const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+  const L={x:b.x-ux*len/2, y:b.y-uy*len/2}, R={x:b.x+ux*len/2, y:b.y+uy*len/2};
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+  ctx.strokeStyle='#111'; ctx.lineWidth=flangeT;
+  ctx.beginPath(); ctx.moveTo(L.x-ux*flangeL+nx*flangeT*2, L.y-uy*flangeL+ny*flangeT*2);
+  ctx.lineTo(L.x+ux*flangeL+nx*flangeT*2, L.y+uy*flangeL+ny*flangeT*2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(R.x-ux*flangeL-nx*flangeT*2, R.y-uy*flangeL-ny*flangeT*2);
+  ctx.lineTo(R.x+ux*flangeL-nx*flangeT*2, R.y+uy*flangeL-ny*flangeT*2); ctx.stroke();
+  const baseL={x:b.x - nx*triW, y:b.y - ny*triW}, baseR={x:b.x + nx*triW, y:b.y + ny*triW};
+  const T={x:b.x + b.nx*triW*0.9, y:b.y + b.ny*triW*0.9};
+  ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=1.6;
+  ctx.beginPath(); ctx.moveTo(T.x,T.y); ctx.lineTo(baseR.x,baseR.y); ctx.lineTo(baseL.x,baseL.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore(); const S=w2s(b.x,b.y); badge(S.x,S.y,'CHECK');
+}
+function drawPump(seg,t){
+  const b=compBasis(seg,t), base=params.linePx*params.compScale;
+  const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2;
+  const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+  const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)}, Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0;
+  ctx.beginPath(); ctx.arc(b.x,b.y,volR,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  function flange(cx,cy){ const ax=ux*(flLen/2), ay=uy*(flLen/2), px=nx*flHalf, py=ny*flHalf;
+    ctx.beginPath(); ctx.moveTo(cx-ax-px, cy-ay-py); ctx.lineTo(cx+ax-px, cy+ay-py); ctx.lineTo(cx+ax+px, cy+ay+py); ctx.lineTo(cx-ax+px, cy-ay+py);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
   }
+  flange(Lc.x,Lc.y); flange(Rc.x,Rc.y);
+  const mL={x:b.x + nx*(volR*0.6) - nx*(motorW/2), y:b.y + ny*(volR*0.6) - ny*(motorW/2)};
+  const mR={x:b.x + nx*(volR*0.6) + nx*(motorW/2), y:b.y + ny*(volR*0.6) + ny*(motorW/2)};
+  const mT={x:mR.x + ux*motorH, y:mR.y + uy*motorH};
+  const mB={x=mL.x + ux*motorH, y:mL.y + uy*motorH};
+  ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore(); const S=w2s(b.x,b.y); badge(S.x,S.y,'PUMP');
+}
 
-  // --- Клапан: две полоски + треугольник вверх ---
-  function drawCheck(seg,t){
-    const b=compBasis(seg,t), base=params.linePx*params.compScale;
-    const len=base*8.5, flangeL=base*2.2, flangeT=Math.max(1.2, base*0.35), triW=base*3.2;
-    const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
-    const L={x:b.x-ux*len/2, y:b.y-uy*len/2}, R={x:b.x+ux*len/2, y:b.y+uy*len/2};
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-    ctx.strokeStyle='#111'; ctx.lineWidth=flangeT;
-    ctx.beginPath(); ctx.moveTo(L.x-ux*flangeL+nx*flangeT*2, L.y-uy*flangeL+ny*flangeT*2);
-    ctx.lineTo(L.x+ux*flangeL+nx*flangeT*2, L.y+uy*flangeL+ny*flangeT*2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(R.x-ux*flangeL-nx*flangeT*2, R.y-uy*flangeL-ny*flangeT*2);
-    ctx.lineTo(R.x+ux*flangeL-nx*flangeT*2, R.y+uy*flangeL-ny*flangeT*2); ctx.stroke();
-    const baseL={x:b.x - nx*triW, y:b.y - ny*triW}, baseR={x:b.x + nx*triW, y:b.y + ny*triW};
-    const T={x:b.x + b.nx*triW*0.9, y:b.y + b.ny*triW*0.9};
-    ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=1.6/view.scale;
-    ctx.beginPath(); ctx.moveTo(T.x,T.y); ctx.lineTo(baseR.x,baseR.y); ctx.lineTo(baseL.x,baseL.y); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.restore(); const S=w2s(b.x,b.y); badge(S.x,S.y,'CHECK');
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+  drawSegments();
+  for(const c of comps){
+    const seg=segs[c.segIndex]; if(!seg) continue;
+    if(c.type==='valve') drawValve(seg,c.t);
+    else if(c.type==='check') drawCheck(seg,c.t);
+    else if(c.type==='pump') drawPump(seg,c.t);
   }
-
-  // --- Насос (круг + два фланца + мотор) ---
-  function drawPump(seg,t){
-    const b=compBasis(seg,t), base=params.linePx*params.compScale;
-    const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2;
-    const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
-    const Lc={x:b.x-ux*(volR+flLen*0.9), y:b.y-uy*(volR+flLen*0.9)}, Rc={x:b.x+ux*(volR+flLen*0.9), y:b.y+uy*(volR+flLen*0.9)};
-    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
-    ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
-    ctx.beginPath(); ctx.arc(b.x,b.y,volR,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    function flange(cx,cy){
-      const ax=ux*(flLen/2), ay=uy*(flLen/2), px=nx*flHalf, py=ny*flHalf;
-      ctx.beginPath(); ctx.moveTo(cx-ax-px, cy-ay-py); ctx.lineTo(cx+ax-px, cy+ay-py); ctx.lineTo(cx+ax+px, cy+ay+py); ctx.lineTo(cx-ax+px, cy-ay+py);
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-    }
-    flange(Lc.x,Lc.y); flange(Rc.x,Rc.y);
-    const mL={x:b.x + nx*(volR*0.6) - nx*(motorW/2), y:b.y + ny*(volR*0.6) - ny*(motorW/2)};
-    const mR={x:b.x + nx*(volR*0.6) + nx*(motorW/2), y:b.y + ny*(volR*0.6) + ny*(motorW/2)};
-    const mT={x:mR.x + ux*motorH, y:mR.y + uy*motorH};
-    const mB={x:mL.x + ux*motorH, y:mL.y + uy*motorH};
-    ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.restore(); const S=w2s(b.x,b.y); badge(S.x,S.y,'PUMP');
-  }
-
-  function draw(){
+  if(first && preview){
     ctx.setTransform(1,0,0,1,0,0);
-    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-
-    drawSegments();
-
-    for(const c of comps){
-      const seg=segs[c.segIndex]; if(!seg) continue;
-      if(c.type==='valve') drawValve(seg,c.t);
-      else if(c.type==='check') drawCheck(seg,c.t);
-      else if(c.type==='pump') drawPump(seg,c.t);
-    }
-
-    if(first && preview){
-      ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-      ctx.setLineDash([12/view.scale,8/view.scale]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
-      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]);
-      const p=w2s(preview.x,preview.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
-    }
-    if(first){
-      const p=w2s(first.x,first.y); ctx.setTransform(1,0,0,1,0,0);
-      ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    }
+    ctx.setLineDash([12,8]); ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2);
+    ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke(); ctx.setLineDash([]);
+    const p=w2s(preview.x,preview.y); ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
   }
-  let raf=0, dirty=false;
-  function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
+  if(first){
+    const p=w2s(first.x,first.y); ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  }
+}
+let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
-  // ---------- ввод ----------
-  const TAP_TIME=300, TAP_MOVE=14*DPR;
-  const pointers=new Map(); const downs=new Map();
-  let prevCenter=null, prevDist=null;
+function canvasXY(e){ const r=cv.getBoundingClientRect(); return { x:(e.clientX-r.left)*(cv.width/r.width), y:(e.clientY-r.top)*(cv.height/r.height) }; }
 
-  function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
-  function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
+cv.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  const p=canvasXY(e);
+  if(mode==='line'){
+    if(!first){ first=p; preview=null; need(); statusEl.textContent='Статус: первая точка'; }
+    else{ segs.push({a:first,b:p}); stack.push('seg'); first=null; preview=null; need(); statusEl.textContent='Статус: сегмент добавлен'; }
+  }else if(mode==='place'){
+    const near=findNearestSegment(p.x,p.y,28*DPR);
+    if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); stack.push('comp'); mode='hand'; need(); statusEl.textContent='Статус: арматура поставлена'; }
+    else{ statusEl.textContent='Статус: ткни по линии'; }
+  }else{
+    // режим рука: ничего не делаем (в этой версии без пан/зум)
+    statusEl.textContent='Статус: Рука (ничего не делает в lite)';
+  }
+}, {passive:false});
 
-  cv.addEventListener('pointerdown', e=>{
-    e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){}
-    const p=canvasXY(e);
-    pointers.set(e.pointerId,{sx:p.sx,sy:p.sy});
-    downs.set(e.pointerId,{t0:performance.now(),sx:p.sx,sy:p.sy});
-  }, {passive:false});
+cv.addEventListener('pointermove', e=>{
+  if(mode==='line' && first){ preview=canvasXY(e); need(); }
+}, {passive:false});
 
-  cv.addEventListener('pointermove', e=>{
-    if(!pointers.has(e.pointerId)) return;
-    const p=canvasXY(e); pointers.set(e.pointerId,{sx:p.sx,sy:p.sy});
+const $=id=>document.getElementById(id);
+$('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; statusEl.textContent='Статус: Режим линия'; };
+$('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; statusEl.textContent='Статус: Рука'; };
+$('btnValve').onclick=()=>{ currentComp='valve'; mode='place'; statusEl.textContent='Статус: Кран — ткни по линии'; };
+$('btnCheck').onclick=()=>{ currentComp='check'; mode='place'; statusEl.textContent='Статус: Клапан — ткни по линии'; };
+$('btnPump').onclick =()=>{ currentComp='pump';  mode='place'; statusEl.textContent='Статус: Насос — ткни по линии'; };
+$('btnUndo').onclick =()=>{
+  if(first){ first=null; preview=null; need(); statusEl.textContent='Статус: точка отменена'; return; }
+  const last=stack.pop(); if(!last){ statusEl.textContent='Статус: нечего отменять'; return; }
+  if(last==='seg' && segs.length) segs.pop(); else if(last==='comp' && comps.length) comps.pop();
+  need(); statusEl.textContent='Статус: отменено';
+};
 
-    if(pointers.size===2){
-      const arr=[...pointers.values()], nowCenter=centroid(), nowDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
-      if(prevCenter && prevDist && nowCenter){
-        const k=(nowDist>0 && prevDist>0)?(nowDist/prevDist):1;
-        view.tx = nowCenter.sx - k*(nowCenter.sx - view.tx);
-        view.ty = nowCenter.sy - k*(nowCenter.sy - view.ty);
-        view.scale = Math.max(0.3, Math.min(8, view.scale*k));
-        view.tx += (nowCenter.sx - prevCenter.sx);
-        view.ty += (nowCenter.sy - prevCenter.sy);
-        need();
-      }
-      prevCenter=nowCenter; prevDist=nowDist; return;
-    }
-
-    const only=[...pointers.values()][0];
-    if(mode==='hand'){
-      const d=downs.get(e.pointerId); if(d){ view.tx += (only.sx-d.sx); view.ty += (only.sy-d.sy); d.sx=only.sx; d.sy=only.sy; need(); }
-    }
-    if(mode==='line' && first){ preview=s2w(only.sx,only.sy); need(); }
-  }, {passive:false});
-
-  cv.addEventListener('pointerup', e=>{
-    const d=downs.get(e.pointerId);
-    const p=pointers.get(e.pointerId)||{sx:0,sy:0};
-    const isTap = !!d && (performance.now()-d.t0<=TAP_TIME) && (Math.hypot(p.sx-d.sx, p.sy-d.sy)<=TAP_MOVE);
-
-    if(isTap && mode==='line'){
-      const W=s2w(p.sx,p.sy);
-      if(!first){ first=W; preview=null; need(); }
-      else{ segs.push({a:first,b:W}); stack.push('seg'); first=null; preview=null; mode='hand'; need(); }
-    }else if(isTap && mode==='place'){
-      const near=findNearestSegment(p.sx,p.sy,28*DPR);
-      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); stack.push('comp'); mode='hand'; need(); }
-    }
-
-    downs.delete(e.pointerId); pointers.delete(e.pointerId);
-    if(pointers.size<2){ prevCenter=null; prevDist=null; }
-  }, {passive:false});
-
-  // ---------- UI ----------
-  const $=id=>document.getElementById(id);
-  $('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; statusEl.textContent='Статус: Линия'; };
-  $('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; statusEl.textContent='Статус: Рука'; };
-  $('btnValve').onclick=()=>{ currentComp='valve'; mode='place'; statusEl.textContent='Статус: Кран — ткни по линии'; };
-  $('btnCheck').onclick=()=>{ currentComp='check'; mode='place'; statusEl.textContent='Статус: Клапан — ткни по линии'; };
-  $('btnPump').onclick =()=>{ currentComp='pump';  mode='place'; statusEl.textContent='Статус: Насос — ткни по линии'; };
-
-  $('btnUndo').onclick=()=>{
-    if(first){ first=null; preview=null; need(); statusEl.textContent='Статус: Отменено (точка)'; return; }
-    const last=stack.pop(); if(!last){ statusEl.textContent='Статус: Нечего отменять'; return; }
-    if(last==='seg' && segs.length) segs.pop(); else if(last==='comp' && comps.length) comps.pop(); need(); statusEl.textContent='Статус: Отмена';
-  };
-
-  // старт
-  fit(); need();
-  statusEl.textContent='Статус: Готово (v847-core)';
+// старт
+fit(); need();
+statusEl.textContent='Статус: Готово (v847b-core)';
 })();
 </script>
 </body>
