@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v853-check-body</title>
+<title>Pro Trace — v854-zoom-check</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -11,6 +11,8 @@
   .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
+  .zoom{position:fixed;right:8px;top:8px;z-index:11;display:flex;gap:8px}
+  .zbtn{height:44px;width:44px;border:0;border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.1);font-size:20px}
   .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.70);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11;max-width:92vw}
 </style>
 </head>
@@ -24,6 +26,11 @@
     <button id="btnPump"  class="btn ghost">Насос</button>
     <button id="btnUndo"  class="btn ghost">↩ Назад</button>
     <button id="btnHand"  class="btn ghost">🖐 Рука</button>
+  </div>
+
+  <div class="zoom">
+    <button id="btnMinus" class="zbtn" title="Уменьшить">−</button>
+    <button id="btnPlus"  class="zbtn" title="Увеличить">+</button>
   </div>
 
   <div id="status" class="status">Статус: Загрузка…</div>
@@ -40,7 +47,9 @@ window.addEventListener('error', e=>{
   statusEl.textContent='Статус: Ошибка — '+(e.message||'unknown');
 });
 
-const view={tx:0,ty:0,scale:1}; // пан (без зума)
+/* ===== камера/вид ===== */
+const view={tx:0,ty:0,scale:1};
+function clampScale(s){ return Math.max(0.25, Math.min(6, s)); }
 function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
 addEventListener('resize',fit,{passive:true});
 
@@ -52,7 +61,7 @@ let mode='line';         // line | place | hand
 let currentComp='valve'; // valve | check | pump
 let first=null, preview=null;
 
-/* «толщина трубы» — базовая шкала для арматуры */
+/* базовая шкала = толщина трубы */
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
 
 /* ===== утилиты ===== */
@@ -85,7 +94,6 @@ function badgeWorld(wx,wy,txt){
   ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2);
 }
-
 function drawSegments(){
   ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
   const col=params.lineColor, sh=darker(col,0.45);
@@ -128,22 +136,22 @@ function drawValve(seg,t){
   ctx.restore(); badgeWorld(b.x,b.y,'BALL');
 }
 
-/* ——— Клапан (реалистичный «бочонок» + два патрубка + стрелка) ——— */
+/* ——— Клапан (компактный «бочонок» + 2 патрубка + стрелка) ——— */
 function drawCheck(seg,t){
   const b=compBasis(seg,t);
   const base = params.linePx*params.compScale;
-  const R    = base*3.1;   // радиус корпуса
-  const nLen = base*2.6;   // длина патрубка
-  const nR   = base*1.15;  // радиус патрубка
+  // чуток компактнее предыдущей версии:
+  const R    = base*2.6;   // радиус корпуса (было 3.1)
+  const nLen = base*1.9;   // длина патрубка (было 2.6)
+  const nR   = base*1.0;   // радиус патрубка
   const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
 
   ctx.save();
   ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
   ctx.lineJoin='round'; ctx.lineCap='round';
 
-  // патрубок слева
-  (function(){
-    const cx=b.x-ux*(R+nLen/2), cy=b.y-uy*(R+nLen/2);
+  function nozzle(sign){
+    const cx=b.x+ux*sign*(R+nLen/2), cy=b.y+uy*sign*(R+nLen/2);
     const ax=ux*(nLen/2), ay=uy*(nLen/2), px=nx*nR, py=ny*nR;
     ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
     ctx.beginPath();
@@ -152,33 +160,20 @@ function drawCheck(seg,t){
     ctx.lineTo(cx+ax+px, cy+ay+py);
     ctx.lineTo(cx-ax+px, cy-ay+py);
     ctx.closePath(); ctx.fill(); ctx.stroke();
-  })();
+  }
+  nozzle(-1); nozzle(1);
 
-  // патрубок справа
-  (function(){
-    const cx=b.x+ux*(R+nLen/2), cy=b.y+uy*(R+nLen/2);
-    const ax=ux*(nLen/2), ay=uy*(nLen/2), px=nx*nR, py=ny*nR;
-    ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
-    ctx.beginPath();
-    ctx.moveTo(cx-ax-px, cy-ay-py);
-    ctx.lineTo(cx+ax-px, cy+ay-py);
-    ctx.lineTo(cx+ax+px, cy+ay+py);
-    ctx.lineTo(cx-ax+px, cy-ay+py);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-  })();
-
-  // корпус-круг
+  // корпус
   ctx.beginPath(); ctx.arc(b.x,b.y,R,0,Math.PI*2);
   ctx.fillStyle='#6b1dff'; ctx.fill();
   ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale; ctx.stroke();
 
-  // стрелка направления внутри (вдоль +u)
-  const shaft = R*0.9, head = R*0.45, headW = R*0.35;
+  // стрелка направления (по +u)
+  const shaft = R*0.85, head = R*0.40, headW = R*0.32;
   const S = {x:b.x-ux*shaft*0.35, y:b.y-uy*shaft*0.35};
   const E = {x:b.x+ux*shaft*0.45, y:b.y+uy*shaft*0.45};
   ctx.strokeStyle='#ffffff'; ctx.lineWidth=2.2/view.scale;
   ctx.beginPath(); ctx.moveTo(S.x,S.y); ctx.lineTo(E.x,E.y); ctx.stroke();
-  // наконечник
   const L = {x:E.x-ux*head + nx*headW*0.5, y:E.y-uy*head + ny*headW*0.5};
   const Rr= {x:E.x-ux*head - nx*headW*0.5, y:E.y-uy*head - ny*headW*0.5};
   ctx.fillStyle='#ffffff';
@@ -188,7 +183,7 @@ function drawCheck(seg,t){
   badgeWorld(b.x,b.y,'CHECK');
 }
 
-/* ——— Насос (как раньше) ——— */
+/* ——— Насос ——— */
 function drawPump(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2;
@@ -235,16 +230,26 @@ function draw(){
 }
 let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
-/* ===== ввод ===== */
+/* ===== ввод: рука, линия, зум ===== */
 const pointers=new Map();
 let isPanning=false, panLast=null;
+let prevCenter=null, prevDist=null; // для пинча
+
 function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
+function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
+function dist2(a,b){ return Math.hypot(a.sx-b.sx,a.sy-b.sy); }
 
 cv.addEventListener('pointerdown', e=>{
   e.preventDefault();
   const {sx,sy}=canvasXY(e);
   pointers.set(e.pointerId,{sx,sy});
-  if(mode==='hand'){ isPanning=true; panLast={sx,sy}; statusEl.textContent='Статус: Перетаскивай'; return; }
+
+  if(pointers.size===2){ prevCenter=centroid(); const [p0,p1]=[...pointers.values()]; prevDist=dist2(p0,p1); }
+
+  if(mode==='hand'){
+    isPanning=true; panLast={sx,sy}; statusEl.textContent='Статус: Перетаскивай';
+    return;
+  }
 
   const W=s2w(sx,sy);
   if(mode==='line'){
@@ -261,23 +266,53 @@ cv.addEventListener('pointermove', e=>{
   if(!pointers.has(e.pointerId)) return;
   const {sx,sy}=canvasXY(e);
   pointers.set(e.pointerId,{sx,sy});
-  if(isPanning && panLast){ view.tx += (sx - panLast.sx); view.ty += (sy - panLast.sy); panLast={sx,sy}; need(); return; }
-  if(mode==='line' && first){ preview=s2w(sx,sy); need(); }
+
+  // Пинч-зум 2 пальцами
+  if(pointers.size===2){
+    const nowC=centroid(); const [p0,p1]=[...pointers.values()]; const nowD=dist2(p0,p1);
+    if(prevCenter && prevDist){
+      const k = nowD>0 && prevDist>0 ? (nowD/prevDist) : 1;
+      const newScale = clampScale(view.scale*k);
+      // масштаб относительно центра жеста
+      const cx=nowC.sx, cy=nowC.sy;
+      view.tx = cx - (cx - view.tx)*(newScale/view.scale);
+      view.ty = cy - (cy - view.ty)*(newScale/view.scale);
+      view.scale = newScale;
+      need();
+    }
+    prevCenter=nowC; prevDist=nowD;
+    return;
+  }
+
+  if(isPanning && panLast){
+    view.tx += (sx - panLast.sx);
+    view.ty += (sy - panLast.sy);
+    panLast={sx,sy};
+    need();
+    return;
+  }
+
+  if(mode==='line' && first){
+    preview=s2w(sx,sy);
+    need();
+  }
 },{passive:false});
 
 cv.addEventListener('pointerup', e=>{
   pointers.delete(e.pointerId);
+  if(pointers.size<2){ prevCenter=null; prevDist=null; }
   if(isPanning && pointers.size===0){ isPanning=false; panLast=null; }
 },{passive:false});
 cv.addEventListener('pointercancel', e=>{
   pointers.delete(e.pointerId);
+  if(pointers.size<2){ prevCenter=null; prevDist=null; }
   if(isPanning && pointers.size===0){ isPanning=false; panLast=null; }
 },{passive:false});
 
 /* ===== кнопки ===== */
 const $=id=>document.getElementById(id);
 $('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; statusEl.textContent='Статус: Режим линия'; };
-$('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; statusEl.textContent='Статус: Рука (перетаскивание одним пальцем)'; };
+$('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; statusEl.textContent='Статус: Рука'; };
 $('btnValve').onclick=()=>{ currentComp='valve'; mode='place'; statusEl.textContent='Статус: Кран — ткни по линии'; };
 $('btnCheck').onclick=()=>{ currentComp='check'; mode='place'; statusEl.textContent='Статус: Клапан — ткни по линии'; };
 $('btnPump').onclick =()=>{ currentComp='pump';  mode='place'; statusEl.textContent='Статус: Насос — ткни по линии'; };
@@ -288,9 +323,20 @@ $('btnUndo').onclick =()=>{
   need(); statusEl.textContent='Статус: отменено';
 };
 
+/* зум-кнопки */
+function zoomAt(factor){
+  const cx=cv.width/2, cy=cv.height/2;
+  const newScale=clampScale(view.scale*factor);
+  view.tx = cx - (cx - view.tx)*(newScale/view.scale);
+  view.ty = cy - (cy - view.ty)*(newScale/view.scale);
+  view.scale=newScale; need();
+}
+$('btnPlus').onclick =()=>zoomAt(1.2);
+$('btnMinus').onclick=()=>zoomAt(1/1.2);
+
 /* ===== старт ===== */
 fit(); need();
-statusEl.textContent='Статус: Готово (v853-check-body)';
+statusEl.textContent='Статус: Готово (v854-zoom-check)';
 
 })();
 </script>
