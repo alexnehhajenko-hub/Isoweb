@@ -3,28 +3,28 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v858-all-in-settings</title>
+<title>Pro Trace — v859-photo-bg</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
   #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
 
-  /* верхняя панель */
   .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
   .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
 
-  /* зум +/- */
   .zoom{position:fixed;right:8px;top:8px;z-index:11;display:flex;gap:8px}
   .zbtn{height:44px;min-width:44px;border:0;border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.1);font-size:18px}
 
-  /* шестерёнка и панель */
   .gear{position:fixed;right:8px;top:64px;z-index:12;height:44px;width:44px;border:1px solid var(--border);border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.08);font-size:20px}
+  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.70);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11;max-width:92vw}
+
+  /* Панель */
   .panel-wrap{position:fixed;inset:0;z-index:20;display:none}
   .panel-wrap.open{display:block}
   .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
   .panel{position:absolute;top:64px;right:8px;background:#fff;border:1px solid var(--border);
-         border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:12px;width:min(92vw,360px);
+         border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:12px;width:min(92vw,380px);
          max-height:80vh;overflow:auto}
   .panel h4{margin:6px 0 8px;font-size:15px}
   .row{display:flex;align-items:center;gap:10px;margin:10px 0}
@@ -35,9 +35,8 @@
   .radio-row{display:flex;gap:10px;flex-wrap:wrap}
   .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333}
   .radio input{accent-color:#6b1dff}
-
-  /* статус */
-  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.70);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11;max-width:92vw}
+  .upl{position:relative;min-width:120px;display:inline-flex;justify-content:center}
+  .upl input{position:absolute;inset:0;opacity:0}
 </style>
 </head>
 <body>
@@ -61,8 +60,18 @@
     <div id="panelBackdrop" class="panel-backdrop"></div>
     <div id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="hSettings">
       <button id="btnClosePanel" class="close" title="Закрыть">✕</button>
-      <h4 id="hSettings">Настройки</h4>
+      <h4 id="hSettings">Фото (фон)</h4>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <label class="btn ghost upl">📷 Камера
+          <input id="fileCam" type="file" accept="image/*" capture="environment">
+        </label>
+        <label class="btn ghost upl">📂 Галерея
+          <input id="fileGal" type="file" accept="image/*">
+        </label>
+        <button id="btnClearBg" class="btn ghost" style="margin-left:auto">🧹 Удалить фон</button>
+      </div>
 
+      <h4>Чертёж</h4>
       <div class="row">
         <label for="rangeLine">Толщина линии</label>
         <input id="rangeLine" type="range" min="2" max="56" step="1">
@@ -75,7 +84,7 @@
         <span id="compVal" class="num">1.15</span>
       </div>
 
-      <div class="row" style="margin-top:14px">
+      <div class="row" style="margin-top:8px">
         <label>Тип арматуры</label>
         <div class="radio-row">
           <label class="radio"><input type="radio" name="comp" value="valve" checked> Кран (шаровый)</label>
@@ -107,14 +116,36 @@ window.addEventListener('error', e=>{
 /* ===== камера/вид ===== */
 const view={tx:0,ty:0,scale:1};
 function clampScale(s){ return Math.max(0.25, Math.min(6, s)); }
-function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
+function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); if(bg && view.scale===1 && view.tx===0 && view.ty===0) fitToScreen(); need(); }
 addEventListener('resize',fit,{passive:true});
+function fitToScreen(){ if(!bg) return; const k=Math.min(cv.width/bw, cv.height/bh); view.scale=k; view.tx=(cv.width-bw*k)/2; view.ty=(cv.height-bh*k)/2; }
+
+/* ===== фон (фото) ===== */
+let bg=null,bw=0,bh=0;
+function loadImageFile(f){
+  if(!f) return;
+  const img=new Image();
+  img.onload=()=>{
+    // ограничим размер (экономим память на телефоне)
+    const maxSide=Math.max(img.naturalWidth,img.naturalHeight);
+    let w=img.naturalWidth, h=img.naturalHeight;
+    if(maxSide>2200){ const sc=2200/maxSide; w=Math.round(w*sc); h=Math.round(h*sc); }
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    c.getContext('2d',{alpha:false}).drawImage(img,0,0,w,h);
+    bg=c; bw=w; bh=h; fitToScreen(); need();
+    updateStatus('Фото добавлено');
+  };
+  img.src=URL.createObjectURL(f);
+}
+document.getElementById('fileCam').onchange=e=>loadImageFile(e.target.files?.[0]);
+document.getElementById('fileGal').onchange=e=>loadImageFile(e.target.files?.[0]);
+document.getElementById('btnClearBg').onclick=()=>{ bg=null; need(); updateStatus('Фон удалён'); };
 
 /* ===== данные сцены ===== */
 const segs=[];           // {a:{x,y}, b:{x,y}}
 const comps=[];          // {segIndex,t,type}
 const stack=[];          // 'seg' | 'comp'
-let mode='line';         // line | place | hand
+let mode='hand';         // стартуем как Рука — чтобы не рисовало случайно
 let currentComp='valve'; // valve | check | pump
 let first=null, preview=null;
 
@@ -122,7 +153,7 @@ let first=null, preview=null;
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
 function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
 function updateStatus(extra=''){
-  statusEl.textContent=`Статус: ${extra}  | Линия: ${params.linePx}px  | Арматура×${params.compScale.toFixed(2)}`;
+  statusEl.textContent=`Статус: ${extra}  | Режим: ${mode==='line'?'Линия':mode==='place'?'Арматура':'Рука'}  | Линия ${params.linePx}px  | Арматура×${params.compScale.toFixed(2)}`;
 }
 
 /* ===== утилиты ===== */
@@ -179,12 +210,10 @@ function drawValve(seg,t){
   ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
-  // конусы
   ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR); ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
   ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR); ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
+  ctx.beginPath(); ctx.MoveTo; ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR); ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
   ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR); ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
-  // шар и ручка
   ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
   const top={x:b.x+nx*bodyR,y:b.y+ny*bodyR}, neckTop={x:top.x+nx*neckH,y:top.y+ny*neckH};
   ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.lineWidth=2/view.scale; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
@@ -212,7 +241,6 @@ function drawCheck(seg,t){
 
   ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.lineJoin='round'; ctx.lineCap='round';
 
-  // корпус
   ctx.beginPath();
   ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
   ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -223,7 +251,6 @@ function drawCheck(seg,t){
   ctx.fillStyle='#6b1dff'; ctx.fill();
   ctx.lineWidth=2/view.scale; ctx.strokeStyle='#2b145f'; ctx.stroke();
 
-  // конусы к трубе
   ctx.beginPath();
   ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
@@ -238,7 +265,6 @@ function drawCheck(seg,t){
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
   ctx.closePath(); ctx.fillStyle='#6b1dff'; ctx.fill(); ctx.stroke();
 
-  // треугольник «вверх» по нормали
   const triBase = base*3.2, triRise = base*3.0;
   const A = {x:b.x - ux*triBase/2, y:b.y - uy*triBase/2};
   const B = {x:b.x + ux*triBase/2, y:b.y + uy*triBase/2};
@@ -276,6 +302,7 @@ function drawPump(seg,t){
 function draw(){
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+  if(bg){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); ctx.drawImage(bg,0,0,bw,bh); }
   drawSegments();
   for(const c of comps){
     const seg=segs[c.segIndex]; if(!seg) continue;
@@ -375,14 +402,7 @@ $('btnUndo').onclick =()=>{
   if(last==='seg' && segs.length) segs.pop(); else if(last==='comp' && comps.length) comps.pop();
   need(); updateStatus('Отменено');
 };
-/* зум-кнопки */
-function zoomAt(factor){
-  const cx=cv.width/2, cy=cv.height/2;
-  const newScale=clampScale(view.scale*factor);
-  view.tx = cx - (cx - view.tx)*(newScale/view.scale);
-  view.ty = cy - (cy - view.ty)*(newScale/view.scale);
-  view.scale=newScale; need();
-}
+function zoomAt(f){ const cx=cv.width/2, cy=cv.height/2; const ns=clampScale(view.scale*f); view.tx=cx-(cx-view.tx)*(ns/view.scale); view.ty=cy-(cy-view.ty)*(ns/view.scale); view.scale=ns; need(); }
 $('btnPlus').onclick =()=>zoomAt(1.2);
 $('btnMinus').onclick=()=>zoomAt(1/1.2);
 
@@ -398,28 +418,19 @@ function closePanel(){ wrap.classList.remove('open'); wrap.setAttribute('aria-hi
 btnSettings.onclick=openPanel; btnClose.onclick=closePanel; backdrop.onclick=closePanel;
 ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}));
 
-/* выбор типа арматуры */
 document.querySelectorAll('input[name="comp"]').forEach(r=>{
   r.addEventListener('change',()=>{ currentComp=r.value; });
 });
+document.getElementById('btnPlaceComp').onclick=()=>{ closePanel(); mode='place'; updateStatus('Ткни по линии — поставлю '+(currentComp==='valve'?'кран':currentComp==='check'?'клапан':'насос')); };
 
-/* кнопка «поставить» из настроек */
-document.getElementById('btnPlaceComp').onclick=()=>{
-  closePanel();
-  mode='place';
-  updateStatus('Ткни по линии — поставлю '+(currentComp==='valve'?'кран':currentComp==='check'?'клапан':'насос'));
-};
-
-/* начальные значения в слайдерах и живое обновление */
 rangeLine.value=params.linePx; lineVal.textContent=params.linePx.toString();
 rangeComp.value=params.compScale; compVal.textContent=params.compScale.toFixed(2);
-
 rangeLine.oninput=()=>{ params.linePx=clamp(parseInt(rangeLine.value,10)||10,2,56); lineVal.textContent=params.linePx; need(); updateStatus('Толщина обновлена'); };
 rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15,0.5,3.0); compVal.textContent=params.compScale.toFixed(2); need(); updateStatus('Масштаб арматуры обновлён'); };
 
 /* ===== старт ===== */
 fit(); need();
-updateStatus('Готово (v858-all-in-settings)');
+updateStatus('Готово (v859-photo-bg) — по умолчанию Рука');
 
 })();
 </script>
