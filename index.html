@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v837</title>
+<title>Pro Trace — v838 (flow arrow)</title>
 <style>
   :root{--violet:#6b1dff; --violetDeep:#2b145f; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
@@ -68,6 +68,7 @@
         <label class="radio"><input type="radio" name="comp" value="valve" checked> Шаровый кран (BALL)</label>
         <label class="radio"><input type="radio" name="comp" value="check"> Обратный клапан (CHECK)</label>
         <label class="radio"><input type="radio" name="comp" value="pump"> Насос (PUMP)</label>
+        <label class="radio"><input type="radio" name="comp" value="flow"> Стрелка потока (FLOW)</label>
       </div>
       <div class="row">
         <label for="scale">Масштаб арматуры</label>
@@ -96,6 +97,8 @@
       <div class="row" style="justify-content:flex-end;gap:8px">
         <button id="btnPlaceComp" class="btn">Поставить на трубу</button>
       </div>
+      <div class="hr"></div>
+      <button id="btnBail" class="btn ghost" title="Показать подсказку">ℹ︎ Подсказка</button>
     </div>
   </div>
 
@@ -105,6 +108,7 @@
 <script>
 (function(){
   "use strict";
+  try{
   function $(id){ return document.getElementById(id); }
   var toastEl=$('toast'), statusEl=$('status');
   function toast(t,ms){ if(ms===void 0) ms=1600; toastEl.textContent=t; toastEl.classList.add('show'); setTimeout(function(){ toastEl.classList.remove('show'); }, ms); }
@@ -172,7 +176,7 @@
   }
   function drawHandleMarker(pt){ var p=w2s(pt.x,pt.y); ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#16a34a'; ctx.strokeStyle='#0f5132'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
 
-  /* ==== арматура (как в прошлой версии) ==== */
+  /* ==== компоненты ==== */
   function drawBallValve(seg,t){
     var b=compBasis(seg,t), base=params.linePx*compScale;
     var bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
@@ -256,8 +260,34 @@
     ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2.0/view.scale;
     ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.strokeStyle='#1b1b1b'; ctx.lineWidth=1.2/view.scale;
-    var i; for(i=1;i<6;i++){ var tpos=i/6; var a={x:mL.x + ux*motorH*tpos, y:mL.y + uy*motorH*tpos}; var bpt={x:mR.x + ux*motorH*tpos, y:mR.y + uy*motorH*tpos}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
+    var i; for(i=1;i<6;i++){ var tpos=i/6; var a={x:mL.x + ux*motorH*tpos, y:mL.y + uy*motorH*tpos}; var bpt={x:mR.x + ux*motorH*tpos, y:mR.y + uy*mоторH*tpos}; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(bpt.x,bpt.y); ctx.stroke(); }
     ctx.restore(); var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'PUMP');
+  }
+
+  // Новая: стрелка потока
+  function drawFlow(seg,t){
+    var b=compBasis(seg,t), base=params.linePx*compScale;
+    var L=base*6.5, W=base*2.4; // длина и ширина стрелы
+    var ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
+    var tail={x:b.x-ux*(L*0.45), y:b.y-uy*(L*0.45)};
+    var tip ={x:b.x+ux*(L*0.55), y:b.y+uy*(L*0.55)};
+    var left ={x:tail.x+nx*(W*0.6), y:tail.y+ny*(W*0.6)};
+    var right={x:tail.x-nx*(W*0.6), y:tail.y-ny*(W*0.6)};
+    var midL={x:tail.x+ux*(L*0.45), y:tail.y+uy*(L*0.45)};
+    ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    // хвост (перо)
+    ctx.fillStyle='#111'; ctx.strokeStyle='#111'; ctx.lineWidth=1.4/view.scale;
+    ctx.beginPath(); ctx.moveTo(left.x,left.y); ctx.lineTo(midL.x+nx*(W*0.35), midL.y+ny*(W*0.35));
+    ctx.lineTo(midL.x-nx*(W*0.35), midL.y-ny*(W*0.35)); ctx.closePath(); ctx.fill();
+    // наконечник
+    ctx.beginPath(); ctx.moveTo(midL.x+nx*(W*0.35), midL.y+ny*(W*0.35));
+    ctx.lineTo(tip.x,tip.y);
+    ctx.lineTo(midL.x-nx*(W*0.35), midL.y-ny*(W*0.35)); ctx.closePath(); ctx.fillStyle='#000'; ctx.fill(); ctx.stroke();
+    // маленькая белая окантовка
+    ctx.strokeStyle='rgba(255,255,255,.8)'; ctx.lineWidth=1.1/view.scale;
+    ctx.beginPath(); ctx.moveTo(left.x,left.y); ctx.lineTo(midL.x+nx*(W*0.35), midL.y+ny*(W*0.35)); ctx.lineTo(tip.x,tip.y); ctx.lineTo(midL.x-nx*(W*0.35), midL.y-ny*(W*0.35)); ctx.lineTo(right.x,right.y); ctx.stroke();
+    ctx.restore();
+    var S=w2s(b.x,b.y); drawBadge(S.x,S.y,'FLOW');
   }
 
   function draw(){
@@ -270,6 +300,7 @@
       if(c.type==='valve') drawBallValve(seg,c.t);
       else if(c.type==='check') drawCheckValve(seg,c.t);
       else if(c.type==='pump') drawPump(seg,c.t);
+      else if(c.type==='flow') drawFlow(seg,c.t);
     }
     if(hoverSnap && hoverSnap._snapped){
       var p=w2s(hoverSnap.x,hoverSnap.y);
@@ -373,8 +404,8 @@
       else{ segs.push({a:first,b:{x:W3.x,y:W3.y}}); history.push('seg'); first=null; preview=null; mode='hand'; hoverSnap=null; need(); toast('Сегмент готов'); }
     }else if(isTap && mode==='place'){
       var near=findNearestSegment(p.sx,p.sy,28*DPR);
-      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); history.push('comp'); mode='hand'; need(); toast('Арматура установлена'); }
-      else{ toast('Ткни по линии, чтобы поставить арматуру'); }
+      if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); history.push('comp'); mode='hand'; need(); toast('Установлено'); }
+      else{ toast('Ткни по линии, чтобы поставить элемент'); }
     }
 
     downs.delete(e.pointerId); pointers.delete(e.pointerId);
@@ -395,7 +426,7 @@
   ['pointerdown','pointermove','pointerup','click','wheel'].forEach(function(ev){ panel.addEventListener(ev,function(e){ e.stopPropagation(); },{passive:false}); });
 
   $('btnLine').onclick=function(){ mode='line'; first=null; preview=null; hoverSnap=null; toast('Режим: линия (тап-тап)'); };
-  $('btnHand').onclick=function(){ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца; пан одним пальцем в режиме «Рука»'); };
+  $('btnHand').onclick=function(){ mode='hand'; first=null; preview=null; hoverSnap=null; toast('Рука: пан/зум — 2 пальца'); };
 
   $('btnUndo').onclick=function(){
     if(mode==='edit'&&editing){ mode='hand'; editing=null; need(); return; }
@@ -426,6 +457,8 @@
   var mag=document.querySelectorAll('input[name="mag"]');
   for(i=0;i<mag.length;i++){ mag[i].addEventListener('change',function(){ magnetOn=(this.value==='on'); }); }
 
+  $('btnBail').onclick=function(){ toast('Линия: тап-тап. Долгое нажатие — правка конца. Настройки → «Поставить на трубу», выбери тип и ткни по линии.',2600); };
+
   function resetInputs(){ var c=$('fileCam'), g=$('fileGal'); if(c) c.value=''; if(g) g.value=''; }
   function loadImageFile(f){
     if(!f) return;
@@ -443,9 +476,10 @@
   $('fileGal').onchange=function(e){ loadImageFile(e.target.files && e.target.files[0]); };
   $('btnExport').onclick=function(){ try{ var url=cv.toDataURL('image/png',0.95); var a=document.createElement('a'); a.href=url; a.download='ProTrace.png'; a.click(); }catch(e){ toast('Экспорт не поддерживается'); } };
 
-  $('btnPlaceComp').onclick=function(){ closePanel(); mode='place'; toast('Ткни по линии — поставлю арматуру'); };
+  $('btnPlaceComp').onclick=function(){ closePanel(); mode='place'; toast('Ткни по линии — поставлю выбранный элемент'); };
 
-  fit(); status('Готово'); toast('Готово: v837');
+  fit(); status('Готово'); toast('Готово: v838');
+  }catch(e){ document.getElementById('status').textContent='Статус: Ошибка — '+(e.message||e); }
 })();
 </script>
 </body>
