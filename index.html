@@ -1,65 +1,161 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Canvas Test</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pro Trace — v844-base</title>
 <style>
-  html,body{margin:0;height:100%;background:#ddd;overflow:hidden;font:14px system-ui}
-  #cv{position:fixed;inset:0;touch-action:none;background:#fff}
-  .ui{position:fixed;top:8px;left:8px;display:flex;gap:8px;z-index:10}
-  button{height:40px;padding:0 12px;border:0;border-radius:10px;background:#7c5bff;color:#fff;font-weight:700}
-  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.65);color:#fff;padding:6px 8px;border-radius:8px}
-  .debug{position:fixed;right:8px;bottom:8px;max-width:90vw;max-height:40vh;overflow:auto;
-         background:rgba(0,0,0,.85);color:#0f0;padding:8px;border-radius:8px;display:none;white-space:pre-wrap}
+  :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
+  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
+  #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+  .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px}
+  .btn{height:44px;padding:0 16px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
+  .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
+  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.65);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11}
 </style>
 </head>
 <body>
-<canvas id="cv"></canvas>
-<div class="ui"><button id="test">Тест</button></div>
-<div id="status" class="status">Статус: Загрузка…</div>
-<div id="debug" class="debug"></div>
+  <canvas id="cv"></canvas>
+
+  <div class="bar">
+    <button id="btnLine" class="btn">📐 Линия</button>
+    <button id="btnUndo" class="btn ghost">↩ Назад</button>
+    <button id="btnHand" class="btn ghost">🖐 Рука</button>
+  </div>
+
+  <div id="status" class="status">Статус: Загрузка…</div>
+
 <script>
 (function(){
   "use strict";
-  const qs=new URLSearchParams(location.search);
-  const DEBUG = qs.get('debug')==='1';
-  const logEl=document.getElementById('debug');
-  function log(){ if(!DEBUG) return; logEl.style.display='block';
-    logEl.textContent += Array.from(arguments).join(' ')+"\\n"; logEl.scrollTop=logEl.scrollHeight; }
 
   const statusEl=document.getElementById('status');
-  function status(t){ statusEl.textContent='Статус: '+t; }
-
-  window.addEventListener('error', e=>{ log('ERROR:', e.message, (e.filename||'')+':'+(e.lineno||'')); });
-
   const cv=document.getElementById('cv');
   const ctx=cv.getContext && cv.getContext('2d',{alpha:false});
-  if(!ctx){ status('Нет 2D контекста'); log('no 2d ctx'); return; }
+  if(!ctx){ statusEl.textContent='Статус: Canvas 2D не поддерживается'; return; }
 
-  const DPR=Math.max(1, window.devicePixelRatio||1);
-  function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); draw(); }
-  addEventListener('resize', fit, {passive:true}); fit();
+  const DPR=Math.max(1,window.devicePixelRatio||1);
+  const view={scale:1,tx:0,ty:0};
 
-  const points=[];
+  function fit(){
+    cv.width=Math.round(innerWidth*DPR);
+    cv.height=Math.round(innerHeight*DPR);
+    need();
+  }
+  addEventListener('resize',fit,{passive:true});
+
+  // ===== данные =====
+  const segs=[];                 // {a:{x,y}, b:{x,y}}
+  let mode='line';               // line | hand
+  let first=null, preview=null;
+
+  const params={ linePx:10, lineColor:'#1f6bff' };
+
+  // ===== утилиты преобразования =====
+  const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale});
+  const w2s=(x,y)=>({x:x*view.scale+view.tx, y:y*view.scale+view.ty});
+
+  // ===== отрисовка =====
   function draw(){
     ctx.setTransform(1,0,0,1,0,0);
-    ctx.fillStyle='#f7f7f7'; ctx.fillRect(0,0,cv.width,cv.height);
-    for(const p of points){
-      ctx.beginPath(); ctx.fillStyle='#6b1dff';
-      ctx.arc(p.x,p.y,14,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+
+    // сегменты
+    ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    for(const s of segs){
+      ctx.strokeStyle='#143b99'; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
+      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+      ctx.strokeStyle=params.lineColor; ctx.globalAlpha=1; ctx.lineWidth=params.linePx/view.scale;
+      ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+    }
+
+    // превью «тап-тап»
+    if(first && preview){
+      ctx.setLineDash([12/view.scale,8/view.scale]);
+      ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
+      ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke();
+      ctx.setLineDash([]);
+      const p=w2s(preview.x,preview.y);
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.fillStyle=params.lineColor; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
+    }
+
+    // маркер первой точки
+    if(first){
+      const p=w2s(first.x,first.y);
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.fillStyle='#ff3b30'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
     }
   }
+  let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
+
+  // ===== ввод (Pointer) =====
+  const TAP_TIME=300, TAP_MOVE=14*DPR;
+  const pointers=new Map(); const downs=new Map();
+  let prevCenter=null, prevDist=null;
+
+  function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
+  function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
 
   cv.addEventListener('pointerdown', e=>{
-    const r=cv.getBoundingClientRect(), sx=(e.clientX-r.left)*(cv.width/r.width), sy=(e.clientY-r.top)*(cv.height/r.height);
-    points.push({x:sx,y:sy}); draw();
+    e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    const p=canvasXY(e);
+    pointers.set(e.pointerId,{sx:p.sx,sy:p.sy});
+    downs.set(e.pointerId,{t0:performance.now(),sx:p.sx,sy:p.sy});
   }, {passive:false});
 
-  document.getElementById('test').onclick=()=>{ status('Работает!'); };
+  cv.addEventListener('pointermove', e=>{
+    if(!pointers.has(e.pointerId)) return;
+    const p=canvasXY(e); pointers.set(e.pointerId,{sx:p.sx,sy:p.sy});
 
-  status('Готово'); log('init ok; DPR=',DPR);
-  draw();
+    if(pointers.size===2){ // зум/пан
+      const arr=[...pointers.values()];
+      const nowCenter=centroid();
+      const nowDist=Math.hypot(arr[0].sx-arr[1].sx,arr[0].sy-arr[1].sy);
+      if(prevCenter && prevDist && nowCenter){
+        const k=(nowDist>0 && prevDist>0)?(nowDist/prevDist):1;
+        view.tx = nowCenter.sx - k*(nowCenter.sx - view.tx);
+        view.ty = nowCenter.sy - k*(nowCenter.sy - view.ty);
+        view.scale = Math.max(0.3, Math.min(8, view.scale*k));
+        view.tx += (nowCenter.sx - prevCenter.sx);
+        view.ty += (nowCenter.sy - prevCenter.sy);
+        need();
+      }
+      prevCenter=nowCenter; prevDist=nowDist; return;
+    }
+
+    const only=[...pointers.values()][0];
+    if(mode==='hand'){
+      const d=downs.get(e.pointerId);
+      if(d){ view.tx += (only.sx-d.sx); view.ty += (only.sy-d.sy); d.sx=only.sx; d.sy=only.sy; need(); }
+    }
+    if(mode==='line' && first){ preview=s2w(only.sx,only.sy); need(); }
+  }, {passive:false});
+
+  cv.addEventListener('pointerup', e=>{
+    const d=downs.get(e.pointerId);
+    const p=pointers.get(e.pointerId)||{sx:0,sy:0};
+    const isTap = !!d && (performance.now()-d.t0<=TAP_TIME) && (Math.hypot(p.sx-d.sx, p.sy-d.sy)<=TAP_MOVE);
+
+    if(isTap && mode==='line'){
+      const W=s2w(p.sx,p.sy);
+      if(!first){ first=W; preview=null; need(); }
+      else{ segs.push({a:first,b:W}); first=null; preview=null; need(); }
+    }
+
+    downs.delete(e.pointerId); pointers.delete(e.pointerId);
+    if(pointers.size<2){ prevCenter=null; prevDist=null; }
+  }, {passive:false});
+
+  // ===== UI =====
+  document.getElementById('btnLine').onclick=()=>{ mode='line'; first=null; preview=null; };
+  document.getElementById('btnHand').onclick=()=>{ mode='hand'; first=null; preview=null; };
+  document.getElementById('btnUndo').onclick=()=>{ if(first){ first=null; preview=null; } else if(segs.length){ segs.pop(); } need(); };
+
+  // старт
+  fit(); need();
+  statusEl.textContent='Статус: Готово (v844-base)';
 })();
 </script>
 </body>
