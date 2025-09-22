@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v868 tap + armature</title>
+<title>Pro Trace — v869 tap + armature</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -89,54 +89,240 @@
 
 <script>
 (()=>{"use strict";
-const DPR=Math.min(1.5,Math.max(1,window.devicePixelRatio||1));
-const cv=document.getElementById('cv');
-const ctx=cv.getContext('2d',{alpha:false});
-const statusEl=document.getElementById('status');
+/* ===== базовая инициализация ===== */
+const DPR = Math.min(1.5, Math.max(1, window.devicePixelRatio||1)); // быстрее на iPhone
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d', {alpha:false});
+const statusEl = document.getElementById('status');
 
-const view={tx:0,ty:0,scale:1};
-const clampScale=s=>Math.max(0.25,Math.min(6,s));
-function fit(){cv.width=Math.round(innerWidth*DPR);cv.height=Math.round(innerHeight*DPR);need();}
-addEventListener('resize',fit,{passive:true});
+/* ===== камера/вид ===== */
+const view = {tx:0, ty:0, scale:1};
+const clampScale = s => Math.max(0.25, Math.min(6, s));
+function fit(){ cv.width = Math.round(innerWidth*DPR); cv.height = Math.round(innerHeight*DPR); need(); }
+addEventListener('resize', fit, {passive:true});
 
-const segs=[];const comps=[];const stack=[];
-let tool='idle';let mode='hand';let first=null,preview=null;let currentComp='valve';
-const params={linePx:10,lineColor:'#1f6bff',compScale:1.15};
-function updateStatus(msg=''){const t=tool==='awaitFirst'?'Жду 1-ю точку':tool==='awaitSecond'?'Жду 2-ю точку':mode==='hand'?'Рука':'Готов';statusEl.textContent=`Статус: ${msg} | ${t}`;}
+/* ===== сцена ===== */
+const segs=[], comps=[], stack=[];
+let tool='idle'; // 'idle' | 'awaitFirst' | 'awaitSecond' | 'placeComp'
+let mode='hand'; // 'hand' | 'line'
+let first=null, preview=null;
+let currentComp='valve'; // valve | check | pump
 
-function s2w(sx,sy){return{x:(sx-view.tx)/view.scale,y:(sy-view.ty)/view.scale};}
-function w2s(x,y){return{x:x*view.scale+view.tx,y:y*view.scale+view.ty};}
-function darker(hex,k=0.45){const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);if(!m)return'#333';let[r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];r=Math.max(0,Math.floor(r*(1-k)));g=Math.max(0,Math.floor(g*(1-k)));b=Math.max(0,Math.floor(b*(1-k)));return'#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');}
+const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
+const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+function updateStatus(msg=''){
+  const t = tool==='awaitFirst' ? 'Жду 1-ю точку'
+        : tool==='awaitSecond' ? 'Жду 2-ю точку'
+        : tool==='placeComp' ? 'Постановка арматуры'
+        : (mode==='hand' ? 'Рука' : 'Готов');
+  statusEl.textContent = `Статус: ${msg} | ${t} | Линия ${params.linePx}px | Арматура×${params.compScale.toFixed(2)}`;
+}
 
-function segGeom(seg){const vx=seg.b.x-seg.a.x,vy=seg.b.y-seg.a.y;const L=Math.hypot(vx,vy)||1;return{vx,vy,L,nx:vx/L,ny:vy/L};}
-function compBasis(seg,t){const g=segGeom(seg);return{x:seg.a.x+g.nx*g.L*t,y:seg.a.y+g.ny*g.L*t,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx};}
+/* ===== утилиты ===== */
+function s2w(sx,sy){ return { x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale }; }
+function w2s(x,y){ return { x:x*view.scale+view.tx, y:y*view.scale+view.ty }; }
+function darker(hex,k=0.45){ const m=/^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex); if(!m) return '#333';
+  let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];
+  r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k)));
+  return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; const L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
+function compBasis(seg,t){ const g=segGeom(seg); return {x:seg.a.x+g.nx*g.L*t, y:seg.a.y+g.ny*g.L*t, ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
 
-function drawSegments(){ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);const col=params.lineColor,sh=darker(col,0.45);for(const s of segs){ctx.strokeStyle=sh;ctx.globalAlpha=.75;ctx.lineWidth=(params.linePx+2)/view.scale;ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();ctx.strokeStyle=col;ctx.globalAlpha=1;ctx.lineWidth=params.linePx/view.scale;ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();}} 
+/* ===== отрисовка ===== */
+function drawSegments(){
+  ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  const col=params.lineColor, sh=darker(col,0.45);
+  for(const s of segs){
+    ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+    ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=params.linePx/view.scale;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+  }
+}
 
-function drawValve(seg,t){const b=compBasis(seg,t);ctx.save();ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);ctx.fillStyle='#6b1dff';ctx.beginPath();ctx.arc(b.x,b.y,params.linePx*params.compScale*2,0,Math.PI*2);ctx.fill();ctx.restore();}
-function drawCheck(seg,t){const b=compBasis(seg,t);ctx.save();ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);ctx.strokeStyle='#6b1dff';ctx.beginPath();ctx.moveTo(b.x-8,b.y-8);ctx.lineTo(b.x+8,b.y+8);ctx.moveTo(b.x+8,b.y-8);ctx.lineTo(b.x-8,b.y+8);ctx.stroke();ctx.restore();}
-function drawPump(seg,t){const b=compBasis(seg,t);ctx.save();ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);ctx.fillStyle='#6b1dff';ctx.fillRect(b.x-10,b.y-6,20,12);ctx.restore();}
+/* ——— простые иконки арматуры (лёгкие и быстрые) ——— */
+function drawValve(seg,t){ // шаровый кран
+  const b=compBasis(seg,t), base=params.linePx*params.compScale;
+  const R=base*2.0;
+  ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
+  // корпус
+  ctx.beginPath(); ctx.arc(b.x,b.y,R,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // ручка
+  ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + b.nx*R*1.6, b.y + b.ny*R*1.6); ctx.stroke();
+  ctx.restore();
+}
+function drawCheck(seg,t){ // обратный клапан (треугольник)
+  const b=compBasis(seg,t), base=params.linePx*params.compScale;
+  const w=base*4.0, h=base*3.2;
+  const A={x:b.x - b.ux*w/2, y:b.y - b.uy*w/2};
+  const B={x:b.x + b.ux*w/2, y:b.y + b.uy*w/2};
+  const T={x:b.x + b.nx*h,   y:b.y + b.ny*h};
+  ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  ctx.fillStyle='#ffffff'; ctx.strokeStyle='#6b1dff'; ctx.lineWidth=2/view.scale;
+  ctx.beginPath(); ctx.moveTo(T.x,T.y); ctx.lineTo(B.x,B.y); ctx.lineTo(A.x,A.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+function drawPump(seg,t){ // насос: круг + мотор сбоку (правильная ориентация)
+  const b=compBasis(seg,t), base=params.linePx*params.compScale;
+  const volR=base*3.8, motorW=base*5.2, motorH=base*3.4;
+  ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
+  // корпус насоса (круг на трубе)
+  ctx.beginPath(); ctx.arc(b.x,b.y,volR,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // мотор — отвод по нормали к трубе (сбоку)
+  const mCx=b.x + b.nx*(volR + motorW/2 + base*0.8);
+  const mCy=b.y + b.ny*(volR + motorW/2 + base*0.8);
+  ctx.fillRect(mCx - motorW/2, mCy - motorH/2, motorW, motorH);
+  ctx.strokeRect(mCx - motorW/2, mCy - motorH/2, motorW, motorH);
+  ctx.restore();
+}
 
-function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);drawSegments();for(const c of comps){const seg=segs[c.segIndex];if(!seg)continue;if(c.type==='valve')drawValve(seg,c.t);else if(c.type==='check')drawCheck(seg,c.t);else if(c.type==='pump')drawPump(seg,c.t);}if(tool==='awaitSecond'&&first&&preview){ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);ctx.strokeStyle=params.lineColor;ctx.lineWidth=params.linePx/view.scale;ctx.beginPath();ctx.moveTo(first.x,first.y);ctx.lineTo(preview.x,preview.y);ctx.stroke();}if(first){const p=w2s(first.x,first.y);ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='red';ctx.beginPath();ctx.arc(p.x,p.y,6,0,Math.PI*2);ctx.fill();}}
-let raf=0,dirty=false;function need(){dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}});}}
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+  drawSegments();
+  for(const c of comps){
+    const seg=segs[c.segIndex]; if(!seg) continue;
+    if(c.type==='valve') drawValve(seg,c.t);
+    else if(c.type==='check') drawCheck(seg,c.t);
+    else if(c.type==='pump') drawPump(seg,c.t);
+  }
+  if(tool==='awaitSecond' && first && preview){
+    ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+    ctx.strokeStyle=params.lineColor; ctx.lineWidth=params.linePx/view.scale;
+    ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke();
+  }
+  if(first){
+    const p=w2s(first.x,first.y);
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
+  }
+}
+let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
-function findNearestSegment(sx,sy,maxDistPx=28){let best=-1,bd=1e9,bt=0;for(let i=0;i<segs.length;i++){const s=segs[i];const A=w2s(s.a.x,s.a.y),B=w2s(s.b.x,s.b.y);const vx=B.x-A.x,vy=B.y-A.y,len2=vx*vx+vy*vy;if(!len2)continue;const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));const px=A.x+vx*t,py=A.y+vy*t,d=Math.hypot(px-sx,py-sy);if(d<bd){bd=d;best=i;bt=t;}}return(best!==-1&&bd<=maxDistPx)?{segIndex:best,t:bt}:null;}
+/* ===== поиск ближайшего сегмента для арматуры ===== */
+function findNearestSegment(sx,sy,maxDistPx=28){
+  let best=-1,bd=1e9,bt=0;
+  for(let i=0;i<segs.length;i++){
+    const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+    const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(!len2) continue;
+    const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
+    const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
+    if(d<bd){ bd=d; best=i; bt=t; }
+  }
+  return (best!==-1 && bd<=maxDistPx)?{segIndex:best,t:bt}:null;
+}
 
-const pointers=new Map();let isPanning=false,panLast=null;let prevCenter=null,prevDist=null;
-function canvasXY(e){const r=cv.getBoundingClientRect();return{sx:(e.clientX-r.left)*(cv.width/r.width),sy:(e.clientY-r.top)*(cv.height/r.height)};}
-function centroid(){const a=[...pointers.values()];if(!a.length)return null;let sx=0,sy=0;for(const p of a){sx+=p.sx;sy+=p.sy;}return{sx:sx/a.length,sy:sy/a.length};}
-function dist2(a,b){return Math.abs(a.sx-b.sx)+Math.abs(a.sy-b.sy);}
+/* ===== ввод ===== */
+const pointers=new Map(); let isPanning=false, panLast=null;
+let prevCenter=null, prevDist=null;
 
-cv.addEventListener('pointerdown',e=>{const{sx,sy}=canvasXY(e);pointers.set(e.pointerId,{sx,sy});if(pointers.size===2){const[p0,p1]=[...pointers.values()];prevCenter=centroid();prevDist=dist2(p0,p1);return;}if(mode==='hand'){isPanning=true;panLast={sx,sy};updateStatus('Панорамирование');return;}if(tool==='awaitFirst'){first=s2w(sx,sy);preview=null;tool='awaitSecond';updateStatus('1-я точка есть');need();return;}if(tool==='awaitSecond'){preview=s2w(sx,sy);segs.push({a:first,b:preview});stack.push('seg');first=null;preview=null;tool='idle';mode='hand';updateStatus('Сегмент готов. Чтобы нарисовать ещё, снова нажми Линия');need();return;}if(tool==='placeComp'){const near=findNearestSegment(sx,sy,28*DPR);if(near){comps.push({segIndex:near.segIndex,t:near.t,type:currentComp});stack.push('comp');tool='idle';mode='hand';updateStatus('Арматура поставлена');need();}else updateStatus('Ткни по линии');return;}},{passive:false});
+function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
+function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
+function dist2(a,b){ return Math.abs(a.sx-b.sx)+Math.abs(a.sy-b.sx)+Math.abs(a.sy-b.sy) - Math.abs(a.sy-b.sx); } // simple manhattan surrogate (kept fast)
 
-cv.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;const{sx,sy}=canvasXY(e);pointers.set(e.pointerId,{sx,sy});if(pointers.size===2){const nowC=centroid();const[p0,p1]=[...pointers.values()];const nowD=dist2(p0,p1);if(prevCenter&&prevDist){const k=nowD>0&&prevDist>0?(nowD/prevDist):1;const ns=clampScale(view.scale*k);const cx=nowC.sx,cy=nowC.sy;view.tx=cx-(cx-view.tx)*(ns/view.scale);view.ty=cy-(cy-view.ty)*(ns/view.scale);view.scale=ns;need();}prevCenter=nowC;prevDist=nowD;return;}if(isPanning&&panLast){view.tx+=(sx-panLast.sx);view.ty+=(sy-panLast.sy);panLast={sx,sy};need();return;}if(tool==='awaitSecond'&&first){preview=s2w(sx,sy);need();}},{passive:true});
+cv.addEventListener('pointerdown', e=>{
+  const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
+  if(pointers.size===2){ const [p0,p1]=[...pointers.values()]; prevCenter=centroid(); prevDist=Math.abs(p0.sx-p1.sx)+Math.abs(p0.sy-p1.sy); return; }
 
-cv.addEventListener('pointerup',e=>{pointers.delete(e.pointerId);if(pointers.size<2){prevCenter=null;prevDist=null;}if(isPanning&&pointers.size===0){isPanning=false;panLast=null;}},{passive:true});
+  if(tool==='placeComp'){
+    const near=findNearestSegment(sx,sy,28*DPR);
+    if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); stack.push('comp'); tool='idle'; mode='hand'; updateStatus('Арматура поставлена'); need(); }
+    else updateStatus('Ткни по линии');
+    return;
+  }
 
+  if(mode==='hand'){ isPanning=true; panLast={sx,sy}; updateStatus('Панорамирование'); return; }
+
+  if(tool==='awaitFirst'){
+    first=s2w(sx,sy); preview=null; tool='awaitSecond'; updateStatus('1-я точка есть'); need(); return;
+  }
+  if(tool==='awaitSecond'){
+    preview=s2w(sx,sy);
+    segs.push({a:first,b:preview}); stack.push('seg');
+    first=null; preview=null;
+    tool='awaitFirst'; mode='line'; // СРАЗУ ждём следующий сегмент (как просили)
+    updateStatus('Сегмент готов — ткни 1-ю точку следующего'); need(); return;
+  }
+},{passive:false});
+
+cv.addEventListener('pointermove', e=>{
+  if(!pointers.has(e.pointerId)) return;
+  const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
+
+  if(pointers.size===2){
+    const [p0,p1]=[...pointers.values()];
+    const nowD=Math.abs(p0.sx-p1.sx)+Math.abs(p0.sy-p1.sy);
+    const nowC=centroid();
+    if(prevCenter && prevDist){
+      const k = nowD>0 && prevDist>0 ? (nowD/prevDist) : 1;
+      const ns=clampScale(view.scale*k);
+      const cx=nowC.sx, cy=nowC.sy;
+      view.tx = cx - (cx - view.tx)*(ns/view.scale);
+      view.ty = cy - (cy - view.ty)*(ns/view.scale);
+      view.scale = ns; need();
+    }
+    prevCenter=nowC; prevDist=nowD; return;
+  }
+
+  if(isPanning && panLast){
+    view.tx += (sx - panLast.sx);
+    view.ty += (sy - panLast.sy);
+    panLast={sx,sy}; need(); return;
+  }
+  if(tool==='awaitSecond' && first){ preview=s2w(sx,sy); need(); }
+},{passive:true});
+
+cv.addEventListener('pointerup', e=>{
+  pointers.delete(e.pointerId);
+  if(pointers.size===0){ isPanning=false; panLast=null; prevCenter=null; prevDist=null; }
+},{passive:true});
+
+/* ===== кнопки и панель ===== */
 const $=id=>document.getElementById(id);
-$('btnLine').onclick=()=>{tool='awaitFirst';mode='line';first=null;preview=null;updateStatus('Режим Линия: ткни 1-ю точку');};
-$('btnHand').onclick=()=>{tool='idle';mode='hand';first=null;preview=null;updateStatus('Режим Рука');};
-$('btnUndo').onclick=()=>{if(tool==='awaitSecond'&&first){first=null;preview=null;tool='idle';mode='hand';need();updateStatus('Сегмент отменён');return;}const last=stack.pop();if(!last){updateStatus('Нечего отменять');return;}if(last==='seg'&&segs.length)segs.pop();else if(last==='comp'&&comps.length)comps.pop();need();updateStatus('Отменено');};
-function zoomAt(f){const cx=cv.width/2,cy=cv.height/2;const ns=clampScale(view.scale*f);view.tx=cx-(cx-view.tx)*(ns/view.scale);view.ty=cy-(cy-view.ty)*(ns/view.scale);view.scale=ns;need();}
-$('btnPlus').onclick=()=>zoomAt(1.2);
-$('btnMinus
+$('btnLine').onclick =()=>{ tool='awaitFirst'; mode='line'; first=null; preview=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
+$('btnHand').onclick =()=>{ tool='idle'; mode='hand'; first=null; preview=null; updateStatus('Режим Рука'); };
+$('btnUndo').onclick =()=>{
+  if(tool==='awaitSecond' && first){ first=null; preview=null; tool='awaitFirst'; mode='line'; need(); updateStatus('Сегмент отменён — ткни 1-ю точку'); return; }
+  const last=stack.pop(); if(!last){ updateStatus('Нечего отменять'); return; }
+  if(last==='seg' && segs.length) segs.pop();
+  else if(last==='comp' && comps.length) comps.pop();
+  need(); updateStatus('Отменено');
+};
+function zoomAt(f){ const cx=cv.width/2, cy=cv.height/2; const ns=clampScale(view.scale*f);
+  view.tx=cx-(cx-view.tx)*(ns/view.scale); view.ty=cy-(cy-view.ty)*(ns/view.scale); view.scale=ns; need();
+}
+$('btnPlus').onclick =()=>zoomAt(1.2);
+$('btnMinus').onclick=()=>zoomAt(1/1.2);
+
+const wrap=document.getElementById('panelWrap'), panel=document.getElementById('panel');
+const btnSettings=document.getElementById('btnSettings'), btnClose=document.getElementById('btnClosePanel');
+const rangeLine=document.getElementById('rangeLine'), lineVal=document.getElementById('lineVal');
+const rangeComp=document.getElementById('rangeComp'), compVal=document.getElementById('compVal');
+
+function openPanel(){ wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false'); }
+function closePanel(){ wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); }
+btnSettings.onclick=openPanel;
+btnClose.onclick=closePanel;
+document.getElementById('panelBackdrop').onclick=closePanel;
+['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:true}));
+
+document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
+document.getElementById('btnPlaceComp').onclick=()=>{ closePanel(); tool='placeComp'; mode='hand'; updateStatus('Ткни по линии — поставлю '+(currentComp==='valve'?'кран':currentComp==='check'?'клапан':'насос')); };
+
+rangeLine.value=params.linePx; lineVal.textContent=String(params.linePx);
+rangeComp.value=params.compScale; compVal.textContent=params.compScale.toFixed(2);
+rangeLine.oninput =()=>{ params.linePx=clamp(parseInt(rangeLine.value,10)||10,2,56); lineVal.textContent=String(params.linePx); need(); updateStatus('Толщина обновлена'); };
+rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15,0.5,3.0); compVal.textContent=params.compScale.toFixed(2); need(); updateStatus('Арматура × '+params.compScale.toFixed(2)); };
+
+/* ===== старт ===== */
+fit(); need();
+tool='idle'; mode='hand';
+updateStatus('Готово (v869): «Линия» → 1-я точка → 2-я точка = сегмент. Сразу ждём следующий. Для арматуры — ⚙ → выбрать → «Поставить на трубу».');
+
+})();
+</script>
+</body>
+</html>
