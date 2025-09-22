@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v874 one-line + armature + photo</title>
+<title>Pro Trace — v875 three-steps + smooth zoom + armature</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -177,7 +177,7 @@ function drawSegments(){
   }
 }
 
-/* ——— арматура — быстрые, но «как на чертеже» ——— */
+/* ——— арматура — «как на чертеже» ——— */
 function drawValve(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4;
@@ -201,7 +201,7 @@ function drawValve(seg,t){
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // переход к трубе
+  // переходы к трубе
   ctx.beginPath();
   ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
@@ -268,15 +268,15 @@ function drawCheck(seg,t){
   ctx.beginPath();
   ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);
   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR);
-  ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR);
+  ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeр);
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // треугольник-направление
+  // треугольник вдоль трубы (вперёд по ux,uy)
   const triBase=base*3.2, triRise=base*3.0;
-  const A={x:b.x - ux*triBase/2, y:b.y - uy*triBase/2};
-  const B={x:b.x + ux*triBase/2, y:b.y + uy*triBase/2};
-  const T={x:b.x + nx*triRise,  y:b.y + ny*triRise};
+  const A={x:b.x - nx*triBase/2, y:b.y - ny*triBase/2}; // ширина поперёк трубы
+  const B={x:b.x + nx*triBase/2, y:b.y + ny*triBase/2};
+  const T={x:b.x + ux*triRise,   y:b.y + uy*triRise};   // направление по трубе
   ctx.fillStyle='#ffffff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=1.6/view.scale;
   ctx.beginPath(); ctx.moveTo(T.x,T.y); ctx.lineTo(B.x,B.y); ctx.lineTo(A.x,A.y); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
@@ -308,9 +308,11 @@ function drawPump(seg,t){
   }
   flange(Lc.x,Lc.y); flange(Rc.x,Rc.y);
 
-  // мотор сбоку по нормали
-  const mCx = b.x + nx * (volR + motorW/2 + base*1.2);
-  const mCy = b.y + ny * (volR + motorW/2 + base*1.2);
+  // мотор: всегда «сверху» в экранных координатах
+  const upSign = (b.ny < 0) ? 1 : -1; // если нормаль наверх (ny<0), берём +, иначе переворачиваем
+  const mOff = volR + motorW/2 + base*1.2;
+  const mCx = b.x + nx * mOff * upSign;
+  const mCy = b.y + ny * mOff * upSign;
   ctx.beginPath(); ctx.rect(mCx - motorW/2, mCy - motorH/2, motorW, motorH); ctx.fill(); ctx.stroke();
 
   ctx.restore();
@@ -354,16 +356,22 @@ function findNearestSegment(sx,sy,maxDistPx=28){
 }
 
 /* ===== ввод ===== */
-const pointers=new Map(); let isPanning=false, panLast=null;
+const pointers=new Map();
+let isPanning=false, panStart=null, panLast=null;
+const PAN_THRESH = 6*DPR; // мягкий порог — «Рука» не реагирует на короткий тап
 let prevCenter=null, prevDist=null;
 
 function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
-function dist2(a,b){ return Math.abs(a.sx-b.sx)+Math.abs(a.sy-b.sy); }
+function distance(a,b){ const dx=a.sx-b.sx, dy=a.sy-b.sy; return Math.hypot(dx,dy); }
 
 cv.addEventListener('pointerdown', e=>{
   const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
-  if(pointers.size===2){ const [p0,p1]=[...pointers.values()]; prevCenter=centroid(); prevDist=dist2(p0,p1); return; }
+  if(pointers.size===2){
+    const [p0,p1]=[...pointers.values()];
+    prevCenter=centroid(); prevDist=distance(p0,p1);
+    return;
+  }
 
   if(tool==='placeComp'){
     const near=findNearestSegment(sx,sy,28*DPR);
@@ -372,14 +380,21 @@ cv.addEventListener('pointerdown', e=>{
     return;
   }
 
-  if(mode==='hand'){ isPanning=true; panLast={sx,sy}; updateStatus('Панорамирование'); return; }
+  if(mode==='hand'){
+    // НЕ блокируем короткие тапы — панорамирование только после порога
+    panStart={sx,sy}; panLast={sx,sy}; isPanning=false;
+    updateStatus('Режим Рука');
+    return;
+  }
 
-  if(tool==='awaitFirst'){ first=s2w(sx,sy); preview=null; tool='awaitSecond'; updateStatus('1-я точка есть'); need(); return; }
+  if(tool==='awaitFirst'){
+    first=s2w(sx,sy); preview=null; tool='awaitSecond'; updateStatus('1-я точка есть'); need(); return;
+  }
   if(tool==='awaitSecond'){
     preview=s2w(sx,sy);
     segs.push({a:first,b:preview}); stack.push('seg');
     first=null; preview=null;
-    tool='idle'; mode='hand'; // ← после сегмента возврат в «Рука»
+    tool='idle'; mode='hand'; // строго три шага
     updateStatus('Сегмент готов. Для следующего снова нажми «Линия».'); need(); return;
   }
 },{passive:false});
@@ -389,10 +404,13 @@ cv.addEventListener('pointermove', e=>{
   const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
 
   if(pointers.size===2){
-    const nowC=centroid(); const [p0,p1]=[...pointers.values()]; const nowD=dist2(p0,p1);
+    const [p0,p1]=[...pointers.values()];
+    const nowD=distance(p0,p1);
+    const nowC=centroid();
     if(prevCenter && prevDist){
-      const k = nowD>0 && prevDist>0 ? (nowD/prevDist) : 1;
-      const ns=clampScale(view.scale*k);
+      const k = (nowD>0 && prevDist>0) ? (nowD/prevDist) : 1;
+      const smooth = 1 + (k-1)*0.55; // мягче пинч
+      const ns=clampScale(view.scale*smooth);
       const cx=nowC.sx, cy=nowC.sy;
       view.tx = cx - (cx - view.tx)*(ns/view.scale);
       view.ty = cy - (cy - view.ty)*(ns/view.scale);
@@ -401,17 +419,23 @@ cv.addEventListener('pointermove', e=>{
     prevCenter=nowC; prevDist=nowD; return;
   }
 
-  if(isPanning && panLast){
-    view.tx += (sx - panLast.sx);
-    view.ty += (sy - panLast.sy);
-    panLast={sx,sy}; need(); return;
+  if(mode==='hand' && panStart){
+    const moved = Math.hypot(sx-panStart.sx, sy-panStart.sy);
+    if(!isPanning && moved > PAN_THRESH){ isPanning=true; }
+    if(isPanning && panLast){
+      view.tx += (sx - panLast.sx);
+      view.ty += (sy - panLast.sy);
+      panLast={sx,sy}; need();
+    }
+    return;
   }
+
   if(tool==='awaitSecond' && first){ preview=s2w(sx,sy); need(); }
 },{passive:true});
 
 cv.addEventListener('pointerup', e=>{
   pointers.delete(e.pointerId);
-  if(pointers.size===0){ isPanning=false; panLast=null; prevCenter=null; prevDist=null; }
+  if(pointers.size===0){ isPanning=false; panStart=null; panLast=null; prevCenter=null; prevDist=null; }
 },{passive:true});
 
 /* ===== кнопки и панель ===== */
@@ -432,8 +456,8 @@ $('btnUndo').onclick =()=>{
 function zoomAt(f){ const cx=cv.width/2, cy=cv.height/2; const ns=clampScale(view.scale*f);
   view.tx=cx-(cx-view.tx)*(ns/view.scale); view.ty=cy-(cy-view.ty)*(ns/view.scale); view.scale=ns; need();
 }
-$('btnPlus').onclick =()=>zoomAt(1.2);
-$('btnMinus').onclick=()=>zoomAt(1/1.2);
+$('btnPlus').onclick =()=>zoomAt(1.10);  // мягче кнопочный зум
+$('btnMinus').onclick=()=>zoomAt(1/1.10);
 
 const wrap=document.getElementById('panelWrap'), panel=document.getElementById('panel');
 const btnSettings=document.getElementById('btnSettings'), btnClose=document.getElementById('btnClosePanel');
@@ -458,8 +482,7 @@ rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15
 /* ===== старт ===== */
 fit(); need();
 tool='idle'; mode='hand';
-updateStatus('Готово (v874): «Линия» → 1-я точка → 2-я точка = сегмент. Для нового — снова «Линия». Для арматуры — ⚙ → выбрать → «Поставить на трубу».');
-
+updateStatus('Готово (v875): 1) «Линия», 2) первая точка, 3) вторая — линия готова. Для следующей — снова «Линия». В «Рука» короткие тапы не мешают; зум мягкий.');
 })();
 </script>
 </body>
