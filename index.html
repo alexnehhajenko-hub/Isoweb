@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v861-line-or-tap</title>
+<title>Pro Trace — tap-only (v862)</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -140,13 +140,14 @@ document.getElementById('btnClearBg').onclick=()=>{ bg=null; need(); updateStatu
 const segs=[];             // {a:{x,y}, b:{x,y}}
 const comps=[];            // {segIndex,t,type}
 const stack=[];            // 'seg' | 'comp'
-let mode='line';           // сразу режим Линия
+let mode='hand';           // теперь по умолчанию «Рука»
 let currentComp='valve';   // valve | check | pump
+let first=null, preview=null;
 
-const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
+const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15, snapRadiusPx:22 };
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 function updateStatus(extra=''){
-  statusEl.textContent=`Статус: ${extra} | Режим: ${mode==='line'?'Линия':mode==='place'?'Арматура':'Рука'} | Линия ${params.linePx}px | Арматура×${params.compScale.toFixed(2)}`;
+  statusEl.textContent=`Статус: ${extra} | Режим: ${mode==='line'?'Линия':'Рука'}${mode==='place'?' (установка)': ''} | Линия ${params.linePx}px | Арматура×${params.compScale.toFixed(2)}`;
 }
 
 /* ===== утилиты ===== */
@@ -155,6 +156,8 @@ function w2s(x,y){ return { x:x*view.scale+view.tx, y:y*view.scale+view.ty }; }
 function darker(hex,k=0.45){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333'; let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]; r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k))); return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; const L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
 function compBasis(seg,t){ const g=segGeom(seg); return {x:seg.a.x+g.nx*g.L*t, y:seg.a.y+g.ny*g.L*t, ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
+function allNodes(){ const out=[]; for(const s of segs){ out.push(s.a,s.b);} return out; }
+function snapToNodes(raw){ const R=params.snapRadiusPx/view.scale; let best=null,bd=Infinity; for(const n of allNodes()){ const d=Math.hypot(n.x-raw.x,n.y-raw.y); if(d<bd){ bd=d; best=n; } } if(best && bd<=R) return {x:best.x,y:best.y}; return raw; }
 function findNearestSegment(sx,sy,maxDistPx=28){ let best=-1,bd=1e9,bt=0; for(let i=0;i<segs.length;i++){ const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y); const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(!len2) continue; const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2)); const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy); if(d<bd){ bd=d; best=i; bt=t; } } return (best!==-1 && bd<=maxDistPx)?{segIndex:best,t:bt}:null; }
 
 /* ===== отрисовка ===== */
@@ -187,7 +190,7 @@ function drawValve(seg,t){
   ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw); ctx.closePath(); ctx.fill();
   ctx.restore(); badgeWorld(b.x,b.y,'BALL');
 }
-/* ——— Клапан (корпус как у крана, без ручки, треугольник вверх) ——— */
+/* ——— Клапан (тот же корпус, без ручки, треугольник вверх) ——— */
 function drawCheck(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*9.0, bodyR=base*2.4, coneL=base*2.8, pipeR=base*1.2;
@@ -223,8 +226,8 @@ function drawPump(seg,t){
   flange(Lc.x,Lc.y); flange(Rc.x,Rc.y);
   const mL={x:b.x + nx*(volR*0.6) - nx*(motorW/2), y:b.y + ny*(volR*0.6) - ny*(motorW/2)};
   const mR={x:b.x + nx*(volR*0.6) + nx*(motorW/2), y:b.y + ny*(volR*0.6) + ny*(motorW/2)};
-  const mT={x:mR.x + ux*motorH, y:mR.y + uy*motorH};
-  const mB={x:mL.x + ux*motorH, y:mL.y + uy*motorH};
+  const mT={x:mR.x + ux*motorH, y=mR.y + uy*motorH};
+  const mB={x=mL.x + ux*motorH, y=mL.y + uy*mоторH};
   ctx.beginPath(); ctx.moveTo(mL.x,mL.y); ctx.lineTo(mB.x,mB.y); ctx.lineTo(mT.x,mT.y); ctx.lineTo(mR.x,mR.y); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore(); badgeWorld(b.x,b.y,'PUMP');
 }
@@ -243,40 +246,31 @@ function draw(){
 }
 let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
-/* ===== ввод: и TAP-TAP, и DRAG ===== */
+/* ===== ввод: только TAP-TAP. перетаскивание НЕ рисует ===== */
 const pointers=new Map();
+const downs=new Map();
 let isPanning=false, panLast=null;
 let prevCenter=null, prevDist=null;
-
-let first=null, preview=null;
-let drawingId=null;
-let tapCandidate=null;           // {sx,sy,t}
-const TAP_TIME=320, TAP_MOVE=12*DPR;
 
 function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
 function dist2(a,b){ return Math.abs(a.sx-b.sx)+Math.abs(a.sy-b.sy); }
 
+const TAP_TIME=320, TAP_MOVE=12*DPR;
+
 cv.addEventListener('pointerdown', e=>{
   e.preventDefault();
   const {sx,sy}=canvasXY(e);
   pointers.set(e.pointerId,{sx,sy});
+  downs.set(e.pointerId,{sx,sy,t:performance.now()});
 
   if(pointers.size===2){ const [p0,p1]=[...pointers.values()]; prevCenter=centroid(); prevDist=dist2(p0,p1); return; }
 
-  if(mode==='hand'){ isPanning=true; panLast={sx,sy}; updateStatus('Панорамирование'); return; }
+  if(mode==='hand'){ isPanning=true; panLast={sx,sy}; return; }
 
-  if(mode==='line' && pointers.size===1){
-    // кандидат на TAP (для "тап-тап")
-    tapCandidate={sx,sy,t:performance.now()};
-    // сразу старт превью для drag
-    first=s2w(sx,sy); preview=first; drawingId=e.pointerId; need();
-  }
-
-  if(mode==='place'){
-    const near=findNearestSegment(sx,sy,28*DPR);
-    if(near){ comps.push({segIndex:near.segIndex,t:near.t,type:currentComp}); stack.push('comp'); mode='hand'; need(); updateStatus('Элемент поставлен'); }
-    else updateStatus('Ткни по линии');
+  if(mode==='line' && first){
+    // для превью показываем «линию-призрак» за пальцем
+    preview=s2w(sx,sy); need();
   }
 },{passive:false});
 
@@ -304,54 +298,44 @@ cv.addEventListener('pointermove', e=>{
     panLast={sx,sy}; need(); return;
   }
 
-  if(mode==='line' && drawingId===e.pointerId && first){
+  if(mode==='line' && first){
     preview=s2w(sx,sy); need();
   }
 },{passive:false});
 
 cv.addEventListener('pointerup', e=>{
-  const {sx,sy}=canvasXY(e);
+  const d=downs.get(e.pointerId);
+  const p=pointers.get(e.pointerId)||{sx:0,sy:0};
+  const isTap = !!d && (performance.now()-d.t<=TAP_TIME) && (Math.hypot(p.sx-d.sx, p.sy-d.sy)<=TAP_MOVE);
 
-  if(mode==='line' && drawingId===e.pointerId && first){
-    const now=performance.now();
-    const isTap = tapCandidate && (now - tapCandidate.t <= TAP_TIME) &&
-                  (Math.hypot(sx - tapCandidate.sx, sy - tapCandidate.sy) <= TAP_MOVE);
-
-    if(isTap && first){ // первый тап: ждём второй
-      // не фиксируем сегмент, оставим первую точку
-      first=first; preview=null; drawingId=null; // отпустили — ждём второй тап
-      setTimeout(()=>{ // если второй тап так и не пришёл — снимем первую точку
-        if(!drawingId && first && mode==='line'){ first=null; need(); }
-      }, TAP_TIME+40);
+  if(isTap && mode==='line'){
+    const W = snapToNodes(s2w(p.sx,p.sy));
+    if(!first){
+      first=W; preview=null; need(); updateStatus('Первая точка'); // ждём второй тап
     }else{
-      // завершение drag
-      const W=s2w(sx,sy);
-      segs.push({a:first,b:W}); stack.push('seg'); first=null; preview=null; drawingId=null; need(); updateStatus('Сегмент добавлен');
+      segs.push({a:first,b:W}); stack.push('seg');
+      first=null; preview=null; mode='hand'; need();
+      updateStatus('Сегмент готов. Нажми «Линия» для следующего.');
     }
-    tapCandidate=null;
-  }else if(mode==='line' && !first && tapCandidate){
-    // это может быть второй тап (первая точка уже снята таймером) — ставим короткий сегмент нулевой длины не будем
-    tapCandidate=null;
   }
 
-  pointers.delete(e.pointerId);
+  pointers.delete(e.pointerId); downs.delete(e.pointerId);
   if(pointers.size<2){ prevCenter=null; prevDist=null; }
   if(isPanning && pointers.size===0){ isPanning=false; panLast=null; }
 },{passive:false});
+
 cv.addEventListener('pointercancel', e=>{
-  pointers.delete(e.pointerId);
-  tapCandidate=null;
-  if(drawingId===e.pointerId){ first=null; preview=null; drawingId=null; need(); }
+  pointers.delete(e.pointerId); downs.delete(e.pointerId);
   if(pointers.size<2){ prevCenter=null; prevDist=null; }
   if(isPanning && pointers.size===0){ isPanning=false; panLast=null; }
 },{passive:false});
 
 /* ===== кнопки ===== */
 const $=id=>document.getElementById(id);
-$('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; drawingId=null; updateStatus('Режим: Линия (тап-тап или потяни)'); };
-$('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; drawingId=null; updateStatus('Режим: Рука'); };
+$('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; updateStatus('Режим: Линия (тап-тап)'); };
+$('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; updateStatus('Режим: Рука'); };
 $('btnUndo').onclick =()=>{
-  if(first){ first=null; preview=null; drawingId=null; need(); updateStatus('Точка снята'); return; }
+  if(first){ first=null; preview=null; need(); updateStatus('Точка снята'); return; }
   const last=stack.pop(); if(!last){ updateStatus('Нечего отменять'); return; }
   if(last==='seg' && segs.length) segs.pop(); else if(last==='comp' && comps.length) comps.pop();
   need(); updateStatus('Отменено');
@@ -378,9 +362,13 @@ rangeComp.value=params.compScale; compVal.textContent=params.compScale.toFixed(2
 rangeLine.oninput=()=>{ params.linePx=clamp(parseInt(rangeLine.value,10)||10,2,56); lineVal.textContent=params.linePx; need(); updateStatus('Толщина обновлена'); };
 rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15,0.5,3.0); compVal.textContent=params.compScale.toFixed(2); need(); updateStatus('Масштаб арматуры обновлён'); };
 
-/* ===== старт ===== */
+/* ===== компоненты (отрисовка) ===== */
+function draw(){ /* выше уже определена */ }
+let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
+
+/* старт */
 fit(); need();
-updateStatus('Готово (v861) — рисуй: тап-тап или потяни; пинч — зум; Рука — панорамирование');
+updateStatus('Готово (v862). Нажми «Линия» → тап-тап. После — режим «Рука». Пинч — зум.');
 
 })();
 </script>
