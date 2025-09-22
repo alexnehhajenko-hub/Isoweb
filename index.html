@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v871 tap + armature + photo</title>
+<title>Pro Trace — v874 one-line + armature + photo</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -102,7 +102,6 @@
 
 <script>
 (()=>{"use strict";
-
 /* ===== скорость/рендер ===== */
 const DPR = Math.min(1.5, Math.max(1, window.devicePixelRatio||1));
 const MAX_SIDE = 1600;
@@ -178,7 +177,7 @@ function drawSegments(){
   }
 }
 
-/* ——— арматура — подробные, быстрые примитивы ——— */
+/* ——— арматура — быстрые, но «как на чертеже» ——— */
 function drawValve(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4;
@@ -193,7 +192,7 @@ function drawValve(seg,t){
   ctx.lineJoin='round'; ctx.lineCap='round';
   ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
 
-  // корпус бочкой
+  // корпус
   ctx.beginPath();
   ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
   ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -202,7 +201,7 @@ function drawValve(seg,t){
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // конусы к трубе
+  // переход к трубе
   ctx.beginPath();
   ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
@@ -258,7 +257,7 @@ function drawCheck(seg,t){
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // конусы к трубе
+  // переходы
   ctx.beginPath();
   ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR);
@@ -273,7 +272,7 @@ function drawCheck(seg,t){
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // треугольник
+  // треугольник-направление
   const triBase=base*3.2, triRise=base*3.0;
   const A={x:b.x - ux*triBase/2, y:b.y - uy*triBase/2};
   const B={x:b.x + ux*triBase/2, y:b.y + uy*triBase/2};
@@ -380,8 +379,8 @@ cv.addEventListener('pointerdown', e=>{
     preview=s2w(sx,sy);
     segs.push({a:first,b:preview}); stack.push('seg');
     first=null; preview=null;
-    tool='awaitFirst'; mode='line'; // сразу ждём следующий сегмент
-    updateStatus('Сегмент готов — ткни 1-ю точку следующего'); need(); return;
+    tool='idle'; mode='hand'; // ← после сегмента возврат в «Рука»
+    updateStatus('Сегмент готов. Для следующего снова нажми «Линия».'); need(); return;
   }
 },{passive:false});
 
@@ -420,7 +419,11 @@ const $=id=>document.getElementById(id);
 $('btnLine').onclick =()=>{ tool='awaitFirst'; mode='line'; first=null; preview=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
 $('btnHand').onclick =()=>{ tool='idle'; mode='hand'; first=null; preview=null; updateStatus('Режим Рука'); };
 $('btnUndo').onclick =()=>{
-  if(tool==='awaitSecond' && first){ first=null; preview=null; tool='awaitFirst'; mode='line'; need(); updateStatus('Сегмент отменён — ткни 1-ю точку'); return; }
+  if(tool==='awaitSecond' && first){
+    first=null; preview=null; tool='idle'; mode='hand';
+    need(); updateStatus('Сегмент отменён. Нажми «Линия», чтобы начать заново.');
+    return;
+  }
   const last=stack.pop(); if(!last){ updateStatus('Нечего отменять'); return; }
   if(last==='seg' && segs.length) segs.pop();
   else if(last==='comp' && comps.length) comps.pop();
@@ -441,7 +444,7 @@ function openPanel(){ wrap.classList.add('open'); wrap.setAttribute('aria-hidden
 function closePanel(){ wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); }
 btnSettings.onclick=openPanel;
 btnClose.onclick=closePanel;
-document.getElementById('panelBackdrop')?.addEventListener('click', closePanel, {passive:true});
+document.getElementById('panelBackdrop').onclick=closePanel;
 ['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:true}));
 
 document.querySelectorAll('input[name="comp"]').forEach(r=>r.addEventListener('change',()=>{ currentComp=r.value; }));
@@ -455,7 +458,7 @@ rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15
 /* ===== старт ===== */
 fit(); need();
 tool='idle'; mode='hand';
-updateStatus('Готово (v871): «Линия» → 1-я точка → 2-я точка = сегмент. Сразу ждём следующий. Для арматуры — ⚙ → выбрать → «Поставить на трубу».');
+updateStatus('Готово (v874): «Линия» → 1-я точка → 2-я точка = сегмент. Для нового — снова «Линия». Для арматуры — ⚙ → выбрать → «Поставить на трубу».');
 
 })();
 </script>
