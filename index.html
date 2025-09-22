@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v860-line-drag</title>
+<title>Pro Trace — v861-line-or-tap</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -140,10 +140,8 @@ document.getElementById('btnClearBg').onclick=()=>{ bg=null; need(); updateStatu
 const segs=[];             // {a:{x,y}, b:{x,y}}
 const comps=[];            // {segIndex,t,type}
 const stack=[];            // 'seg' | 'comp'
-let mode='hand';           // стартуем в РУКА
+let mode='line';           // сразу режим Линия
 let currentComp='valve';   // valve | check | pump
-let first=null, preview=null;
-let drawingId=null;        // id пальца, которым рисуем (для «тап-и-потяни-отпусти»)
 
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
@@ -163,7 +161,7 @@ function findNearestSegment(sx,sy,maxDistPx=28){ let best=-1,bd=1e9,bt=0; for(le
 function badgeWorld(wx,wy,txt){ const p=w2s(wx,wy); ctx.setTransform(1,0,0,1,0,0); ctx.font='700 11px system-ui,-apple-system,Segoe UI,Roboto'; const pad=6,h=18,r=7,w=ctx.measureText(txt).width+pad*2,x=p.x+8,y=p.y-8-h,rr=Math.min(r,w/2,h/2); ctx.fillStyle='rgba(255,255,255,.96)'; ctx.strokeStyle='#111'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.fillStyle='#111'; ctx.textBaseline='middle'; ctx.fillText(txt,x+pad,y+h/2); }
 function drawSegments(){ ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty); const col=params.lineColor, sh=darker(col,0.45); for(const s of segs){ ctx.strokeStyle=sh; ctx.globalAlpha=.75; ctx.lineWidth=(params.linePx+2)/view.scale; ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke(); ctx.strokeStyle=col; ctx.globalAlpha=1; ctx.lineWidth=params.linePx/view.scale; ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke(); } }
 
-/* Кран */
+/* ——— Кран ——— */
 function drawValve(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4, ballR=base*2.0, neckH=base*2.6, neckR=base*0.9, handleL=base*6.5, handleW=base*0.9;
@@ -189,7 +187,7 @@ function drawValve(seg,t){
   ctx.lineTo(neckTop.x+nx*hw, neckTop.y+ny*hw); ctx.closePath(); ctx.fill();
   ctx.restore(); badgeWorld(b.x,b.y,'BALL');
 }
-/* Клапан: корпус как у крана, без ручки, треугольник в центре */
+/* ——— Клапан (корпус как у крана, без ручки, треугольник вверх) ——— */
 function drawCheck(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*9.0, bodyR=base*2.4, coneL=base*2.8, pipeR=base*1.2;
@@ -212,7 +210,7 @@ function drawCheck(seg,t){
   ctx.beginPath(); ctx.moveTo(T.x,T.y); ctx.lineTo(B.x,B.y); ctx.lineTo(A.x,A.y); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore(); badgeWorld(b.x,b.y,'CHECK');
 }
-/* Насос */
+/* ——— Насос ——— */
 function drawPump(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6, motorW=base*5.2, motorH=base*7.2;
@@ -245,29 +243,34 @@ function draw(){
 }
 let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
-/* ===== ввод ===== */
+/* ===== ввод: и TAP-TAP, и DRAG ===== */
 const pointers=new Map();
 let isPanning=false, panLast=null;
 let prevCenter=null, prevDist=null;
 
+let first=null, preview=null;
+let drawingId=null;
+let tapCandidate=null;           // {sx,sy,t}
+const TAP_TIME=320, TAP_MOVE=12*DPR;
+
 function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX-r.left)*(cv.width/r.width), sy:(e.clientY-r.top)*(cv.height/r.height) }; }
 function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
-function dist2(a,b){ return Math.hypot(a.sx-b.sx,a.sy-b.sy); }
+function dist2(a,b){ return Math.abs(a.sx-b.sx)+Math.abs(a.sy-b.sy); }
 
 cv.addEventListener('pointerdown', e=>{
   e.preventDefault();
   const {sx,sy}=canvasXY(e);
   pointers.set(e.pointerId,{sx,sy});
 
-  // Пинч — не рисуем, только зум
   if(pointers.size===2){ const [p0,p1]=[...pointers.values()]; prevCenter=centroid(); prevDist=dist2(p0,p1); return; }
 
   if(mode==='hand'){ isPanning=true; panLast={sx,sy}; updateStatus('Панорамирование'); return; }
 
   if(mode==='line' && pointers.size===1){
-    // старт отрезка: тап и держи, тащи — отпусти
-    first=s2w(sx,sy); preview=first; drawingId=e.pointerId; updateStatus('Первая точка');
-    need(); return;
+    // кандидат на TAP (для "тап-тап")
+    tapCandidate={sx,sy,t:performance.now()};
+    // сразу старт превью для drag
+    first=s2w(sx,sy); preview=first; drawingId=e.pointerId; need();
   }
 
   if(mode==='place'){
@@ -308,10 +311,27 @@ cv.addEventListener('pointermove', e=>{
 
 cv.addEventListener('pointerup', e=>{
   const {sx,sy}=canvasXY(e);
-  // завершение рисования отрезка — только тем же пальцем
+
   if(mode==='line' && drawingId===e.pointerId && first){
-    const W=s2w(sx,sy);
-    segs.push({a:first,b:W}); stack.push('seg'); first=null; preview=null; drawingId=null; need(); updateStatus('Сегмент добавлен');
+    const now=performance.now();
+    const isTap = tapCandidate && (now - tapCandidate.t <= TAP_TIME) &&
+                  (Math.hypot(sx - tapCandidate.sx, sy - tapCandidate.sy) <= TAP_MOVE);
+
+    if(isTap && first){ // первый тап: ждём второй
+      // не фиксируем сегмент, оставим первую точку
+      first=first; preview=null; drawingId=null; // отпустили — ждём второй тап
+      setTimeout(()=>{ // если второй тап так и не пришёл — снимем первую точку
+        if(!drawingId && first && mode==='line'){ first=null; need(); }
+      }, TAP_TIME+40);
+    }else{
+      // завершение drag
+      const W=s2w(sx,sy);
+      segs.push({a:first,b:W}); stack.push('seg'); first=null; preview=null; drawingId=null; need(); updateStatus('Сегмент добавлен');
+    }
+    tapCandidate=null;
+  }else if(mode==='line' && !first && tapCandidate){
+    // это может быть второй тап (первая точка уже снята таймером) — ставим короткий сегмент нулевой длины не будем
+    tapCandidate=null;
   }
 
   pointers.delete(e.pointerId);
@@ -320,6 +340,7 @@ cv.addEventListener('pointerup', e=>{
 },{passive:false});
 cv.addEventListener('pointercancel', e=>{
   pointers.delete(e.pointerId);
+  tapCandidate=null;
   if(drawingId===e.pointerId){ first=null; preview=null; drawingId=null; need(); }
   if(pointers.size<2){ prevCenter=null; prevDist=null; }
   if(isPanning && pointers.size===0){ isPanning=false; panLast=null; }
@@ -327,7 +348,7 @@ cv.addEventListener('pointercancel', e=>{
 
 /* ===== кнопки ===== */
 const $=id=>document.getElementById(id);
-$('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; drawingId=null; updateStatus('Режим: Линия (нажми и тащи)'); };
+$('btnLine').onclick =()=>{ mode='line'; first=null; preview=null; drawingId=null; updateStatus('Режим: Линия (тап-тап или потяни)'); };
 $('btnHand').onclick =()=>{ mode='hand'; first=null; preview=null; drawingId=null; updateStatus('Режим: Рука'); };
 $('btnUndo').onclick =()=>{
   if(first){ first=null; preview=null; drawingId=null; need(); updateStatus('Точка снята'); return; }
@@ -359,7 +380,7 @@ rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15
 
 /* ===== старт ===== */
 fit(); need();
-updateStatus('Готово (v860-line-drag) — по умолчанию Рука');
+updateStatus('Готово (v861) — рисуй: тап-тап или потяни; пинч — зум; Рука — панорамирование');
 
 })();
 </script>
