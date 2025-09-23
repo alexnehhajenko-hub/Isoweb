@@ -3,67 +3,112 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — 3D grid + draw + edit + snaps + comps + save/load + measure</title>
+<title>Pro Trace — 3D draw (clean HUD + settings + photo)</title>
 <style>
-  :root{--violet:#6b1dff; --violet2:#7c5bff}
+  :root{--violet:#6b1dff; --violet2:#7c5bff; --edge:#e7e3f7}
   html,body{margin:0;height:100%;background:#1a1a1a;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #cv3d{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#1a1a1a;touch-action:none;-webkit-user-select:none;user-select:none}
-  .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
-  .btn{height:40px;padding:0 12px;border:0;border-radius:10px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
-  .btn.ghost{background:#2c2c2c;color:#ddd;border:1px solid #3a3a3a}
-  .btn.tog.on{outline:3px solid #ffd54d}
+  #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#111;touch-action:none;-webkit-user-select:none;user-select:none}
+
+  .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px}
+  .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
+  .btn.ghost{background:#2b2b2b;color:#eee;border:1px solid #3a3a3a}
+  .zbtn{height:44px;min-width:44px;border:0;border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.1);font-size:18px}
+
+  .gear{position:fixed;right:8px;top:8px;z-index:11;height:44px;width:44px;border:1px solid var(--edge);border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.08);font-size:20px}
+
   .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.70);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11;max-width:92vw}
-  .row{display:flex;gap:8px;flex-wrap:wrap}
-  select, input[type=range]{height:40px;border-radius:10px;border:1px solid #3a3a3a;background:#2b2b2b;color:#eee}
-  .range{display:flex;align-items:center;gap:8px;background:#2b2b2b;border:1px solid #3a3a3a;border-radius:10px;padding:0 8px}
-  .range span{min-width:38px;text-align:center;color:#ddd}
-  .badge{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.5);color:#fff;padding:6px 10px;border-radius:8px;font-size:13px;pointer-events:none;display:none}
+  .badge{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.5);color:#fff;padding:6px 10px;border-radius:8px;font-size:13px;pointer-events:none;display:none;z-index:12}
+
+  /* Панель настроек */
+  .panel-wrap{position:fixed;inset:0;z-index:20;display:none}
+  .panel-wrap.open{display:block}
+  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
+  .panel{position:absolute;top:64px;right:8px;background:#1f1f1f;border:1px solid #2e2e2e;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:12px;width:min(92vw,420px);max-height:80vh;overflow:auto;color:#eee}
+  .panel h4{margin:8px 0 10px;font-size:15px;color:#fff}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
+  .close{position:sticky;top:0;margin:-6px -6px 6px auto;background:#2b2b2b;border:1px solid #3a3a3a;width:32px;height:32px;border-radius:8px;color:#fff}
+  input[type=range], select{height:40px;border-radius:10px;border:1px solid #3a3a3a;background:#2b2b2b;color:#eee}
+  .tog{padding:8px 12px;border-radius:10px;border:1px solid #3a3a3a;background:#2b2b2b;color:#eee}
+  .tog.on{outline:3px solid #ffd54d}
+  .upl{position:relative;min-width:120px;display:inline-flex;justify-content:center}
+  .upl input{position:absolute;inset:0;opacity:0}
+  .num{font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
-  <canvas id="cv3d"></canvas>
+  <canvas id="cv"></canvas>
 
   <div class="bar">
-    <div class="row">
-      <button id="btnLine" class="btn">📐 Линия</button>
-      <button id="btnUndo" class="btn ghost">↩</button>
-      <button id="btnRuler" class="btn ghost">📏 Линейка</button>
-      <button id="btnAxisY" class="btn ghost tog">Y↕</button>
-    </div>
+    <button id="btnLine"  class="btn">📐 Линия</button>
+    <button id="btnUndo"  class="btn ghost">↩ Назад</button>
+    <button id="btnMinus" class="zbtn" title="Уменьшить">−</button>
+    <button id="btnPlus"  class="zbtn" title="Увеличить">+</button>
+  </div>
+  <button id="btnSettings" class="gear" title="Настройки">⚙</button>
 
-    <div class="row">
-      <button id="btnSnapEnds" class="btn ghost tog on">Стык</button>
-      <button id="btnSnapMid"  class="btn ghost tog">Середина</button>
-      <button id="btnSnapGrid" class="btn ghost tog on">Сетка</button>
-    </div>
+  <div id="panelWrap" class="panel-wrap" aria-hidden="true">
+    <div id="panelBackdrop" class="panel-backdrop"></div>
+    <div id="panel" class="panel" role="dialog" aria-modal="true">
+      <button id="btnClosePanel" class="close" title="Закрыть">✕</button>
 
-    <div class="row">
-      <div class="range">
-        <label style="color:#bbb">Ø</label>
-        <input id="rPipe" type="range" min="0.015" max="0.12" step="0.005" value="0.035" style="width:140px">
-        <span id="rPipeVal">35</span>
+      <h4>Режимы</h4>
+      <div class="row">
+        <button id="togRuler" class="tog">📏 Линейка</button>
+        <button id="togY" class="tog">Двигать по Y↕</button>
       </div>
-      <select id="matSel">
-        <option value="metal" selected>Металл</option>
-        <option value="plastic">Пластик</option>
-        <option value="matte">Матовый</option>
-      </select>
-    </div>
 
-    <div class="row">
-      <select id="compSel">
-        <option value="valve">Кран</option>
-        <option value="check">Клапан</option>
-        <option value="pump">Насос</option>
-      </select>
-      <button id="btnPlaceComp" class="btn ghost">Поставить</button>
-    </div>
+      <h4>Магниты</h4>
+      <div class="row">
+        <button id="togSnapEnds" class="tog on">Стык</button>
+        <button id="togSnapMid"  class="tog">Середина</button>
+        <button id="togSnapGrid" class="tog on">Сетка</button>
+        <button id="togGridVisible" class="tog on">Показать сетку</button>
+      </div>
 
-    <div class="row">
-      <button id="btnSave" class="btn ghost">💾 Сохранить</button>
-      <label class="btn ghost" style="position:relative;overflow:hidden">📂 Загрузить
-        <input id="fileLoad" type="file" accept="application/json" style="position:absolute;inset:0;opacity:0">
-      </label>
+      <h4>Труба</h4>
+      <div class="row">
+        <label>Ø</label>
+        <input id="rangeR" type="range" min="0.015" max="0.12" step="0.005" value="0.035" style="width:160px">
+        <span id="rangeRVal" class="num">35</span>
+      </div>
+      <div class="row">
+        <label>Материал</label>
+        <select id="matSel">
+          <option value="metal" selected>Металл</option>
+          <option value="plastic">Пластик</option>
+          <option value="matte">Матовый</option>
+        </select>
+      </div>
+
+      <h4>Арматура</h4>
+      <div class="row">
+        <select id="compSel">
+          <option value="valve">Кран</option>
+          <option value="check">Клапан</option>
+          <option value="pump">Насос</option>
+        </select>
+        <button id="btnPlaceComp" class="tog">Поставить</button>
+      </div>
+
+      <h4>Фото (фон)</h4>
+      <div class="row">
+        <label class="btn ghost upl">📷 Камера
+          <input id="fileCam" type="file" accept="image/*" capture="environment">
+        </label>
+        <label class="btn ghost upl">📂 Галерея
+          <input id="fileGal" type="file" accept="image/*">
+        </label>
+        <button id="btnToggleBg" class="tog">Скрыть/показать</button>
+        <button id="btnClearBg" class="tog">Удалить фон</button>
+      </div>
+
+      <h4>Проект</h4>
+      <div class="row">
+        <button id="btnSave" class="btn ghost">💾 Сохранить JSON</button>
+        <label class="btn ghost upl">📂 Загрузить JSON
+          <input id="fileLoad" type="file" accept="application/json">
+        </label>
+      </div>
     </div>
   </div>
 
@@ -75,70 +120,73 @@
 <script>
 (()=>{"use strict";
 
-/* ===== статус/утилиты ===== */
-const statusEl=document.getElementById('status');
-const badgeEl=document.getElementById('badge');
-const DPR=Math.min(2, Math.max(1, window.devicePixelRatio||1));
+/* ===== короткие утилиты ===== */
 const $=id=>document.getElementById(id);
-function say(s){ statusEl.textContent=s; }
-function mm(v){ return Math.round(v*1000); }          // метры → мм
-function fmtLen(m){ return (m>=1)? (m.toFixed(3)+' м') : (mm(m)+' мм'); }
+const statusEl=$('status'), badgeEl=$('badge');
+const DPR=Math.min(2, Math.max(1, window.devicePixelRatio||1));
+const say=s=>statusEl.textContent=s;
+const badge=s=>{ if(!s){badgeEl.style.display='none';}else{badgeEl.textContent=s;badgeEl.style.display='block';} };
+const mm=v=>Math.round(v*1000);
+const fmtLen=m=> (m>=1 ? m.toFixed(3)+' м' : mm(m)+' мм');
 
-/* ===== THREE ===== */
-const cv=$('cv3d');
+/* ===== THREE setup ===== */
+const cv=$('cv');
 let renderer, scene, camera, controls, raycaster, mouseNDC;
-let ground, grid;
-
+let grid, ground;            // сетка и невидимая плоскость для пика
+let bgPlane=null;            // фоновая картинка (плоскость)
 const GRID_STEP=0.2;
-const LONG_MS=700;
-let wantY=false;
-let snapEnds=true, snapMid=false, snapGrid=true;
-let pipeRadius=0.035;
-let matKind='metal';
 
-const materialByKind=()=>{
-  if(matKind==='metal') return new THREE.MeshStandardMaterial({color:0x6b1dff, metalness:0.75, roughness:0.25});
-  if(matKind==='plastic') return new THREE.MeshStandardMaterial({color:0x7fc5ff, metalness:0.05, roughness:0.35});
-  return new THREE.MeshStandardMaterial({color:0x6b7b8f, metalness:0.0, roughness:0.9});
-};
-
-function init(){
+function init3D(){
   renderer=new THREE.WebGLRenderer({canvas:cv, antialias:true});
   renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
   renderer.setSize(innerWidth, innerHeight, false);
-
   scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x1a1a1a);
+  scene.background=new THREE.Color(0x101010);
 
-  camera=new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 300);
-  camera.position.set(3,2.4,3);
+  camera=new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 500);
+  camera.position.set(3,2.6,3);
 
   controls=new THREE.OrbitControls(camera, cv);
   controls.enableDamping=true; controls.dampingFactor=0.08;
   controls.target.set(0,0,0);
 
   scene.add(new THREE.AmbientLight(0xffffff, .9));
-  const dir=new THREE.DirectionalLight(0xffffff, .7); dir.position.set(2,3,1); scene.add(dir);
+  const dir=new THREE.DirectionalLight(0xffffff, .65); dir.position.set(2,3,1); scene.add(dir);
 
   grid=new THREE.GridHelper(40, 40/GRID_STEP, 0x333333, 0x2f2f2f);
-  grid.material.opacity=0.9; grid.material.transparent=true;
-  scene.add(grid);
+  grid.material.opacity=0.9; grid.material.transparent=true; scene.add(grid);
 
   ground=new THREE.Mesh(new THREE.PlaneGeometry(400,400), new THREE.MeshBasicMaterial({visible:false}));
   ground.rotateX(-Math.PI/2); scene.add(ground);
 
-  raycaster=new THREE.Raycaster();
-  mouseNDC=new THREE.Vector2();
+  raycaster=new THREE.Raycaster(); mouseNDC=new THREE.Vector2();
 
   animate();
 }
 function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene,camera); }
+function onResize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight,false); }
+addEventListener('resize', onResize, {passive:true});
 
-/* ===== геометрия ===== */
+/* ===== состояние рисования/опций ===== */
+let st='idle'; // 'idle'|'awaitFirst'|'awaitSecond'
+let ruler=false;
+let wantY=false;
+let snapEnds=true, snapMid=false, snapGrid=true, gridVisible=true;
+let pipeRadius=0.035;
+let matKind='metal';
+let placingComp=false;
+
 const pipes=[]; // {a:V3,b:V3,radius,mesh}
 const comps=[]; // {pipeIndex,t,type,group}
 
-/* ===== модели ===== */
+/* ===== материалы ===== */
+const materialByKind=()=>{
+  if(matKind==='metal') return new THREE.MeshStandardMaterial({color:0x6b1dff, metalness:.75, roughness:.25});
+  if(matKind==='plastic') return new THREE.MeshStandardMaterial({color:0x7fc5ff, metalness:.05, roughness:.35});
+  return new THREE.MeshStandardMaterial({color:0x6b7b8f, metalness:0.0, roughness:.9});
+};
+
+/* ===== геометрия (труба/арматура) ===== */
 function makePipeMesh(a,b,r,mat){
   const dir=new THREE.Vector3().subVectors(b,a);
   const len=dir.length()||1e-6;
@@ -156,60 +204,41 @@ function refreshPipe(i){
   scene.add(p.mesh);
   comps.forEach((c,idx)=>{ if(c.pipeIndex===i) refreshComp(idx); });
 }
-
-/* ——— арматура ——— */
 function makeCompModel(type, radius){
-  const g=new THREE.Group();
-  const col=0x6b1dff, stroke=0x1b1b1b;
+  const g=new THREE.Group(); const col=0x6b1dff, stroke=0x1b1b1b;
   if(type==='valve'){
-    const body=new THREE.Mesh(new THREE.CapsuleGeometry(radius*1.6, radius*6.0, 8, 16),
-                              new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.3}));
-    g.add(body);
-    const ball=new THREE.Mesh(new THREE.SphereGeometry(radius*1.3, 16, 12),
-                              new THREE.MeshStandardMaterial({color:0xffffff, metalness:.1, roughness:.5}));
-    g.add(ball);
-    const handle=new THREE.Mesh(new THREE.BoxGeometry(radius*0.6, radius*4.0, radius*0.6),
-                                new THREE.MeshStandardMaterial({color:stroke, metalness:.2, roughness:.7}));
-    handle.position.y=radius*2.2; handle.rotation.z=Math.PI/2; g.add(handle);
+    g.add(new THREE.Mesh(new THREE.CapsuleGeometry(radius*1.6, radius*6.0, 8, 16), new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.3})));
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(radius*1.3, 16, 12), new THREE.MeshStandardMaterial({color:0xffffff, metalness:.1, roughness:.5})));
+    const h=new THREE.Mesh(new THREE.BoxGeometry(radius*0.6, radius*4.0, radius*0.6), new THREE.MeshStandardMaterial({color:stroke, metalness:.2, roughness:.7}));
+    h.position.y=radius*2.2; h.rotation.z=Math.PI/2; g.add(h);
   }else if(type==='check'){
-    const body=new THREE.Mesh(new THREE.CapsuleGeometry(radius*1.6, radius*5.0, 8, 16),
-                              new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.3}));
-    g.add(body);
-    const cone=new THREE.Mesh(new THREE.ConeGeometry(radius*1.2, radius*2.0, 16),
-                              new THREE.MeshStandardMaterial({color:0xffffff, metalness:.0, roughness:.6}));
+    g.add(new THREE.Mesh(new THREE.CapsuleGeometry(radius*1.6, radius*5.0, 8, 16), new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.3})));
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(radius*1.2, radius*2.0, 16), new THREE.MeshStandardMaterial({color:0xffffff, metalness:0, roughness:.6}));
     cone.rotation.x=Math.PI/2; g.add(cone);
-  }else{ // pump
-    const vol=new THREE.Mesh(new THREE.CylinderGeometry(radius*2.2, radius*2.2, radius*1.6, 20),
-                             new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.35}));
+  }else{
+    const vol=new THREE.Mesh(new THREE.CylinderGeometry(radius*2.2, radius*2.2, radius*1.6, 20), new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.35}));
     vol.rotation.x=Math.PI/2; g.add(vol);
-    const motor=new THREE.Mesh(new THREE.BoxGeometry(radius*2.8, radius*1.8, radius*4.2),
-                               new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.35}));
+    const motor=new THREE.Mesh(new THREE.BoxGeometry(radius*2.8, radius*1.8, radius*4.2), new THREE.MeshStandardMaterial({color:col, metalness:.5, roughness:.35}));
     motor.position.y=radius*2.0; g.add(motor);
   }
   return g;
 }
-function compBasisOnPipe(pipe, t){
-  const a=pipe.a, b=pipe.b;
-  const pos=new THREE.Vector3().lerpVectors(a,b,t);
-  const dir=new THREE.Vector3().subVectors(b,a).normalize();
+function basisOnPipe(pipe,t){
+  const pos=new THREE.Vector3().lerpVectors(pipe.a, pipe.b, t);
+  const dir=new THREE.Vector3().subVectors(pipe.b, pipe.a).normalize();
   const quat=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
-  return {pos, quat, dir};
+  return {pos,quat};
 }
 function refreshComp(i){
   const c=comps[i], p=pipes[c.pipeIndex]; if(!p) return;
-  if(c.group){
-    c.group.traverse(o=>{ if(o.geometry) o.geometry.dispose?.(); if(o.material) o.material.dispose?.(); });
-    scene.remove(c.group);
-  }
-  const {pos, quat, dir}=compBasisOnPipe(p, c.t);
+  if(c.group){ c.group.traverse(o=>{o.geometry?.dispose?.(); o.material?.dispose?.();}); scene.remove(c.group); }
   const g=makeCompModel(c.type, p.radius);
-  g.position.copy(pos); g.quaternion.copy(quat);
-  // насос — поворот мотора вверх экрана: оставим как есть (ось уже по трубе)
+  const {pos,quat}=basisOnPipe(p,c.t); g.position.copy(pos); g.quaternion.copy(quat);
   g.userData={compIndex:i};
   scene.add(g); c.group=g;
 }
 
-/* ===== снапы/пикинг ===== */
+/* ===== снапы и пикинг ===== */
 function pickOnGround(e){
   const rect=cv.getBoundingClientRect();
   mouseNDC.set(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
@@ -217,22 +246,17 @@ function pickOnGround(e){
   const hit=raycaster.intersectObject(ground,false)[0];
   return hit? hit.point.clone() : null;
 }
-function snapToGrid(v){
-  if(!snapGrid) return v;
-  v.x=Math.round(v.x/GRID_STEP)*GRID_STEP;
-  v.y=Math.round(v.y/GRID_STEP)*GRID_STEP;
-  v.z=Math.round(v.z/GRID_STEP)*GRID_STEP;
-  return v;
+function snapGrid(v){ if(!snapGridOn) return v; v.x=Math.round(v.x/GRID_STEP)*GRID_STEP; v.y=Math.round(v.y/GRID_STEP)*GRID_STEP; v.z=Math.round(v.z/GRID_STEP)*GRID_STEP; return v; }
+let snapGridOn=true;
+function allEnds(){ const arr=[]; pipes.forEach((p,i)=>arr.push({i,end:'a',v:p.a},{i,end:'b',v:p.b})); return arr; }
+function allMids(){ const arr=[]; pipes.forEach((p,i)=>arr.push({i,t:.5,v:new THREE.Vector3().lerpVectors(p.a,p.b,.5)})); return arr; }
+function snapVertices(v){
+  let best=null,bd=1e9;
+  if(snapEnds){ for(const it of allEnds()){ const d=it.v.distanceTo(v); if(d<bd){bd=d; best=it.v;} } }
+  if(snapMid){  for(const it of allMids()){ const d=it.v.distanceTo(v); if(d<bd){bd=d; best=it.v;} } }
+  return (best && bd<=Math.max(pipeRadius*3,0.25)) ? best.clone() : null;
 }
-function allPipeEnds(){ const arr=[]; pipes.forEach((p,idx)=>arr.push({idx,end:'a',v:p.a},{idx,end:'b',v:p.b})); return arr; }
-function allPipeMids(){ const arr=[]; pipes.forEach((p,idx)=>arr.push({idx,t:0.5,v:new THREE.Vector3().lerpVectors(p.a,p.b,0.5)})); return arr; }
-function snapToVertices(v){
-  let best=null, bd=1e9;
-  if(snapEnds){ for(const it of allPipeEnds()){ const d=it.v.distanceTo(v); if(d<bd){ bd=d; best=it.v; } } }
-  if(snapMid){ for(const it of allPipeMids()){ const d=it.v.distanceTo(v); if(d<bd){ bd=d; best=it.v; } } }
-  return (best && bd<=Math.max(pipeRadius*3, 0.25)) ? best.clone() : null;
-}
-function raycastPipes(e){
+function raycastPipe(e){
   const rect=cv.getBoundingClientRect();
   mouseNDC.set(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
   raycaster.setFromCamera(mouseNDC, camera);
@@ -240,270 +264,220 @@ function raycastPipes(e){
   const hits=raycaster.intersectObjects(meshes, false);
   if(!hits.length) return null;
   const mesh=hits[0].object;
-  const pipeIndex=pipes.findIndex(p=>p.mesh===mesh);
-  const p=pipes[pipeIndex]; const a=p.a, b=p.b;
-  const hitPoint=hits[0].point.clone();
-  const ab=new THREE.Vector3().subVectors(b,a);
-  const t=THREE.MathUtils.clamp( a.clone().distanceTo(hitPoint) / ab.length(), 0, 1 );
-  return {pipeIndex,t, hitPoint};
+  const idx=pipes.findIndex(p=>p.mesh===mesh);
+  const p=pipes[idx], a=p.a, b=p.b, hitPoint=hits[0].point.clone();
+  const t=THREE.MathUtils.clamp(a.clone().distanceTo(hitPoint)/a.distanceTo(b),0,1);
+  return {idx,t};
 }
-function raycastComps(e){
+function raycastComp(e){
   const rect=cv.getBoundingClientRect();
   mouseNDC.set(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
   raycaster.setFromCamera(mouseNDC, camera);
   const groups=comps.map(c=>c.group).filter(Boolean);
-  const hits=raycaster.intersectObjects(groups, true);
+  const hits=raycaster.intersectObjects(groups,true);
   if(!hits.length) return null;
-  const root=hits[0].object;
-  let g=root; while(g && !g.userData?.compIndex){ g=g.parent; }
-  if(!g || g.userData.compIndex==null) return null;
+  let g=hits[0].object;
+  while(g && g.userData?.compIndex==null) g=g.parent;
+  if(!g) return null;
   return {compIndex:g.userData.compIndex};
 }
 
-/* ===== режимы ===== */
-let stLine='idle';       // 'idle'|'awaitFirst'|'awaitSecond'
-let first=null;          // V3
-let preview=null;        // Mesh
-let pressTimer=null;
-let editEnd=null;        // {pipeIndex,end:'a'|'b',axis:'xz'|'y'}
-let placingComp=false;
-let draggingComp=null;   // {compIndex}
-let rulerMode=false;
-let rulerFirst=null;     // V3
+/* ===== ввод ===== */
+let first=null, preview=null, pressTimer=null;
+let editEnd=null;      // {idx,end,axis:'xz'|'y'}
+let dragComp=null;     // {compIndex}
 
-/* ===== UI ===== */
-$('btnLine').onclick=()=>{
-  if(rulerMode) { say('Сначала выйди из «Линейки»'); return; }
-  if(stLine==='idle'){ stLine='awaitFirst'; first=null; if(preview){scene.remove(preview); preview=null;} say('Линия: ткни первую точку'); return; }
-  if(stLine==='awaitFirst'){ stLine='idle'; say('Отмена'); return; }
-  if(stLine==='awaitSecond'){ stLine='idle'; first=null; if(preview){scene.remove(preview); preview=null;} say('Отмена'); return; }
-};
-$('btnUndo').onclick=()=>{
-  if(preview){ scene.remove(preview); preview=null; }
-  const last=pipes.pop();
-  if(last){ scene.remove(last.mesh); last.mesh.geometry.dispose(); last.mesh.material.dispose(); }
-  say('Отменено');
-};
-$('btnRuler').onclick=()=>{
-  rulerMode=!rulerMode;
-  $('btnRuler').classList.toggle('tog',true);
-  $('btnRuler').classList.toggle('on',rulerMode);
-  stLine='idle'; first=null; if(preview){scene.remove(preview); preview=null;}
-  badge('');
-  say(rulerMode?'Линейка: ткни 2 точки':'Линейка выключена');
-};
-$('btnAxisY').onclick = ()=>{ wantY=!wantY; $('btnAxisY').classList.toggle('on', wantY); say(wantY?'Движение по высоте Y':'Движение по плоскости XZ'); };
-
-$('btnSnapEnds').onclick=()=>{ snapEnds=!snapEnds; $('btnSnapEnds').classList.toggle('on', snapEnds); say('Магнит к стыкам: '+(snapEnds?'вкл':'выкл')); };
-$('btnSnapMid').onclick =()=>{ snapMid=!snapMid;  $('btnSnapMid').classList.toggle('on',  snapMid);  say('Магнит к серединам: '+(snapMid?'вкл':'выкл')); };
-$('btnSnapGrid').onclick=()=>{ snapGrid=!snapGrid; $('btnSnapGrid').classList.toggle('on', snapGrid); say('Магнит к сетке: '+(snapGrid?'вкл':'выкл')); };
-
-$('rPipe').oninput = (e)=>{ pipeRadius=parseFloat(e.target.value||'0.035'); $('rPipeVal').textContent=Math.round(pipeRadius*1000); say('Толщина трубы: Ø'+Math.round(pipeRadius*1000)+' мм'); };
-$('matSel').onchange = (e)=>{ matKind=e.target.value; pipes.forEach((_,i)=>refreshPipe(i)); say('Материал: '+matKind); };
-
-$('btnPlaceComp').onclick=()=>{ placingComp=!placingComp; $('btnPlaceComp').classList.toggle('on', placingComp); say(placingComp?'Режим арматуры: ткни по трубе (можно долгим тапом по арматуре — тянуть вдоль трубы)':'Режим арматуры выключен'); };
-
-$('btnSave').onclick=()=>saveProject();
-$('fileLoad').onchange=e=>{ const f=e.target.files?.[0]; if(f) loadProjectFile(f); };
-
-/* ===== badge ===== */
-function badge(txt){ if(!txt){ badgeEl.style.display='none'; return; } badgeEl.textContent=txt; badgeEl.style.display='block'; }
-
-/* ===== события ===== */
 cv.addEventListener('pointerdown', e=>{
   clearTimeout(pressTimer);
 
-  // 1) длинный тап по арматуре → перетаскивание вдоль трубы
-  const hitComp=raycastComps(e);
-  if(hitComp){
-    pressTimer=setTimeout(()=>{ draggingComp={compIndex:hitComp.compIndex}; say('Тяни арматуру вдоль трубы'); }, LONG_MS);
+  // долгий тап по арматуре — тянуть вдоль трубы
+  const hitC=raycastComp(e);
+  if(hitC){
+    pressTimer=setTimeout(()=>{ dragComp={compIndex:hitC.compIndex}; say('Тяни арматуру вдоль трубы'); }, 650);
   }
 
-  // 2) длинный тап по концу трубы → правка конца
+  // долгий тап по концу трубы — правка
   const p=pickOnGround(e);
   if(p){
-    const ends=allPipeEnds().sort((A,B)=>A.v.distanceTo(p)-B.v.distanceTo(p));
-    if(ends.length && ends[0].v.distanceTo(p) <= Math.max(pipeRadius*3,0.25)){
-      pressTimer=setTimeout(()=>{
-        editEnd={pipeIndex:ends[0].idx, end:ends[0].end, axis:(wantY?'y':'xz')};
-        say('Правка конца: двигай. Кнопка Y↕ — высота.');
-      }, LONG_MS);
+    const near=allEnds().sort((A,B)=>A.v.distanceTo(p)-B.v.distanceTo(p))[0];
+    if(near && near.v.distanceTo(p)<=Math.max(pipeRadius*3,0.25)){
+      pressTimer=setTimeout(()=>{ editEnd={idx:near.i,end:near.end,axis:(wantY?'y':'xz')}; say('Правка конца'); }, 650);
     }
   }
 
-  // 3) режим арматуры — разовая вставка по тапу на трубу
+  // вставка арматуры
   if(placingComp){
-    const hit=raycastPipes(e);
-    if(hit){
-      const type=$('compSel').value;
-      comps.push({pipeIndex:hit.pipeIndex,t:hit.t,type,group:null});
-      refreshComp(comps.length-1);
-      placingComp=false; $('btnPlaceComp').classList.remove('on');
-      say('Арматура поставлена');
-    }else{
-      say('Ткни по трубе');
-    }
+    const hit=raycastPipe(e);
+    if(hit){ comps.push({pipeIndex:hit.idx,t:hit.t,type:$('compSel').value,group:null}); refreshComp(comps.length-1); placingComp=false; $('btnPlaceComp').classList.remove('on'); say('Арматура поставлена'); }
+    else say('Ткни по трубе');
     return;
   }
 
-  // 4) Линейка: две точки
-  if(rulerMode){
-    let v = p ? p.clone() : null; if(!v) return;
-    v = snapToGrid(v); const j=snapToVertices(v); if(j) v=j;
-    if(!rulerFirst){ rulerFirst=v.clone(); badge('0 мм'); say('Линейка: выбери вторую точку'); }
+  // линейка
+  if(ruler){
+    let v=p? p.clone(): null; if(!v) return;
+    v = snapGridOn? snapGrid(v): v;
+    const j=snapVertices(v); if(j) v=j;
+    if(!first){ first=v.clone(); badge('0 мм'); say('Линейка: выбери вторую точку'); }
     else{
-      const d=rulerFirst.distanceTo(v);
-      badge(fmtLen(d));
-      say('Длина: '+fmtLen(d));
-      // зафиксируем пару как подсказку на несколько секунд
-      setTimeout(()=>badge(''), 2000);
-      rulerFirst=null;
+      const d=first.distanceTo(v); badge(fmtLen(d)); setTimeout(()=>badge(''),1600); first=null;
     }
     return;
   }
 
-  // 5) Рисование линии
-  if(stLine==='awaitFirst'){
-    let v = p ? p.clone() : null; if(!v) return;
-    v = snapToGrid(v); const j=snapToVertices(v); if(j) v=j;
-    first=v.clone(); stLine='awaitSecond'; say('Первая точка. Поставь вторую.');
+  // рисование
+  if(st==='awaitFirst'){
+    let v=p? p.clone(): null; if(!v) return;
+    v = snapGridOn? snapGrid(v): v; const j=snapVertices(v); if(j) v=j;
+    first=v.clone(); st='awaitSecond'; say('1-я точка. Поставь вторую.');
     return;
   }
-  if(stLine==='awaitSecond' && first){
-    let v = p ? p.clone() : null; if(!v) return;
-    v = snapToGrid(v); const j=snapToVertices(v); if(j) v=j;
-
+  if(st==='awaitSecond' && first){
+    let v=p? p.clone(): null; if(!v) return;
+    v = snapGridOn? snapGrid(v): v; const j=snapVertices(v); if(j) v=j;
     const i=pipes.push({a:first.clone(), b:v.clone(), radius:pipeRadius, mesh:null})-1;
     refreshPipe(i);
-
-    first=null; if(preview){ scene.remove(preview); preview=null; }
-    stLine='idle'; badge(''); say('Труба добавлена. Нажми «Линия» для следующей.');
+    first=null; if(preview){scene.remove(preview); preview=null;} st='idle'; badge(''); say('Труба добавлена. Для следующей снова нажми «Линия».');
     return;
   }
 });
 
 cv.addEventListener('pointermove', e=>{
-  // отмена долгого тапа при сдвиге
-  if(pressTimer && Math.hypot(e.movementX, e.movementY) > 6){ clearTimeout(pressTimer); pressTimer=null; }
+  if(pressTimer && Math.hypot(e.movementX,e.movementY)>6){ clearTimeout(pressTimer); pressTimer=null; }
 
   // перетаскивание арматуры
-  if(draggingComp){
-    const {compIndex}=draggingComp; const c=comps[compIndex]; const p=pipes[c.pipeIndex];
-    const hit=raycastPipes(e);
-    if(hit && hit.pipeIndex===c.pipeIndex){
-      c.t=THREE.MathUtils.clamp(hit.t, 0, 1);
-      refreshComp(compIndex);
-      say('Арматура: t='+c.t.toFixed(2));
-    }
+  if(dragComp){
+    const c=comps[dragComp.compIndex]; const hit=raycastPipe(e);
+    if(hit && hit.idx===c.pipeIndex){ c.t=hit.t; refreshComp(dragComp.compIndex); say('t='+c.t.toFixed(2)); }
     return;
   }
-
   // правка конца
   if(editEnd){
     const p=pickOnGround(e); if(!p) return;
-    const pipe=pipes[editEnd.pipeIndex]; const other = (editEnd.end==='a')?pipe.b:pipe.a;
-    let v=snapToGrid(p.clone()); const j=snapToVertices(v); if(j) v=j;
+    const pipe=pipes[editEnd.idx]; const other = (editEnd.end==='a'? pipe.b:pipe.a);
+    let v=snapGridOn? snapGrid(p.clone()): p.clone(); const j=snapVertices(v); if(j) v=j;
     if(editEnd.axis==='xz') v.y=other.y;
     if(editEnd.end==='a') pipe.a.copy(v); else pipe.b.copy(v);
-    refreshPipe(editEnd.pipeIndex);
-    return;
+    refreshPipe(editEnd.idx); return;
   }
 
-  // превью длины при рисовании
-  if(stLine==='awaitSecond' && first){
+  // превью при рисовании
+  if(st==='awaitSecond' && first){
     const p=pickOnGround(e); if(!p) return;
-    let v=snapToGrid(p.clone()); const j=snapToVertices(v); if(j) v=j;
+    let v=snapGridOn? snapGrid(p.clone()): p.clone(); const j=snapVertices(v); if(j) v=j;
     if(preview){ scene.remove(preview); preview=null; }
-    const matPrev=new THREE.MeshStandardMaterial({color:0x7c5bff, metalness:.2, roughness:.5});
-    preview=makePipeMesh(first, v, Math.max(0.8*pipeRadius, 0.01), matPrev); scene.add(preview);
-    badge(fmtLen(first.distanceTo(v)));
+    preview=makePipeMesh(first, v, Math.max(0.8*pipeRadius,0.01), new THREE.MeshStandardMaterial({color:0x7c5bff,metalness:.2,roughness:.5}));
+    scene.add(preview); badge(fmtLen(first.distanceTo(v)));
   }
 });
+cv.addEventListener('pointerup', ()=>{ clearTimeout(pressTimer); pressTimer=null; if(editEnd){editEnd=null; say('Готово');} if(dragComp){dragComp=null; say('Готово');} });
 
-cv.addEventListener('pointerup', e=>{
-  clearTimeout(pressTimer); pressTimer=null;
-  if(draggingComp){ draggingComp=null; say('Готово'); }
-  if(editEnd){ editEnd=null; say('Готово'); }
-});
+/* ===== кнопки HUD ===== */
+$('btnLine').onclick=()=>{
+  if(ruler){ say('Сначала выключи «Линейку» в ⚙'); return; }
+  if(st==='idle'){ st='awaitFirst'; first=null; if(preview){scene.remove(preview); preview=null;} say('Режим Линия: ткни 1-ю точку'); return; }
+  if(st==='awaitFirst'){ st='idle'; say('Отмена'); return; }
+  if(st==='awaitSecond'){ st='idle'; first=null; if(preview){scene.remove(preview); preview=null;} say('Отмена'); return; }
+};
+$('btnUndo').onclick=()=>{ if(preview){scene.remove(preview); preview=null;} const last=pipes.pop(); if(last){scene.remove(last.mesh); last.mesh.geometry.dispose(); last.mesh.material.dispose();} say('Отменено'); };
+$('btnPlus').onclick =()=>{ controls.dollyOut(0.9); controls.update(); };
+$('btnMinus').onclick=()=>{ controls.dollyIn(0.9);  controls.update(); };
 
-/* ===== сохранение/загрузка ===== */
+/* ===== Панель ===== */
+const wrap=$('panelWrap'), backdrop=$('panelBackdrop'), panel=$('panel');
+$('btnSettings').onclick=()=>{ wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false'); };
+$('btnClosePanel').onclick=()=>{ wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); };
+backdrop.onclick=$('btnClosePanel').onclick;
+['pointerdown','pointermove','pointerup','click','wheel'].forEach(ev=>panel.addEventListener(ev, e=>e.stopPropagation(), {passive:true}));
+
+// Тогглы
+$('togRuler').onclick =()=>{ ruler=!ruler; $('togRuler').classList.toggle('on',ruler); st='idle'; first=null; if(preview){scene.remove(preview); preview=null;} say(ruler?'Линейка: ткни 2 точки':'Линейка выключена'); };
+$('togY').onclick      =()=>{ wantY=!wantY; $('togY').classList.toggle('on',wantY); say(wantY?'Движение по высоте Y':'Плоскость XZ'); };
+$('togSnapEnds').onclick =()=>{ snapEnds=!snapEnds; $('togSnapEnds').classList.toggle('on',snapEnds); say('Магнит к стыкам: '+(snapEnds?'вкл':'выкл')); };
+$('togSnapMid').onclick  =()=>{ snapMid=!snapMid;   $('togSnapMid').classList.toggle('on',snapMid);   say('Магнит к серединам: '+(snapMid?'вкл':'выкл')); };
+$('togSnapGrid').onclick =()=>{ snapGridOn=!snapGridOn; $('togSnapGrid').classList.toggle('on',snapGridOn); say('Магнит к сетке: '+(snapGridOn?'вкл':'выкл')); };
+$('togGridVisible').onclick=()=>{ gridVisible=!gridVisible; $('togGridVisible').classList.toggle('on',gridVisible); grid.visible=gridVisible; say('Сетка: '+(gridVisible?'показана':'скрыта')); };
+
+// Ø и материал
+$('rangeR').oninput = e=>{ pipeRadius=parseFloat(e.target.value||'0.035'); $('rangeRVal').textContent=String(Math.round(pipeRadius*1000)); say('Ø '+Math.round(pipeRadius*1000)+' мм'); };
+$('matSel').onchange= e=>{ matKind=e.target.value; pipes.forEach((_,i)=>refreshPipe(i)); say('Материал: '+matKind); };
+
+// Арматура
+$('btnPlaceComp').onclick=()=>{ placingComp=!placingComp; $('btnPlaceComp').classList.toggle('on',placingComp); say(placingComp?'Режим арматуры: ткни по трубе':'Режим арматуры выключен'); };
+
+// Фото/фон
+function setBackgroundFromFile(file){
+  if(!file) return;
+  const img=new Image();
+  img.onload=()=>{
+    const tex=new THREE.Texture(img); tex.needsUpdate=true; tex.colorSpace=THREE.SRGBColorSpace;
+    const ar=img.width/img.height;
+    const W=10, H=W/ar;
+    if(bgPlane){ scene.remove(bgPlane); bgPlane.geometry.dispose(); bgPlane.material.map?.dispose?.(); bgPlane.material.dispose(); }
+    const geo=new THREE.PlaneGeometry(W,H);
+    const mat=new THREE.MeshBasicMaterial({map:tex, side:THREE.DoubleSide, transparent:true, opacity:.95});
+    bgPlane=new THREE.Mesh(geo,mat);
+    bgPlane.rotation.x=-Math.PI/2;
+    bgPlane.position.y=-0.001; // под сеткой
+    scene.add(bgPlane);
+    say('Фон добавлен');
+  };
+  img.src=URL.createObjectURL(file);
+}
+$('fileCam').onchange=e=>setBackgroundFromFile(e.target.files?.[0]);
+$('fileGal').onchange=e=>setBackgroundFromFile(e.target.files?.[0]);
+$('btnToggleBg').onclick=()=>{ if(bgPlane){ bgPlane.visible=!bgPlane.visible; say('Фон: '+(bgPlane.visible?'показан':'скрыт')); } };
+$('btnClearBg').onclick=()=>{ if(bgPlane){ scene.remove(bgPlane); bgPlane.geometry.dispose(); bgPlane.material.map?.dispose?.(); bgPlane.material.dispose(); bgPlane=null; say('Фон удалён'); } };
+
+// Сохранить/загрузить
 function serialize(){
   return {
     version:1,
-    settings:{pipeRadius, matKind, snapEnds, snapMid, snapGrid, wantY},
-    pipes: pipes.map(p=>({a:p.a, b:p.b, radius:p.radius})),
-    comps: comps.map(c=>({pipeIndex:c.pipeIndex, t:c.t, type:c.type}))
+    settings:{pipeRadius,matKind,snapEnds,snapMid,snapGridOn,gridVisible,wantY},
+    pipes:pipes.map(p=>({a:p.a,b:p.b,radius:p.radius})),
+    comps:comps.map(c=>({pipeIndex:c.pipeIndex,t:c.t,type:c.type}))
   };
 }
-function saveProject(){
-  const data=serialize();
-  const blob=new Blob([JSON.stringify(data)], {type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download='pro-trace.json'; a.click();
-  setTimeout(()=>URL.revokeObjectURL(url), 1000);
-  say('Проект сохранён (JSON)');
-}
-function loadProjectFile(file){
+$('btnSave').onclick=()=>{
+  const blob=new Blob([JSON.stringify(serialize())],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download='pro-trace.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  say('Проект сохранён');
+};
+$('fileLoad').onchange=e=>{
+  const f=e.target.files?.[0]; if(!f) return;
   const rd=new FileReader();
   rd.onload=()=>{
     try{
       const data=JSON.parse(rd.result);
-      loadFromJSON(data);
+      // очистка
+      pipes.splice(0).forEach(p=>{ if(p.mesh){scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose();}});
+      comps.splice(0).forEach(c=>{ if(c.group){c.group.traverse(o=>{o.geometry?.dispose?.();o.material?.dispose?.();}); scene.remove(c.group);} });
+      // настройки
+      if(data.settings){
+        pipeRadius=data.settings.pipeRadius??pipeRadius; $('rangeR').value=pipeRadius; $('rangeRVal').textContent=Math.round(pipeRadius*1000);
+        matKind=data.settings.matKind??matKind; $('matSel').value=matKind;
+        snapEnds=!!data.settings.snapEnds; $('togSnapEnds').classList.toggle('on',snapEnds);
+        snapMid=!!data.settings.snapMid;   $('togSnapMid').classList.toggle('on',snapMid);
+        snapGridOn=!!data.settings.snapGridOn; $('togSnapGrid').classList.toggle('on',snapGridOn);
+        gridVisible=!!data.settings.gridVisible; $('togGridVisible').classList.toggle('on',gridVisible); grid.visible=gridVisible;
+        wantY=!!data.settings.wantY; $('togY').classList.toggle('on',wantY);
+      }
+      // трубы
+      (data.pipes||[]).forEach(p=>{ pipes.push({a:new THREE.Vector3(p.a.x,p.a.y,p.a.z), b:new THREE.Vector3(p.b.x,p.b.y,p.b.z), radius:p.radius||pipeRadius, mesh:null}); });
+      pipes.forEach((_,i)=>refreshPipe(i));
+      // арматура
+      (data.comps||[]).forEach(c=>{ comps.push({pipeIndex:c.pipeIndex,t:c.t,type:c.type,group:null}); });
+      comps.forEach((_,i)=>refreshComp(i));
       say('Проект загружен');
-    }catch(err){ alert('Не удалось прочитать файл: '+err); }
+    }catch(err){ alert('Ошибка JSON: '+err); }
   };
-  rd.readAsText(file);
-}
-function loadFromJSON(data){
-  // очистить сцену
-  pipes.splice(0,pipes.length).forEach(p=>{ if(p.mesh){scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose();}});
-  comps.splice(0,comps.length).forEach(c=>{
-    if(c.group){ c.group.traverse(o=>{o.geometry?.dispose?.(); o.material?.dispose?.();}); scene.remove(c.group); }
-  });
-
-  // настройки
-  if(data.settings){
-    pipeRadius = data.settings.pipeRadius ?? pipeRadius;
-    matKind    = data.settings.matKind    ?? matKind;
-    snapEnds   = !!data.settings.snapEnds;
-    snapMid    = !!data.settings.snapMid;
-    snapGrid   = !!data.settings.snapGrid;
-    wantY      = !!data.settings.wantY;
-    $('rPipe').value = String(pipeRadius);
-    $('rPipeVal').textContent = Math.round(pipeRadius*1000);
-    $('matSel').value = matKind;
-    $('btnSnapEnds').classList.toggle('on', snapEnds);
-    $('btnSnapMid').classList.toggle('on', snapMid);
-    $('btnSnapGrid').classList.toggle('on', snapGrid);
-    $('btnAxisY').classList.toggle('on', wantY);
-  }
-
-  // трубы
-  (data.pipes||[]).forEach(p=>{
-    const a=new THREE.Vector3(p.a.x,p.a.y,p.a.z);
-    const b=new THREE.Vector3(p.b.x,p.b.y,p.b.z);
-    pipes.push({a,b,radius:p.radius||pipeRadius, mesh:null});
-  });
-  pipes.forEach((_,i)=>refreshPipe(i));
-
-  // арматура
-  (data.comps||[]).forEach(c=>{
-    comps.push({pipeIndex:c.pipeIndex, t:c.t, type:c.type, group:null});
-  });
-  comps.forEach((_,i)=>refreshComp(i));
-}
-
-/* ===== окно/ресайз ===== */
-function onResize(){
-  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight,false);
-}
-addEventListener('resize', onResize, {passive:true});
+  rd.readAsText(f);
+};
 
 /* ===== старт ===== */
-init();
-say('Готово: 3D сетка. «Линия» — тап-тап; «Линейка» — 2 точки; арматуру можно долгим тапом тянуть вдоль трубы; есть Сохранить/Загрузить.');
+init3D();
+say('Готово: 3D-сетка работает. Нажми «Линия» → 1-я точка → 2-я точка. Всё остальное — в ⚙ Настройки.');
 })();
 </script>
 </body>
