@@ -102,7 +102,7 @@
 <script>
 (()=>{"use strict";
 
-/* ===== Ошибки сразу на экране (для iPhone) ===== */
+/* ===== Ошибки сразу на экране ===== */
 window.onerror = function (msg, src, line, col) {
   alert("❌ Ошибка: " + msg + "\n" + (src||"") + "@" + line + ":" + col);
 };
@@ -158,7 +158,7 @@ function updateStatus(msg=''){
 /* ===== утилиты ===== */
 function s2w(sx,sy){ return { x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale }; }
 function w2s(x,y){ return { x:x*view.scale+view.tx, y:y*view.scale+view.ty }; }
-function darker(hex,k=0.45){ const m=/^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex); if(!m) return '#333';
+function darker(hex,k=0.45){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); if(!m) return '#333';
   let [r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];
   r=Math.max(0,Math.floor(r*(1-k))); g=Math.max(0,Math.floor(g*(1-k))); b=Math.max(0,Math.floor(b*(1-k)));
   return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
@@ -194,14 +194,16 @@ function drawValve(seg,t){
   ctx.lineJoin='round'; ctx.lineCap='round';
   ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
 
+  // корпус
   ctx.beginPath();
   ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
   ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
   ctx.arc(R.x,R.y,bodyR, Math.atan2(-ny,-nx), Math.atan2(ny,-nx), false);
-  ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyР);
+  ctx.lineTo(L.x+nx*bodyR, L.y+ny*bodyR);
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
+  // переходы к трубе
   ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR); ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);
   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -210,8 +212,8 @@ function drawValve(seg,t){
   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR); ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR);
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fill(); ctx.stroke();
 
+  // шар и ручка
   ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
-
   const top={x:b.x+nx*bodyR,y:b.y+ny*bodyR};
   const neckTop={x:top.x+nx*neckH,y:top.y+ny*neckH};
   ctx.beginPath(); ctx.arc(b.x,b.y,neckR,0,Math.PI*2); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
@@ -241,6 +243,7 @@ function drawCheck(seg,t){
   ctx.lineJoin='round'; ctx.lineCap='round';
   ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
 
+  // корпус
   ctx.beginPath();
   ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
   ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -249,14 +252,16 @@ function drawCheck(seg,t){
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
+  // переходы к трубе
   ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR); ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);
   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fill(); ctx.stroke();
 
   ctx.beginPath(); ctx.moveTo(R.x-nx*bodyR,R.y-ny*bodyR);
-  ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeР); ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeР);
-  ctx.lineTo(R.x+nx*bodyР,R.y+ny*bodyР); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR); ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR);
+  ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fill(); ctx.stroke();
 
+  // белый треугольник вдоль трубы: основание по нормали, вершина по направлению
   const triBase=base*3.2, triRise=base*3.0;
   const A={x:b.x - nx*triBase/2, y:b.y - ny*triBase/2};
   const B={x:b.x + nx*triBase/2, y:b.y + ny*triBase/2};
@@ -343,7 +348,7 @@ function findNearestSegment(sx,sy,maxDistPx=28){
   return (best!==-1 && bd<=maxDistPx)?{segIndex:best,t:bt}:null;
 }
 
-/* ===== ввод: панорама/зум всегда доступны, рисование — только по "Линия" ===== */
+/* ===== ввод ===== */
 const pointers=new Map();
 let panStart=null, panLast=null, isPanning=false;
 const PAN_THRESH = 6*DPR;
@@ -449,7 +454,7 @@ rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15
 
 /* ===== старт ===== */
 fit(); need();
-updateStatus('Готово: 1) «Линия», 2) первая точка, 3) вторая → сегмент. Фон: камера/галерея. Жесты навигации всегда доступны.');
+updateStatus('Готово: 1) «Линия», 2) первая точка, 3) вторая → сегмент. Фон: камера/галерея.');
 })();
 </script>
 </body>
