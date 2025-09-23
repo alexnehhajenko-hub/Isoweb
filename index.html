@@ -1,13 +1,65 @@
 <!doctype html>
-<html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <title>Test</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pro Trace — grid test</title>
+<style>
+  html,body{margin:0;height:100%;background:#111;overflow:hidden}
+  #cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none}
+  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.7);color:#fff;padding:6px 8px;border-radius:8px;font:13px system-ui}
+</style>
 </head>
-<body style="background:#111; color:#fff; font:20px monospace">
-  Hello from index.html
+<body>
+  <canvas id="cv"></canvas>
+  <div id="status" class="status">Статус: загрузка…</div>
+
+  <script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
+
   <script>
-    document.body.insertAdjacentHTML("beforeend","<br>✅ script ok");
+  (()=>{"use strict";
+    const status = document.getElementById('status');
+    const cv = document.getElementById('cv');
+
+    const renderer = new THREE.WebGLRenderer({canvas: cv, antialias: true});
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+    renderer.setSize(innerWidth, innerHeight, false);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x141414);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 300);
+    camera.position.set(3, 2.4, 3);
+
+    const controls = new THREE.OrbitControls(camera, cv);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    controls.target.set(0,0,0);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+    dir.position.set(2,3,1); scene.add(dir);
+
+    const GRID_STEP = 0.2;
+    const grid = new THREE.GridHelper(20, 20/GRID_STEP, 0x333333, 0x2f2f2f);
+    grid.material.transparent = true; grid.material.opacity = 0.95;
+    scene.add(grid);
+
+    function onResize(){
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight, false);
+    }
+    addEventListener('resize', onResize, {passive:true});
+
+    (function animate(){
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+
+    status.textContent = '✅ 3D сетка работает. Пальцами — зум/вращение.';
+  })();
   </script>
 </body>
 </html>
