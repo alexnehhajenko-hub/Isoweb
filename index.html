@@ -2,125 +2,521 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — v877 line-only</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>IsoPipe — точные точки + жесты</title>
 <style>
-  :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
-  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+  :root{--violet:#8000ff; --violet2:#6f19ff}
+  html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;touch-action:none}
+  canvas{display:block;width:100vw;height:100vh;background:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
 
-  .bar{position:fixed;left:8px;top:8px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
-  .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
+  .bar{position:fixed;left:8px;right:100px;top:8px;z-index:1000;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+  .btn{height:44px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:800}
   .btn.ghost{background:linear-gradient(180deg,#8c8c8c,#6a6a6a)}
+  .gear{position:fixed;top:8px;right:8px;width:44px;height:44px;border-radius:12px;border:1px solid #e7e3f7;background:#fff;color:#5b30c2;font-weight:800;z-index:1001}
 
-  .zoom{position:fixed;right:8px;top:8px;z-index:11;display:flex;gap:8px}
-  .zbtn{height:44px;min-width:44px;border:0;border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.1);font-size:18px}
+  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f1f2e;color:#fff;padding:8px 10px;border-radius:10px;opacity:0;transition:.25s;z-index:1100;pointer-events:none}
+  .toast.show{opacity:1}
 
-  .gear{position:fixed;right:8px;top:64px;z-index:12;height:44px;width:44px;border:1px solid var(--border);border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.08);font-size:20px}
-  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.70);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:11;max-width:92vw}
-
-  .panel-wrap{position:fixed;inset:0;z-index:20;display:none}
+  .panel-wrap{position:fixed;inset:0;z-index:1050;display:none}
   .panel-wrap.open{display:block}
-  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.18)}
-  .panel{position:absolute;top:64px;right:8px;background:#fff;border:1px solid var(--border);
-         border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:12px;width:min(92vw,380px);
-         max-height:80vh;overflow:auto}
-  .panel h4{margin:6px 0 8px;font-size:15px}
-  .row{display:flex;align-items:center;gap:10px;margin:10px 0}
-  .row label{min-width:140px;font-size:13px;color:#444}
-  .close{position:sticky;top:0;margin:-6px -6px 6px auto;background:#fff;border:1px solid var(--border);width:32px;height:32px;border-radius:8px}
-  input[type=range]{width:100%}
-  .num{font-variant-numeric:tabular-nums;color:#111;font-weight:700}
-  .radio-row{display:flex;gap:10px;flex-wrap:wrap}
-  .radio{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:999px;padding:6px 10px;font-size:12px;color:#333}
-  .radio input{accent-color:#6b1dff}
+  .panel-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.15)}
+  .panel{position:absolute;top:70px;right:8px;background:#fff;border:1px solid #e7e3f7;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:12px;width:min(92vw,360px);max-height:80vh;overflow:auto}
+  .panel h4{margin:6px 0 8px 0;font-size:15px}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+  .row label{min-width:150px;font-size:13px;color:#555}
+  .row input[type="range"]{flex:1;appearance:none;height:6px;border-radius:999px;background:#eee}
+  .row input[type="range"]::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--violet)}
+  .switch{display:flex;align-items:center;gap:8px}
+  .panel .btn{height:38px}
 </style>
 </head>
 <body>
   <canvas id="cv"></canvas>
 
   <div class="bar">
-    <button id="btnLine"  class="btn">📐 Линия</button>
-    <button id="btnUndo"  class="btn ghost">↩ Назад</button>
+    <button id="btnHand"    class="btn ghost">Рука</button>
+    <button id="btnFit"     class="btn ghost">Фит</button>
+    <button id="btnLine"    class="btn">Линия</button>
+    <button id="btnCamera"  class="btn">Камера</button>
+    <button id="btnErase"   class="btn">Ластик</button>
+    <button id="btnUndoTop" class="btn ghost">↩ Назад</button>
   </div>
-
-  <div class="zoom">
-    <button id="btnMinus" class="zbtn" title="Уменьшить">−</button>
-    <button id="btnPlus"  class="zbtn" title="Увеличить">+</button>
-  </div>
-
   <button id="btnSettings" class="gear" title="Настройки">⚙</button>
+
+  <input id="fileCamera"  type="file" accept="image/*" capture="environment" hidden />
+  <input id="fileGallery" type="file" accept="image/*" hidden />
+
+  <div id="toast" class="toast"></div>
 
   <div id="panelWrap" class="panel-wrap" aria-hidden="true">
     <div id="panelBackdrop" class="panel-backdrop"></div>
     <div id="panel" class="panel" role="dialog" aria-modal="true">
-      <button id="btnClosePanel" class="close" title="Закрыть">✕</button>
-
-      <h4>Чертёж</h4>
+      <h4>Фото</h4>
       <div class="row">
-        <label for="rangeLine">Толщина линии</label>
-        <input id="rangeLine" type="range" min="2" max="56" step="1">
-        <span id="lineVal" class="num">10</span>
+        <button id="btnGallery" class="btn" style="flex:1">Из галереи</button>
+        <button id="btnExport"  class="btn" style="flex:1">Экспорт PNG</button>
+      </div>
+
+      <h4>Магнит и оси</h4>
+      <div class="row switch">
+        <input id="snapOn" type="checkbox" checked>
+        <label for="snapOn">Магнит (узлы + продление + изометрия)</label>
+      </div>
+      <div class="row">
+        <label>Радиус магнита (px)</label>
+        <input id="snapRadius" type="range" min="6" max="40" value="18">
+        <span id="snapRadiusVal" style="width:36px;text-align:right;font-size:12px;color:#666">18</span>
+      </div>
+      <div class="row">
+        <label>Допуск осей (±°)</label>
+        <input id="isoTol" type="range" min="4" max="25" value="10">
+        <span id="isoTolVal" style="width:36px;text-align:right;font-size:12px;color:#666">10</span>
+      </div>
+      <div class="row">
+        <label>Липнуть к концам (px)</label>
+        <input id="endStick" type="range" min="12" max="60" value="28">
+        <span id="endStickVal" style="width:36px;text-align:right;font-size:12px;color:#666">28</span>
+      </div>
+      <div class="row">
+        <label>Лимит сдвига при отпускании (px)</label>
+        <input id="finalSnapLimit" type="range" min="0" max="20" value="6">
+        <span id="finalSnapLimitVal" style="width:36px;text-align:right;font-size:12px;color:#666">6</span>
+      </div>
+
+      <h4>Линии / Точки</h4>
+      <div class="row">
+        <label>Толщина линии (px)</label>
+        <input id="lineWidth" type="range" min="2" max="24" value="6">
+        <span id="lineWidthVal" style="width:36px;text-align:right;font-size:12px;color:#666">6</span>
+      </div>
+      <div class="row switch">
+        <input id="showPoints" type="checkbox" checked>
+        <label for="showPoints">Показывать точки</label>
+      </div>
+      <div class="row">
+        <label>Размер точки (px)</label>
+        <input id="ptSize" type="range" min="4" max="20" value="10">
+        <span id="ptSizeVal" style="width:36px;text-align:right;font-size:12px;color:#666">10</span>
+      </div>
+
+      <h4>Сетка</h4>
+      <div class="row">
+        <label>Прозрачность</label>
+        <input id="gridAlpha" type="range" min="0" max="100" value="18">
+        <span id="gridAlphaVal" style="width:36px;text-align:right;font-size:12px;color:#666">18%</span>
+      </div>
+      <div class="row">
+        <label>Шаг (px)</label>
+        <input id="gridStep" type="range" min="80" max="480" value="200">
+        <span id="gridStepVal" style="width:36px;text-align:right;font-size:12px;color:#666">200</span>
+      </div>
+      <div class="row">
+        <label>Угол (°)</label>
+        <input id="gridAngle" type="range" min="-90" max="90" value="30">
+        <span id="gridAngleVal" style="width:36px;text-align:right;font-size:12px;color:#666">30</span>
       </div>
 
       <div class="row">
-        <label for="rangeComp">Арматура ×</label>
-        <input id="rangeComp" type="range" min="0.5" max="3.0" step="0.01">
-        <span id="compVal" class="num">1.15</span>
-      </div>
-
-      <div class="row" style="margin-top:8px">
-        <label>Тип арматуры</label>
-        <div class="radio-row">
-          <label class="radio"><input type="radio" name="comp" value="valve" checked> Кран</label>
-          <label class="radio"><input type="radio" name="comp" value="check"> Клапан</label>
-          <label class="radio"><input type="radio" name="comp" value="pump"> Насос</label>
-        </div>
-      </div>
-
-      <div class="row" style="justify-content:flex-end;gap:8px">
-        <button id="btnPlaceComp" class="btn">Поставить на трубу</button>
+        <button id="btnClear" class="btn" style="flex:1;background:linear-gradient(180deg,#ff4d6d,#e11d48)">Очистить</button>
+        <button id="btnDone"  class="btn" style="flex:1;background:linear-gradient(180deg,#16a34a,#15803d)">Готово</button>
       </div>
     </div>
   </div>
 
-  <div id="status" class="status">Статус: Загрузка…</div>
-
 <script>
-(()=>{"use strict";
-/* базовые */
-const DPR=Math.min(1.5,Math.max(1,window.devicePixelRatio||1));
-const cv=document.getElementById('cv');const ctx=cv.getContext('2d',{alpha:false});
-const statusEl=document.getElementById('status');
-const view={tx:0,ty:0,scale:1};function fit(){cv.width=Math.round(innerWidth*DPR);cv.height=Math.round(innerHeight*DPR);need();}addEventListener('resize',fit,{passive:true});
-const segs=[],comps=[],stack=[];let tool='idle';let first=null,preview=null;let currentComp='valve';
-const params={linePx:10,lineColor:'#1f6bff',compScale:1.15};
+(function(){
+  // ===== Константы / DOM =====
+  const DPR = Math.min(1.5, Math.max(1, (window.devicePixelRatio||1)));
+  const MAX_IMG_SIDE = 2000;
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d', { alpha:false });
+  const $ = id => document.getElementById(id);
+  const toast = (t,ms=1200)=>{ const el=$('toast'); el.textContent=t; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),ms); };
 
-/* утилиты */
-function s2w(sx,sy){return{x:(sx-view.tx)/view.scale,y:(sy-view.ty)/view.scale};}
-function w2s(x,y){return{x:x*view.scale+view.tx,y:y*view.scale+view.ty};}
-function darker(hex,k=0.45){const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);if(!m)return'#333';let[r,g,b]=[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)];r=Math.max(0,Math.floor(r*(1-k)));g=Math.max(0,Math.floor(g*(1-k)));b=Math.max(0,Math.floor(b*(1-k)));return'#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');}
-function segGeom(seg){const vx=seg.b.x-seg.a.x,vy=seg.b.y-seg.a.y;const L=Math.hypot(vx,vy)||1;return{vx,vy,L,nx:vx/L,ny:vy/L};}
-function compBasis(seg,t){const g=segGeom(seg);return{x:seg.a.x+g.nx*g.L*t,y:seg.a.y+g.ny*g.L*t,ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx};}
-function updateStatus(m=''){const t=tool==='awaitFirst'?'Жду 1-ю точку':tool==='awaitSecond'?'Жду 2-ю точку':tool==='placeComp'?'Арматура':'Готов';statusEl.textContent=`Статус: ${m} | ${t}`;}
+  // Режимы
+  let mode='hand'; // hand | line | erase
+  let panelOpen=false;
+  const canvasFrozen = ()=>panelOpen;
 
-/* рисование */
-function drawSegments(){ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);const col=params.lineColor,sh=darker(col,0.45);for(const s of segs){ctx.strokeStyle=sh;ctx.globalAlpha=.75;ctx.lineWidth=(params.linePx+2)/view.scale;ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();ctx.strokeStyle=col;ctx.globalAlpha=1;ctx.lineWidth=params.linePx/view.scale;ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();}}
-function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);drawSegments();for(const c of comps){/* арматура отрисовка */}if(tool==='awaitSecond'&&first&&preview){ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);ctx.strokeStyle=params.lineColor;ctx.lineWidth=params.linePx/view.scale;ctx.beginPath();ctx.moveTo(first.x,first.y);ctx.lineTo(preview.x,preview.y);ctx.stroke();}if(first){const p=w2s(first.x,first.y);ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='red';ctx.beginPath();ctx.arc(p.x,p.y,6,0,Math.PI*2);ctx.fill();}}let raf=0,dirty=false;function need(){dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}});}}
+  // Состояние сцены
+  const photo = { img:null, w:0, h:0, cx:0, cy:0, s:1, alpha:0.9 };
+  const segs = [];
+  const grid  = { alpha:0.18, step:200, angleDeg:30 };
+  const pts   = { show:true, sizePx:10 };
+  const snap  = { on:true, isoTolDeg:10, radiusPx:18, endStickPx:28, finalLimitPx:6 };
+  let lineWidthPx = 6;
+  let firstPt=null, previewPt=null;
 
-/* ввод */
-cv.addEventListener('pointerdown',e=>{const r=cv.getBoundingClientRect();const sx=(e.clientX-r.left)*(cv.width/r.width),sy=(e.clientY-r.top)*(cv.height/r.height);if(tool==='awaitFirst'){first=s2w(sx,sy);preview=null;tool='awaitSecond';updateStatus('1-я точка');need();return;}if(tool==='awaitSecond'){preview=s2w(sx,sy);segs.push({a:first,b:preview});stack.push('seg');first=null;preview=null;tool='idle';updateStatus('Линия готова. Нажми «Линия» для новой.');need();return;}if(tool==='placeComp'){/* поиск сегмента и установка арматуры */tool='idle';updateStatus('Арматура поставлена');need();return;}},{passive:false});
-cv.addEventListener('pointermove',e=>{if(tool==='awaitSecond'&&first){const r=cv.getBoundingClientRect();const sx=(e.clientX-r.left)*(cv.width/r.width),sy=(e.clientY-r.top)*(cv.height/r.height);preview=s2w(sx,sy);need();}},{passive:true});
+  // жесты
+  const pointers=new Map();
+  let last1=null;
 
-/* кнопки */
-const $=id=>document.getElementById(id);
-$('btnLine').onclick=()=>{tool='awaitFirst';first=null;preview=null;updateStatus('Режим Линия: ткни 1-ю точку');};
-$('btnUndo').onclick=()=>{if(tool==='awaitSecond'&&first){first=null;preview=null;tool='idle';need();updateStatus('Отменено');return;}const last=stack.pop();if(!last){updateStatus('Нечего отменять');return;}if(last==='seg'&&segs.length)segs.pop();need();updateStatus('Отменено');};
-function zoomAt(f){const cx=cv.width/2,cy=cv.height/2;const ns=clampScale(view.scale*f);view.tx=cx-(cx-view.tx)*(ns/view.scale);view.ty=cy-(cy-view.ty)*(ns/view.scale);view.scale=ns;need();}
-$('btnPlus').onclick=()=>zoomAt(1.1);
-$('btnMinus').onclick=()=>zoomAt(1/1.1);
+  // отдельный слой линий
+  const linesCv=document.createElement('canvas');
+  const linesCtx=linesCv.getContext('2d',{alpha:true});
 
-fit();need();updateStatus('Готово (v877): 1) Линия, 2) первая точка, 3) вторая точка → линия. Для новой линии снова «Линия».');
+  // ===== Координаты (точно под палец) =====
+  function getCanvasPoint(e){
+    const r=cv.getBoundingClientRect();
+    const sx=(e.clientX - r.left)*DPR;
+    const sy=(e.clientY - r.top )*DPR;
+    return {sx,sy};
+  }
+  const screenToWorld=(sx,sy)=>({ x:(sx - photo.cx)/photo.s, y:(sy - photo.cy)/photo.s });
+  const worldToScreen=(x,y)=>({ x:photo.cx + x*photo.s, y:photo.cy + y*photo.s });
+
+  // ===== Init / ресайз =====
+  function fit(){ cv.width=Math.floor(innerWidth*DPR); cv.height=Math.floor(innerHeight*DPR); linesCv.width=cv.width; linesCv.height=cv.height; draw(); }
+  addEventListener('resize',fit);
+
+  function downscaleImage(img){
+    const maxSide=Math.max(img.width,img.height);
+    if(maxSide<=MAX_IMG_SIDE) return img;
+    const scale=MAX_IMG_SIDE/maxSide, w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+    const off=document.createElement('canvas'); off.width=w; off.height=h;
+    off.getContext('2d').drawImage(img,0,0,w,h);
+    const scaled=new Image(); scaled.src=off.toDataURL('image/jpeg',0.9); return scaled;
+  }
+  function loadFromFile(file){
+    if(!file){ toast('Фото не выбрано'); return; }
+    const url=URL.createObjectURL(file); const img=new Image();
+    img.onload=()=>{ URL.revokeObjectURL(url); const s=downscaleImage(img); if(s===img) applyImage(img); else s.onload=()=>applyImage(s); };
+    img.src=url;
+  }
+  function applyImage(img){
+    photo.img=img; photo.w=img.width; photo.h=img.height;
+    fitToScreen();
+    draw(); toast('Фото добавлено');
+  }
+
+  function fitToScreen(){
+    if(!photo.img){ draw(); return; }
+    const sx=(cv.width/DPR)/photo.w*0.9, sy=(cv.height/DPR)/photo.h*0.9;
+    photo.s=Math.max(0.02,Math.min(sx,sy))*DPR; photo.cx=cv.width/2; photo.cy=cv.height/2;
+  }
+
+  // ===== Снапы / геометрия =====
+  const normDeg=a=>((a%360)+360)%360;
+  const angDiff=(a,b)=>{ let d=Math.abs(a-b)%360; return d>180?360-d:d; };
+  let axisLock = { active:false, angle:null };
+  function clearAxisLock(){ axisLock.active=false; axisLock.angle=null; }
+
+  function allNodes(){ const arr=[]; for(const s of segs){ arr.push(s.a,s.b); } if(firstPt) arr.push(firstPt); return arr; }
+
+  function snapToNodes(raw){
+    const R=snap.radiusPx*DPR, Rx=snap.endStickPx*DPR;
+    const sx=photo.cx+raw.x*photo.s, sy=photo.cy+raw.y*photo.s;
+    let best=null, bestD=Infinity;
+    for(const n of allNodes()){
+      const ns=worldToScreen(n.x,n.y);
+      const d=Math.hypot(ns.x-sx,ns.y-sy);
+      const thr=(d<Rx?Rx:R);
+      if(d<thr && d<bestD){ bestD=d; best=n; }
+    }
+    return best? {x:best.x,y:best.y,_lockNode:true}: raw;
+  }
+  function snapToSegmentExtension(raw, tolPx=10){
+    if(segs.length===0) return raw;
+    const sx=photo.cx+raw.x*photo.s, sy=photo.cy+raw.y*photo.s;
+    let bestProj=null, bestDist=Infinity;
+    for(const s of segs){
+      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
+      const vx=B.x-A.x, vy=B.y-A.y; const L=Math.hypot(vx,vy); if(L<1) continue;
+      const nx=vx/L, ny=vy/L;
+      const wx=sx-A.x, wy=sy-A.y;
+      const proj=wx*nx+wy*ny;
+      const px=A.x+nx*proj, py=A.y+ny*proj;
+      const dist=Math.hypot(sx-px,sy-py);
+      if(dist<=tolPx*DPR && dist<bestDist){ bestDist=dist; bestProj={px,py}; }
+    }
+    if(bestProj){ const pWorld=screenToWorld(bestProj.px,bestProj.py); pWorld._lockAxis=true; return pWorld; }
+    return raw;
+  }
+  function adaptiveTol(start, end){
+    const L=Math.hypot(end.x-start.x, end.y-start.y);
+    const px=L*photo.s/DPR, tBase=snap.isoTolDeg;
+    if(px<40) return tBase+8; if(px<120) return tBase+4; if(px<240) return tBase; return Math.max(4, tBase-3);
+  }
+  function snapToAxes(raw,start,tolDeg){
+    if(!start) return raw;
+    const v={x:raw.x-start.x,y:raw.y-start.y}, L=Math.hypot(v.x,v.y);
+    if(L===0) return raw;
+    const targets=[0,90,180,-90, 30,150,210,330];
+    const ang=normDeg(Math.atan2(v.y,v.x)*180/Math.PI);
+    let bestA=axisLock.active?axisLock.angle:null, bestD=axisLock.active?angDiff(ang,bestA):181;
+    if(!axisLock.active){
+      for(const t of targets){ const d=angDiff(ang,normDeg(t)); if(d<bestD){bestD=d; bestA=t;} }
+      if(bestD<=tolDeg){ axisLock.active=true; axisLock.angle=bestA; }
+    }else{
+      if(bestD>tolDeg+8){ axisLock.active=false; axisLock.angle=null; return raw; }
+      bestA=axisLock.angle;
+    }
+    if(axisLock.active && bestA!=null){
+      const a=bestA*Math.PI/180;
+      return { x:start.x+Math.cos(a)*L, y:start.y+Math.sin(a)*L, _lockAxis:true };
+    }
+    return raw;
+  }
+  function previewWithSnap(raw,start){
+    if(!snap.on) return raw;
+    let p=raw;
+    const node=snapToNodes(p); if(node._lockNode) return node; p=node;
+    const ext =snapToSegmentExtension(p,10); if(ext._lockAxis){ axisLock.active=true; return ext; } p=ext;
+    p=snapToAxes(p,start,adaptiveTol(start,p)); return p;
+  }
+  function limitFinalMove(rawEndWorld, snappedEndWorld){
+    const rawS = worldToScreen(rawEndWorld.x, rawEndWorld.y);
+    const snpS = worldToScreen(snappedEndWorld.x, snappedEndWorld.y);
+    const dist = Math.hypot(rawS.x - snpS.x, rawS.y - snpS.y) / DPR; // CSS px
+    return (dist <= snap.finalLimitPx) ? snappedEndWorld : rawEndWorld;
+  }
+  function finalizeWithSnap(start, endRaw){
+    if(!snap.on) return endRaw;
+    const merged = snapToNodes(endRaw);
+    const withAxis = snapToAxes( snapToSegmentExtension(merged,10), start, Math.max(12, snap.isoTolDeg) );
+    return limitFinalMove(endRaw, withAxis);
+  }
+
+  // ===== Рендер =====
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,cv.width,cv.height);
+
+    if(photo.img){
+      ctx.save(); ctx.globalAlpha=photo.alpha;
+      ctx.translate(photo.cx,photo.cy); ctx.scale(photo.s,photo.s);
+      ctx.imageSmoothingEnabled=true; ctx.drawImage(photo.img,-photo.w/2,-photo.h/2,photo.w,photo.h);
+      ctx.restore();
+    }
+
+    drawIsoGrid();
+
+    linesCtx.clearRect(0,0,linesCv.width,linesCv.height);
+    linesCtx.lineCap='round'; linesCtx.lineJoin='round';
+    for(const s of segs){
+      const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
+      linesCtx.strokeStyle='#5b00bf'; linesCtx.lineWidth=lineWidthPx+2; linesCtx.globalAlpha=.7;
+      linesCtx.beginPath(); linesCtx.moveTo(A.x,A.y); linesCtx.lineTo(B.x,B.y); linesCtx.stroke();
+      linesCtx.strokeStyle='#8000ff'; linesCtx.lineWidth=lineWidthPx; linesCtx.globalAlpha=1;
+      linesCtx.beginPath(); linesCtx.moveTo(A.x,A.y); linesCtx.lineTo(B.x,B.y); linesCtx.stroke();
+    }
+
+    // точки
+    if(pts.show){
+      const size = pts.sizePx*DPR;
+      ctx.save();
+      const dot=p=>{ const S=worldToScreen(p.x,p.y);
+        ctx.beginPath(); ctx.fillStyle='rgba(91,0,191,.35)'; ctx.arc(S.x,S.y,size*0.9,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.fillStyle='#8000ff'; ctx.arc(S.x,S.y,size*0.65,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.fillStyle='#fff'; ctx.arc(S.x,S.y,size*0.28,0,Math.PI*2); ctx.fill();
+      };
+      for(const s of segs){ dot(s.a); dot(s.b); }
+      if(firstPt){ dot(firstPt); }
+      if(previewPt){ const S=worldToScreen(previewPt.x,previewPt.y);
+        ctx.beginPath(); ctx.fillStyle='#22c55e'; ctx.arc(S.x,S.y,size*0.5,0,Math.PI*2); ctx.fill(); }
+      ctx.restore();
+    }
+
+    ctx.drawImage(linesCv,0,0);
+
+    if(firstPt && previewPt){
+      const A=worldToScreen(firstPt.x,firstPt.y), B=worldToScreen(previewPt.x,previewPt.y);
+      ctx.save(); ctx.setLineDash([8,8]); ctx.strokeStyle='#16a34a'; ctx.lineWidth=Math.max(3,lineWidthPx-2);
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    }
+  }
+
+  function drawIsoGrid(){
+    const a=grid.alpha; if(a<=0) return;
+    const base=[grid.angleDeg,90,180-grid.angleDeg];
+    const margin=2000;
+    ctx.save();
+    for(const ang of base){
+      const r=ang*Math.PI/180, vx=Math.cos(r), vy=Math.sin(r), px=-vy, py=vx;
+      const need=Math.ceil((Math.max(cv.width,cv.height)+margin*2)/(grid.step*photo.s))+2;
+      for(let k=-need;k<=need;k++){
+        const bx=px*k*grid.step, by=py*k*grid.step;
+        const A=worldToScreen(bx-vx*100000, by-vy*100000);
+        const B=worldToScreen(bx+vx*100000, by+vy*100000);
+        const major=(k%3===0);
+        ctx.globalAlpha=(major?a*1.3:a);
+        ctx.strokeStyle= major? '#b7bcc8' : '#cfd3dc';
+        ctx.lineWidth= major? 1.6 : 1.0;
+        ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+      }
+    }
+    ctx.restore(); ctx.globalAlpha=1;
+  }
+
+  // ===== Ластик =====
+  const ERASER_HIT = 18, ERASER_GAP = 18, ERASER_DRAW_STEP = 10;
+  function distanceToSegmentScreen(sx,sy, A,B){
+    const vx=B.x-A.x, vy=B.y-A.y, wx=sx-A.x, wy=sy-A.y;
+    const c1=vx*wx+vy*wy; if(c1<=0) return Math.hypot(sx-A.x,sy-A.y);
+    const c2=vx*vx+vy*vy; if(c2<=c1) return Math.hypot(sx-B.x,sy-B.y);
+    const t=c1/c2, px=A.x+t*vx, py=A.y+t*vy; return Math.hypot(sx-px,sy-py);
+  }
+  function splitSegmentAtScreen(i,sx,sy,gapPx=ERASER_GAP){
+    const s=segs[i]; const A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
+    const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(len2===0) return false;
+    const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
+    const lenWorld=Math.hypot(s.b.x-s.a.x,s.b.y-s.a.y);
+    const gapT=Math.min(0.45,(gapPx/DPR)/(photo.s*lenWorld));
+    const P0={x:s.a.x+(s.b.x-s.a.x)*Math.max(0,t-gapT), y:s.a.y+(s.b.y-s.a.y)*Math.max(0,t-gapT)};
+    const P1={x:s.a.x+(s.b.x-s.a.x)*Math.min(1,t+gapT), y:s.a.y+(s.b.y-s.a.y)*Math.min(1,t+gapT)};
+    const left =(t-gapT>0.02)?{a:{...s.a},b:P0}:null;
+    const right=(t+gapT<0.98)?{a:P1,b:{...s.b}}:null;
+    segs.splice(i,1,...[left,right].filter(Boolean));
+    return true;
+  }
+  function eraseAtPoint(sx,sy){
+    let bestI=-1,bestD=Infinity;
+    for(let i=0;i<segs.length;i++){
+      const s=segs[i], A=worldToScreen(s.a.x,s.a.y), B=worldToScreen(s.b.x,s.b.y);
+      const d=distanceToSegmentScreen(sx,sy,A,B);
+      if(d<bestD){bestD=d; bestI=i;}
+    }
+    if(bestI!==-1 && bestD<=ERASER_HIT*DPR){ splitSegmentAtScreen(bestI,sx,sy); draw(); return true; }
+    return false;
+  }
+
+  // ===== Жесты (везде passive:false) =====
+  cv.addEventListener('pointerdown', e=>{
+    if(canvasFrozen()) return;
+    e.preventDefault();
+    cv.setPointerCapture?.(e.pointerId);
+    const {sx,sy}=getCanvasPoint(e);
+    const p={x:sx,y:sy}; pointers.set(e.pointerId,p);
+    if(pointers.size===1) last1=p;
+
+    if(mode==='line' && firstPt){
+      let w=screenToWorld(p.x,p.y);
+      previewPt = previewWithSnap(w, firstPt); draw();
+    }else if(mode==='erase'){
+      eraseAtPoint(p.x,p.y);
+    }
+  }, {passive:false});
+
+  cv.addEventListener('pointermove', e=>{
+    if(canvasFrozen()) return;
+    e.preventDefault();
+    if(!pointers.has(e.pointerId)) return;
+    const {sx,sy}=getCanvasPoint(e);
+    const cur={x:sx,y:sy};
+    const prev=pointers.get(e.pointerId); pointers.set(e.pointerId,cur);
+
+    // масштаб/панорама 2 пальцами — всегда
+    if(pointers.size>=2){
+      const ids=[...pointers.keys()];
+      const a=pointers.get(ids[0]), b=pointers.get(ids[1]);
+      const ap=(ids[0]===e.pointerId?prev:a), bp=(ids[1]===e.pointerId?prev:b);
+      const dPrev=Math.hypot(ap.x-bp.x,ap.y-bp.y), dCur=Math.hypot(a.x-b.x,a.y-b.y);
+      const cCur={x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+      if(dPrev>0){
+        const f=dCur/dPrev, dx=cCur.x-photo.cx, dy=cCur.y-photo.cy;
+        photo.cx += dx-dx*f; photo.cy += dy-dy*f;
+        photo.s = Math.max(0.02*DPR, Math.min(photo.s*f, 50*DPR));
+      }
+      draw(); last1=null; return;
+    }
+
+    // панорама одним пальцем — только в режиме Рука
+    if(mode==='hand' && photo.img){
+      photo.cx += cur.x-last1.x; photo.cy += cur.y-last1.y; last1=cur; draw();
+    }
+
+    // превью второй точки
+    if(mode==='line' && firstPt){
+      let w=screenToWorld(cur.x,cur.y);
+      previewPt = previewWithSnap(w, firstPt); draw();
+    }
+
+    // ластик — непрерывно
+    if(mode==='erase'){
+      const step=ERASER_DRAW_STEP*DPR, dx=cur.x-prev.x, dy=cur.y-prev.y, L=Math.hypot(dx,dy);
+      if(L>0){ const n=Math.max(1,Math.floor(L/step)); for(let i=1;i<=n;i++){ const sx=prev.x+dx*i/n, sy=prev.y+dy*i/n; eraseAtPoint(sx,sy); } }
+    }
+  }, {passive:false});
+
+  function endPointers(e){
+    pointers.delete(e.pointerId);
+    last1=(pointers.size===1)?[...pointers.values()][0]:null;
+  }
+
+  cv.addEventListener('pointerup', e=>{
+    if(canvasFrozen()) return;
+    e.preventDefault();
+    endPointers(e);
+
+    if(mode==='line'){
+      const {sx,sy}=getCanvasPoint(e);
+      const raw=screenToWorld(sx,sy);
+      if(!firstPt){
+        firstPt = snap.on ? snapToNodes(raw) : raw;
+        previewPt=null; clearAxisLock(); draw(); return;
+      }
+      const proposed = snap.on ? finalizeWithSnap(firstPt, (previewPt||raw)) : raw;
+      const final = limitFinalMove(raw, proposed);
+      segs.push({a:firstPt,b:final});
+      firstPt=null; previewPt=null; mode='hand'; clearAxisLock(); draw(); return;
+    }
+  }, {passive:false});
+
+  // колесо — зум к курсору
+  cv.addEventListener('wheel', e=>{
+    if(canvasFrozen()) return;
+    e.preventDefault();
+    if(!photo.img) return;
+    const r=cv.getBoundingClientRect();
+    const sx=(e.clientX-r.left)*DPR, sy=(e.clientY-r.top)*DPR;
+    const f=e.deltaY<0?1.12:0.9;
+    const dx=sx-photo.cx, dy=sy-photo.cy;
+    photo.cx += dx-dx*f; photo.cy += dy-dy*f;
+    photo.s = Math.max(0.02*DPR, Math.min(photo.s*f, 50*DPR));
+    draw();
+  }, {passive:false});
+
+  // ===== Кнопки =====
+  $('btnHand').onclick  = ()=>{ mode='hand'; toast('Режим: рука (перетаскивание одним пальцем). Pinch-zoom — всегда.'); };
+  $('btnFit').onclick   = ()=>{ fitToScreen(); draw(); };
+  $('btnLine').onclick  = ()=>{ mode='line'; firstPt=null; previewPt=null; toast('Линия: поставь 2 точки'); };
+  $('btnErase').onclick = ()=>{ mode='erase'; toast('Ластик: проведи по линии'); };
+  $('btnCamera').onclick= ()=> $('fileCamera').click();
+  $('fileCamera').onchange  = e=> loadFromFile(e.target.files?.[0]);
+  $('btnGallery').onclick   = ()=> $('fileGallery').click();
+  $('fileGallery').onchange = e=> loadFromFile(e.target.files?.[0]);
+  $('btnUndoTop').onclick   = ()=>{ if(firstPt && mode==='line'){ firstPt=null; previewPt=null; mode='hand'; } else if(segs.length){ segs.pop(); } clearAxisLock(); draw(); };
+
+  // Панель
+  const wrap=$('panelWrap'), panel=$('panel'), backdrop=$('panelBackdrop');
+  const openPanel = ()=>{ panelOpen=true; wrap.classList.add('open'); wrap.setAttribute('aria-hidden','false'); cv.style.pointerEvents='none'; };
+  const closePanel= ()=>{ panelOpen=false; wrap.classList.remove('open'); wrap.setAttribute('aria-hidden','true'); cv.style.pointerEvents='auto'; };
+  $('btnSettings').onclick=openPanel; $('btnDone').onclick=closePanel; backdrop.onclick=closePanel;
+  ['pointerdown','pointermove','pointerup','touchstart','touchmove','touchend','mousedown','mousemove','mouseup','wheel','click'].forEach(ev=>{
+    panel.addEventListener(ev, ev2=>ev2.stopPropagation(), {passive:false});
+  });
+
+  // Настройки
+  $('btnExport').onclick = ()=>{ const url=cv.toDataURL('image/png',0.95); const a=document.createElement('a'); a.href=url; a.download='IsoPipe.png'; a.click(); };
+  $('btnClear').onclick  = ()=>{ segs.length=0; firstPt=null; previewPt=null; mode='hand'; draw(); };
+
+  $('lineWidth').oninput=e=>{ lineWidthPx=+e.target.value||6; $('lineWidthVal').textContent=lineWidthPx; draw(); };
+  $('showPoints').onchange=e=>{ pts.show=e.target.checked; draw(); };
+  $('ptSize').oninput=e=>{ pts.sizePx=+e.target.value||10; $('ptSizeVal').textContent=pts.sizePx; draw(); };
+
+  $('gridAlpha').oninput=e=>{ grid.alpha=(+e.target.value||0)/100; $('gridAlphaVal').textContent=e.target.value+'%'; draw(); };
+  $('gridStep').oninput =e=>{ grid.step=+e.target.value||200; $('gridStepVal').textContent=grid.step; draw(); };
+  $('gridAngle').oninput=e=>{ grid.angleDeg=+e.target.value||30; $('gridAngleVal').textContent=grid.angleDeg; draw(); };
+
+  $('snapOn').onchange  =e=>{ snap.on=e.target.checked; clearAxisLock(); };
+  $('snapRadius').oninput=e=>{ snap.radiusPx=+e.target.value||18; $('snapRadiusVal').textContent=e.target.value; };
+  $('isoTol').oninput   =e=>{ snap.isoTolDeg=+e.target.value||10; $('isoTolVal').textContent=e.target.value; };
+  $('endStick').oninput =e=>{ snap.endStickPx=+e.target.value||28; $('endStickVal').textContent=e.target.value; };
+  $('finalSnapLimit').oninput=e=>{ snap.finalLimitPx=+e.target.value||6; $('finalSnapLimitVal').textContent=e.target.value; };
+
+  // старт
+  fit();
+  toast('Pinch-zoom включён. Режим «Рука» для перетаскивания одним пальцем.');
 })();
 </script>
 </body>
