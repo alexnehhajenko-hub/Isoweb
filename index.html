@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — snap to joints</title>
+<title>Pro Trace — snap + long-press endpoint edit</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -143,17 +143,19 @@ document.getElementById('btnClearBg').onclick=()=>{ bg=null; need(); updateStatu
 const segs=[];              // {a:{x,y}, b:{x,y}}
 const comps=[];             // {segIndex,t,type}
 const stack=[];             // 'seg' | 'comp'
-let tool='idle';            // 'idle' | 'awaitFirst' | 'awaitSecond' | 'placeComp'
+let tool='idle';            // 'idle' | 'awaitFirst' | 'awaitSecond' | 'placeComp' | 'editEnd'
 let first=null, preview=null;
 let currentComp='valve';    // valve | check | pump
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
-const SNAP_PX = 18 * DPR;   // радиус притяжения к стыкам (на экране)
+const SNAP_PX = 18 * DPR;   // притяжение к стыкам
+const LONG_PRESS_MS = 700;  // долгое нажатие для правки конца
 
 /* ===== статус ===== */
 function updateStatus(msg=''){
   const t = tool==='awaitFirst' ? 'Жду 1-ю точку' :
             tool==='awaitSecond' ? 'Жду 2-ю точку' :
-            tool==='placeComp' ? 'Арматура' : 'Готов';
+            tool==='placeComp' ? 'Арматура' :
+            tool==='editEnd' ? 'Правка конца' : 'Готов';
   statusEl.textContent = `Статус: ${msg} | ${t} | Линия ${params.linePx}px | Арматура×${params.compScale.toFixed(2)}`;
 }
 
@@ -168,15 +170,11 @@ function darker(hex,k=0.45){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i
 function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; const L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
 function compBasis(seg,t){ const g=segGeom(seg); return {x:seg.a.x+g.nx*g.L*t, y:seg.a.y+g.ny*g.L*t, ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
 
-/* ===== SNAP: поиск ближайшего стыка (конца сегмента) ===== */
-function allVertices(){
-  const pts=[];
-  for(const s of segs){ pts.push(s.a, s.b); }
-  return pts;
-}
+/* ===== SNAP: стыки ===== */
+function allVertices(){ const pts=[]; for(const s of segs){ pts.push({seg:s,ref:'a',p:s.a}); pts.push({seg:s,ref:'b',p:s.b}); } return pts; }
 function findSnapVertexScreen(sx,sy){
   let best=null, bd=1e9;
-  for(const p of allVertices()){
+  for(const {p} of allVertices()){
     const sp=w2s(p.x,p.y);
     const d=Math.hypot(sp.x-sx, sp.y-sy);
     if(d<bd){ bd=d; best=p; }
@@ -250,7 +248,7 @@ function drawCheck(seg,t){
   const ux=b.ux, uy=b.uy, nx=b.nx, ny=b.ny;
   const L={x:b.x-ux*bodyLen/2,y:b.y-uy*bodyLen/2};
   const R={x:b.x+ux*bodyLen/2,y:b.y+uy*bodyLen/2};
-  const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneL};
+  const P1={x:L.x-ux*coneL,y:L.y-uy*coneL}, P2={x:R.x+ux*coneL,y:R.y+uy*coneЛ};
 
   ctx.save(); ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
   ctx.lineJoin='round'; ctx.lineCap='round';
@@ -316,8 +314,12 @@ function drawPump(seg,t){
   ctx.restore();
 }
 
+/* ===== правка конца: состояние ===== */
+let snapPreview=null; // {x,y}
+let edit=null;        // {segIndex, end:'a'|'b', start:{x,y}, axis:null|'x'|'y'}
+let pressTimer=null;
+
 /* ===== общий рендер ===== */
-let snapPreview=null; // {x,y} — куда притянули
 function draw(){
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
@@ -347,12 +349,30 @@ function draw(){
     ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
   }
 
-  // подсветка притягивания
+  // подсветка притяжения
   if(snapPreview){
     const sp=w2s(snapPreview.x, snapPreview.y);
     ctx.setTransform(1,0,0,1,0,0);
     ctx.beginPath(); ctx.arc(sp.x, sp.y, 9, 0, Math.PI*2);
     ctx.lineWidth=2; ctx.strokeStyle='rgba(0,180,255,.9)'; ctx.stroke();
+  }
+
+  // гайд для правки конца
+  if(edit){
+    const seg=segs[edit.segIndex], P=seg[edit.end];
+    const sp=w2s(P.x,P.y);
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle='rgba(0,180,255,.9)'; ctx.beginPath(); ctx.arc(sp.x,sp.y,7,0,Math.PI*2); ctx.fill();
+    if(edit.axis){
+      ctx.setLineDash([8,6]); ctx.lineWidth=2; ctx.strokeStyle='rgba(0,180,255,.8)';
+      ctx.beginPath();
+      if(edit.axis==='x'){ // горизонтальная направляющая
+        ctx.moveTo(0, sp.y); ctx.lineTo(cv.width, sp.y);
+      }else{
+        ctx.moveTo(sp.x, 0); ctx.lineTo(sp.x, cv.height);
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
   }
 }
 let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
@@ -370,6 +390,18 @@ function findNearestSegment(sx,sy,maxDistPx=28){
   }
   return (best!==-1 && bd<=maxDistPx)?{segIndex:best,t:bt}:null;
 }
+function findNearestEndpoint(sx,sy){ // поиск ближайшего конца сегмента (в экранах)
+  let res=null, bd=1e9;
+  segs.forEach((s,i)=>{
+    const pts=[{end:'a',p:s.a},{end:'b',p:s.b}];
+    for(const {end,p} of pts){
+      const sp=w2s(p.x,p.y);
+      const d=Math.hypot(sp.x-sx, sp.y-sy);
+      if(d<bd){ bd=d; res={segIndex:i,end,p,dist:d}; }
+    }
+  });
+  return (res && bd<=SNAP_PX) ? res : null;
+}
 
 /* ===== ввод ===== */
 const pointers=new Map();
@@ -381,11 +413,22 @@ function canvasXY(e){ const r=cv.getBoundingClientRect(); return { sx:(e.clientX
 function centroid(){ const a=[...pointers.values()]; if(!a.length) return null; let sx=0,sy=0; for(const p of a){ sx+=p.sx; sy+=p.sy; } return {sx:sx/a.length, sy:sy/a.length}; }
 
 cv.addEventListener('pointerdown', e=>{
+  e.preventDefault();
   const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
   if(pointers.size===2){
     const [p0,p1]=[...pointers.values()];
     prevCenter=centroid(); prevDist=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
     return;
+  }
+
+  // долгий тап на конце для правки
+  const nearEnd=findNearestEndpoint(sx,sy);
+  if(nearEnd){
+    clearTimeout(pressTimer);
+    pressTimer=setTimeout(()=>{
+      edit={segIndex:nearEnd.segIndex,end:nearEnd.end,start:{sx,sy},axis:null};
+      tool='editEnd'; updateStatus('Правка конца: потяни по оси'); need();
+    }, LONG_PRESS_MS);
   }
 
   if(tool==='placeComp'){
@@ -416,6 +459,36 @@ cv.addEventListener('pointermove', e=>{
   if(!pointers.has(e.pointerId)) return;
   const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
 
+  // если долгое нажатие ещё идёт и пользователь сдвинул — отменим запуск
+  if(pressTimer){
+    const p=[...pointers.values()][0];
+    if(Math.hypot((p?.sx??sx)-sx,(p?.sy??sy)-sy)>8*DPR){ clearTimeout(pressTimer); pressTimer=null; }
+  }
+
+  if(tool==='editEnd' && edit){
+    const seg=segs[edit.segIndex], end=edit.end, other=end==='a'?seg.b:seg.a;
+    const w=s2w(sx,sy);
+
+    // ось выбираем по первому движению
+    if(!edit.axis){
+      const dx=Math.abs(sx-edit.start.sx), dy=Math.abs(sy-edit.start.sy);
+      edit.axis = dx>dy ? 'x' : 'y';
+    }
+
+    // притягивание к другим концам
+    const snap=findSnapVertexScreen(sx,sy);
+    let nx=w.x, ny=w.y;
+    if(snap){ nx=snap.pt.x; ny=snap.pt.y; }
+
+    // ограничение по оси
+    if(edit.axis==='x'){ ny=other.y; }
+    else { nx=other.x; }
+
+    seg[end]={x:nx,y:ny};
+    need();
+    return;
+  }
+
   if(pointers.size===2){
     const [p0,p1]=[...pointers.values()];
     const nowD=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
@@ -432,7 +505,7 @@ cv.addEventListener('pointermove', e=>{
     prevCenter=nowC; prevDist=nowD; return;
   }
 
-  if(panStart){
+  if(panStart && tool!=='awaitSecond' && !edit){
     const moved = Math.hypot(sx-panStart.sx, sy-panStart.sy);
     if(!isPanning && moved>PAN_THRESH) isPanning=true;
     if(isPanning && panLast){
@@ -447,19 +520,25 @@ cv.addEventListener('pointermove', e=>{
     if(snap){ preview={x:snap.pt.x,y:snap.pt.y}; snapPreview=preview; }
     else { preview=s2w(sx,sy); snapPreview=null; }
     need();
-  }else{
-    snapPreview=null; // чтобы не светился, когда не рисуем
+  }else if(!edit){
+    snapPreview=null;
   }
-},{passive:true});
+},{passive:false});
 
 cv.addEventListener('pointerup', e=>{
   pointers.delete(e.pointerId);
+  clearTimeout(pressTimer); pressTimer=null;
+
+  if(tool==='editEnd' && edit){
+    tool='idle'; updateStatus('Готово'); need(); edit=null; return;
+  }
+
   if(pointers.size===0){ panStart=null; panLast=null; isPanning=false; prevCenter=null; prevDist=null; }
-},{passive:true});
+},{passive:false});
 
 /* ===== кнопки и панель ===== */
 const $=id=>document.getElementById(id);
-$('btnLine').onclick =()=>{ tool='awaitFirst'; first=null; preview=null; snapPreview=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
+$('btnLine').onclick =()=>{ tool='awaitFirst'; first=null; preview=null; snapPreview=null; edit=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
 $('btnUndo').onclick =()=>{
   if(tool==='awaitSecond' && first){ first=null; preview=null; snapPreview=null; tool='idle'; need(); updateStatus('Отменено'); return; }
   const last=stack.pop(); if(!last){ updateStatus('Нечего отменять'); return; }
@@ -495,7 +574,7 @@ rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15
 
 /* ===== старт ===== */
 fit(); need();
-updateStatus('Готово: Линия → Точка1 → Точка2. «Магнит» притягивает к стыкам (концам труб).');
+updateStatus('Готово: Линия → Точка1 → Точка2. Магнит к стыкам. Долгое нажатие по стыку — правка по оси.');
 })();
 </script>
 </body>
