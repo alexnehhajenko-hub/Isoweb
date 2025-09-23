@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — onefile (photo + taps)</title>
+<title>Pro Trace — snap to joints</title>
 <style>
   :root{--violet:#6b1dff; --violet2:#7c5bff; --border:#e7e3f7}
   html,body{margin:0;height:100%;background:#f2f3f6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
@@ -147,7 +147,9 @@ let tool='idle';            // 'idle' | 'awaitFirst' | 'awaitSecond' | 'placeCom
 let first=null, preview=null;
 let currentComp='valve';    // valve | check | pump
 const params={ linePx:10, lineColor:'#1f6bff', compScale:1.15 };
+const SNAP_PX = 18 * DPR;   // радиус притяжения к стыкам (на экране)
 
+/* ===== статус ===== */
 function updateStatus(msg=''){
   const t = tool==='awaitFirst' ? 'Жду 1-ю точку' :
             tool==='awaitSecond' ? 'Жду 2-ю точку' :
@@ -166,6 +168,22 @@ function darker(hex,k=0.45){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i
 function segGeom(seg){ const vx=seg.b.x-seg.a.x, vy=seg.b.y-seg.a.y; const L=Math.hypot(vx,vy)||1; return {vx,vy,L,nx:vx/L,ny:vy/L}; }
 function compBasis(seg,t){ const g=segGeom(seg); return {x:seg.a.x+g.nx*g.L*t, y:seg.a.y+g.ny*g.L*t, ux:g.nx,uy:g.ny,nx:-g.ny,ny:g.nx}; }
 
+/* ===== SNAP: поиск ближайшего стыка (конца сегмента) ===== */
+function allVertices(){
+  const pts=[];
+  for(const s of segs){ pts.push(s.a, s.b); }
+  return pts;
+}
+function findSnapVertexScreen(sx,sy){
+  let best=null, bd=1e9;
+  for(const p of allVertices()){
+    const sp=w2s(p.x,p.y);
+    const d=Math.hypot(sp.x-sx, sp.y-sy);
+    if(d<bd){ bd=d; best=p; }
+  }
+  return (best && bd<=SNAP_PX) ? {pt:best, dist:bd} : null;
+}
+
 /* ===== отрисовка ===== */
 function drawSegments(){
   ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
@@ -178,8 +196,7 @@ function drawSegments(){
   }
 }
 
-/* ——— Арматура ——— */
-/* Кран (шаровый) */
+/* ——— Арматура (как раньше) ——— */
 function drawValve(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4;
@@ -194,7 +211,6 @@ function drawValve(seg,t){
   ctx.lineJoin='round'; ctx.lineCap='round';
   ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
 
-  // корпус
   ctx.beginPath();
   ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
   ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -203,7 +219,6 @@ function drawValve(seg,t){
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // переходы к трубе
   ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR); ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);
   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -212,7 +227,6 @@ function drawValve(seg,t){
   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR); ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR);
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // шар и ручка
   ctx.beginPath(); ctx.arc(b.x,b.y,ballR,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#1b1b1b'; ctx.stroke();
   const top={x:b.x+nx*bodyR,y:b.y+ny*bodyR};
   const neckTop={x:top.x+nx*neckH,y:top.y+ny*neckH};
@@ -229,7 +243,6 @@ function drawValve(seg,t){
   ctx.restore();
 }
 
-/* Клапан: корпус как у шарового (без ручки) + белый треугольник вдоль трубы */
 function drawCheck(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const bodyLen=base*10.5, bodyR=base*2.6, coneL=base*3.2, pipeR=base*1.4;
@@ -243,7 +256,6 @@ function drawCheck(seg,t){
   ctx.lineJoin='round'; ctx.lineCap='round';
   ctx.fillStyle='#6b1dff'; ctx.strokeStyle='#2b145f'; ctx.lineWidth=2/view.scale;
 
-  // корпус
   ctx.beginPath();
   ctx.moveTo(L.x-nx*bodyR, L.y-ny*bodyR);
   ctx.lineTo(R.x-nx*bodyR, R.y-ny*bodyR);
@@ -252,7 +264,6 @@ function drawCheck(seg,t){
   ctx.arc(L.x,L.y,bodyR, Math.atan2(ny,nx), Math.atan2(-ny,nx), false);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // переходы к трубе
   ctx.beginPath(); ctx.moveTo(P1.x-nx*pipeR,P1.y-ny*pipeR);
   ctx.lineTo(L.x-nx*bodyR,L.y-ny*bodyR); ctx.lineTo(L.x+nx*bodyR,L.y+ny*bodyR);
   ctx.lineTo(P1.x+nx*pipeR,P1.y+ny*pipeR); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -261,7 +272,6 @@ function drawCheck(seg,t){
   ctx.lineTo(P2.x-nx*pipeR,P2.y-ny*pipeR); ctx.lineTo(P2.x+nx*pipeR,P2.y+ny*pipeR);
   ctx.lineTo(R.x+nx*bodyR,R.y+ny*bodyR); ctx.closePath(); ctx.fill(); ctx.stroke();
 
-  // белый треугольник вдоль трубы: основание по нормали, вершина по направлению
   const triBase=base*3.2, triRise=base*3.0;
   const A={x:b.x - nx*triBase/2, y:b.y - ny*triBase/2};
   const B={x:b.x + nx*triBase/2, y:b.y + ny*triBase/2};
@@ -272,7 +282,6 @@ function drawCheck(seg,t){
   ctx.restore();
 }
 
-/* Насос: мотор «сверху» относительно экрана */
 function drawPump(seg,t){
   const b=compBasis(seg,t), base=params.linePx*params.compScale;
   const volR=base*4.2, flLen=base*2.6, flHalf=base*1.6;
@@ -307,6 +316,8 @@ function drawPump(seg,t){
   ctx.restore();
 }
 
+/* ===== общий рендер ===== */
+let snapPreview=null; // {x,y} — куда притянули
 function draw(){
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
@@ -322,24 +333,36 @@ function draw(){
     else if(c.type==='pump') drawPump(seg,c.t);
   }
 
+  // превью линии
   if(tool==='awaitSecond' && first && preview){
     ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
     ctx.strokeStyle=params.lineColor; ctx.lineWidth=Math.max(3,params.linePx-2)/view.scale;
     ctx.beginPath(); ctx.moveTo(first.x,first.y); ctx.lineTo(preview.x,preview.y); ctx.stroke();
   }
+
+  // первая точка
   if(first){
     const p=w2s(first.x,first.y);
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill();
   }
+
+  // подсветка притягивания
+  if(snapPreview){
+    const sp=w2s(snapPreview.x, snapPreview.y);
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.beginPath(); ctx.arc(sp.x, sp.y, 9, 0, Math.PI*2);
+    ctx.lineWidth=2; ctx.strokeStyle='rgba(0,180,255,.9)'; ctx.stroke();
+  }
 }
 let raf=0, dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{ raf=0; if(dirty){ dirty=false; draw(); } }); } }
 
 /* ===== выбор сегмента для арматуры ===== */
+function w2sPoint(p){ return w2s(p.x,p.y); }
 function findNearestSegment(sx,sy,maxDistPx=28){
   let best=-1,bd=1e9,bt=0;
   for(let i=0;i<segs.length;i++){
-    const s=segs[i]; const A=w2s(s.a.x,s.a.y), B=w2s(s.b.x,s.b.y);
+    const s=segs[i]; const A=w2sPoint(s.a), B=w2sPoint(s.b);
     const vx=B.x-A.x, vy=B.y-A.y, len2=vx*vx+vy*vy; if(!len2) continue;
     const t=Math.max(0,Math.min(1,((sx-A.x)*vx+(sy-A.y)*vy)/len2));
     const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
@@ -372,8 +395,19 @@ cv.addEventListener('pointerdown', e=>{
     return;
   }
 
-  if(tool==='awaitFirst'){ first=s2w(sx,sy); preview=null; tool='awaitSecond'; updateStatus('1-я точка'); need(); return; }
-  if(tool==='awaitSecond'){ preview=s2w(sx,sy); segs.push({a:first,b:preview}); stack.push('seg'); first=null; preview=null; tool='idle'; updateStatus('Линия готова. Нажми «Линия» для новой.'); need(); return; }
+  if(tool==='awaitFirst'){
+    const snap=findSnapVertexScreen(sx,sy);
+    first = snap ? {x:snap.pt.x, y:snap.pt.y} : s2w(sx,sy);
+    preview=null; tool='awaitSecond'; updateStatus('1-я точка'); need(); return;
+  }
+
+  if(tool==='awaitSecond'){
+    const snap=findSnapVertexScreen(sx,sy);
+    const end = snap ? {x:snap.pt.x, y:snap.pt.y} : s2w(sx,sy);
+    segs.push({a:first,b:end}); stack.push('seg');
+    first=null; preview=null; snapPreview=null; tool='idle';
+    updateStatus('Линия готова. Нажми «Линия» для новой.'); need(); return;
+  }
 
   panStart={sx,sy}; panLast={sx,sy}; isPanning=false;
 },{passive:false});
@@ -408,7 +442,14 @@ cv.addEventListener('pointermove', e=>{
     }
   }
 
-  if(tool==='awaitSecond' && first){ preview=s2w(sx,sy); need(); }
+  if(tool==='awaitSecond' && first){
+    const snap=findSnapVertexScreen(sx,sy);
+    if(snap){ preview={x:snap.pt.x,y:snap.pt.y}; snapPreview=preview; }
+    else { preview=s2w(sx,sy); snapPreview=null; }
+    need();
+  }else{
+    snapPreview=null; // чтобы не светился, когда не рисуем
+  }
 },{passive:true});
 
 cv.addEventListener('pointerup', e=>{
@@ -418,9 +459,9 @@ cv.addEventListener('pointerup', e=>{
 
 /* ===== кнопки и панель ===== */
 const $=id=>document.getElementById(id);
-$('btnLine').onclick =()=>{ tool='awaitFirst'; first=null; preview=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
+$('btnLine').onclick =()=>{ tool='awaitFirst'; first=null; preview=null; snapPreview=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
 $('btnUndo').onclick =()=>{
-  if(tool==='awaitSecond' && first){ first=null; preview=null; tool='idle'; need(); updateStatus('Отменено'); return; }
+  if(tool==='awaitSecond' && first){ first=null; preview=null; snapPreview=null; tool='idle'; need(); updateStatus('Отменено'); return; }
   const last=stack.pop(); if(!last){ updateStatus('Нечего отменять'); return; }
   if(last==='seg' && segs.length) segs.pop();
   else if(last==='comp' && comps.length) comps.pop();
@@ -454,7 +495,7 @@ rangeComp.oninput=()=>{ params.compScale=clamp(parseFloat(rangeComp.value)||1.15
 
 /* ===== старт ===== */
 fit(); need();
-updateStatus('Готово: 1) «Линия», 2) первая точка, 3) вторая → сегмент. Фон: камера/галерея.');
+updateStatus('Готово: Линия → Точка1 → Точка2. «Магнит» притягивает к стыкам (концам труб).');
 })();
 </script>
 </body>
