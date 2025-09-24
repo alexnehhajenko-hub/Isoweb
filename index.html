@@ -1,87 +1,222 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Pro Trace 3D</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #111;
-    }
-    #status {
-      position: absolute;
-      bottom: 5px;
-      left: 5px;
-      color: #0f0;
-      font-size: 14px;
-      font-family: monospace;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pro Trace 3D — трубы по двум тапам</title>
+<style>
+  html,body{height:100%;margin:0;background:#0f0f0f;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #app{position:fixed;inset:0}
+  .bar{position:fixed;left:10px;top:10px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
+  .btn{height:42px;padding:0 14px;border:0;border-radius:12px;background:linear-gradient(180deg,#7c5bff,#6b1dff);color:#fff;font-weight:800}
+  .btn.ghost{background:#2a2a2a}
+  .status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.65);padding:6px 8px;border-radius:8px;font-size:12px;z-index:10}
+</style>
 </head>
 <body>
-  <div id="status">Статус: загружаю 3D…</div>
+<div id="app"></div>
 
-  <!-- three.js -->
-  <script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
-  <!-- OrbitControls из твоего репозитория -->
-  <script src="lib/OrbitControls.js"></script>
+<div class="bar">
+  <button id="btnLine" class="btn">📐 Линия</button>
+  <button id="btnUndo" class="btn ghost">↩ Назад</button>
+  <button id="btnClear" class="btn ghost">🧹 Очистить</button>
+</div>
 
-  <script>
-    let scene, camera, renderer, controls;
+<div id="status" class="status">Статус: Загружаю 3D…</div>
 
-    init();
-    animate();
+<!-- three.js CDN + локальный OrbitControls -->
+<script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
 
-    function init() {
-      // сцена
-      scene = new THREE.Scene();
+<script>
+(()=>{"use strict";
+const DPR=Math.max(1,Math.min(2,devicePixelRatio||1));
+const app=document.getElementById('app');
+const statusEl=document.getElementById('status');
+const updateStatus=(t)=>statusEl.textContent='Статус: '+t;
 
-      // камера
-      camera = new THREE.PerspectiveCamera(
-        75, window.innerWidth / window.innerHeight, 0.1, 1000
-      );
-      camera.position.set(0, 5, 10);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(DPR); renderer.setSize(innerWidth,innerHeight);
+renderer.setClearColor(0x0f0f0f,1);
+app.appendChild(renderer.domElement);
 
-      // рендер
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,1,50000);
+camera.position.set(900,700,900);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true; controls.dampingFactor=.08; controls.target.set(0,0,0);
 
-      // сетка
-      const grid = new THREE.GridHelper(20, 20);
-      scene.add(grid);
+const hemi=new THREE.HemisphereLight(0xffffff,0x202020,0.9); scene.add(hemi);
+const dir =new THREE.DirectionalLight(0xffffff,0.6); dir.position.set(800,1000,600); scene.add(dir);
 
-      // оси
-      const axes = new THREE.AxesHelper(5);
-      scene.add(axes);
+// Сетка + оси
+const grid=new THREE.GridHelper(6000,120,0x303030,0x202020); grid.material.opacity=.9; grid.material.transparent=true; scene.add(grid);
+const axes=new THREE.AxesHelper(600); scene.add(axes);
 
-      // свет
-      const light = new THREE.DirectionalLight(0xffffff, 1);
-      light.position.set(10, 10, 10);
-      scene.add(light);
-      scene.add(new THREE.AmbientLight(0x404040));
+// Луч и плоскость XY (Y вверх). Будем класть точки на плоскость Y=0
+const ray=new THREE.Raycaster(); const mouse=new THREE.Vector2();
+const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+const planeIntersect=(clientX,clientY)=>{
+  const rect=renderer.domElement.getBoundingClientRect();
+  mouse.x=((clientX-rect.left)/rect.width)*2-1;
+  mouse.y=-((clientY-rect.top)/rect.height)*2+1;
+  ray.setFromCamera(mouse,camera);
+  const p=new THREE.Vector3();
+  ray.ray.intersectPlane(plane,p);
+  return p;
+};
 
-      // управление
-      controls = new THREE.OrbitControls(camera, renderer.domElement);
+// Геометрия узла и трубы
+const nodeMat=new THREE.MeshBasicMaterial({color:0x00e0ff});
+const nodeGeo=new THREE.SphereGeometry(18,20,12);
+const tubeMatMetal=new THREE.MeshStandardMaterial({color:0x8ea3b0,metalness:0.8,roughness:0.35});
+const TUBE_R=25; // радиус трубы 50мм
 
-      // при ресайзе
-      window.addEventListener('resize', onWindowResize, false);
+// Данные
+const segments=[]; // {a:THREE.Vector3, b:THREE.Vector3, mesh:THREE.Mesh, na:THREE.Mesh, nb:THREE.Mesh}
+const stack=[];
 
-      document.getElementById("status").textContent = "✅ 3D загружено";
+// Снайп к сетке (магнит)
+const STEP=50; // 50 мм
+const snap=v=>new THREE.Vector3(
+  Math.round(v.x/STEP)*STEP,
+  Math.round(v.y/STEP)*STEP,
+  Math.round(v.z/STEP)*STEP
+);
+
+// Состояния
+let tool='idle';           // 'idle' | 'awaitFirst' | 'awaitSecond' | 'edit'
+let first=null;            // THREE.Vector3
+let editInfo=null;         // {seg, end:'a'|'b'}
+let longPressTimer=null;
+
+// UI
+const $=id=>document.getElementById(id);
+$('btnLine').onclick=()=>{ tool='awaitFirst'; first=null; editInfo=null; updateStatus('Линия: ткни первую точку'); };
+$('btnUndo').onclick=()=>{
+  if(tool==='awaitSecond'&&first){ first=null; tool='awaitFirst'; updateStatus('Первая точка снята'); return; }
+  const last=stack.pop();
+  if(!last){ updateStatus('Нечего отменять'); return; }
+  if(last.type==='seg'){ scene.remove(last.seg.mesh,last.seg.na,last.seg.nb); const i=segments.indexOf(last.seg); if(i>=0) segments.splice(i,1); }
+  updateStatus('Отменено');
+};
+$('btnClear').onclick=()=>{
+  for(const s of segments){ scene.remove(s.mesh,s.na,s.nb); }
+  segments.length=0; stack.length=0; first=null; tool='idle'; updateStatus('Очищено');
+};
+
+// Построение цилиндра между двумя точками
+function makeTubeMesh(A,B){
+  const dir=new THREE.Vector3().subVectors(B,A);
+  const len=dir.length()||1;
+  const geo=new THREE.CylinderGeometry(TUBE_R,TUBE_R,len,24,1,true);
+  const mesh=new THREE.Mesh(geo,tubeMatMetal);
+  // Повернём цилиндр по направлению
+  const axis=new THREE.Vector3(0,1,0);
+  const q=new THREE.Quaternion().setFromUnitVectors(axis,dir.clone().normalize());
+  mesh.quaternion.copy(q);
+  mesh.position.copy(A.clone().add(B).multiplyScalar(0.5));
+  return mesh;
+}
+function addSegment(A,B){
+  const mesh=makeTubeMesh(A,B);
+  const na=new THREE.Mesh(nodeGeo,nodeMat); na.position.copy(A);
+  const nb=new THREE.Mesh(nodeGeo,nodeMat); nb.position.copy(B);
+  scene.add(mesh,na,nb);
+  const seg={a:A.clone(), b:B.clone(), mesh, na, nb};
+  segments.push(seg); stack.push({type:'seg',seg});
+}
+
+// Поиск ближайшего узла для редактирования
+function pickNode(clientX,clientY, maxDistPx=28){
+  const rect=renderer.domElement.getBoundingClientRect();
+  let best=null,bd=1e9;
+  for(const seg of segments){
+    for(const end of ['na','nb']){
+      const p=seg[end].position.clone().project(camera);
+      const sx=(p.x*0.5+0.5)*rect.width, sy=(-p.y*0.5+0.5)*rect.height;
+      const d=Math.hypot(clientX-rect.left - sx, clientY-rect.top - sy);
+      if(d<bd && d<=maxDistPx){ bd=d; best={seg,end:end==='na'?'a':'b'}; }
     }
+  }
+  return best;
+}
 
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+// Ввод
+let dragging=false;
+renderer.domElement.addEventListener('pointerdown',e=>{
+  const p=snap(planeIntersect(e.clientX,e.clientY));
+  if(tool==='awaitFirst'){
+    first=p; tool='awaitSecond';
+    showTempNode(p);
+    updateStatus('Первая точка есть — ткни вторую');
+  }else if(tool==='awaitSecond'){
+    hideTempNode(); addSegment(first,p); first=null; tool='idle';
+    updateStatus('Сегмент добавлен. Чтобы нарисовать ещё — нажми «Линия».');
+  }else{
+    // проверим долгий тап по узлу — войдём в редактирование
+    const pick=pickNode(e.clientX,e.clientY);
+    if(pick){
+      longPressTimer=setTimeout(()=>{
+        tool='edit'; editInfo=pick; dragging=true; controls.enabled=false;
+        updateStatus('Редактирование конца трубы — потяни и отпусти');
+      },600);
     }
+  }
+},{passive:true});
 
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-  </script>
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(tool==='awaitSecond' && first){
+    const p=snap(planeIntersect(e.clientX,e.clientY));
+    moveTempNode(p); showTempPreview(first,p);
+  }
+  if(tool==='edit' && dragging && editInfo){
+    const p=snap(planeIntersect(e.clientX,e.clientY));
+    const seg=editInfo.seg;
+    if(editInfo.end==='a'){ seg.a.copy(p); seg.na.position.copy(p); }
+    else { seg.b.copy(p); seg.nb.position.copy(p); }
+    // перестроить трубу
+    scene.remove(seg.mesh); seg.mesh=makeTubeMesh(seg.a,seg.b); scene.add(seg.mesh);
+  }
+},{passive:true});
+
+renderer.domElement.addEventListener('pointerup',()=>{
+  clearTimeout(longPressTimer); longPressTimer=null;
+  if(tool==='edit'){ dragging=false; tool='idle'; controls.enabled=true; updateStatus('Готово'); }
+},{passive:true});
+
+renderer.domElement.addEventListener('pointercancel',()=>{
+  clearTimeout(longPressTimer); longPressTimer=null;
+  if(tool==='edit'){ dragging=false; tool='idle'; controls.enabled=true; updateStatus('Отмена редактирования'); }
+},{passive:true});
+
+// Временная точка + превью трубы
+let tempNode=null, tempPreview=null;
+function showTempNode(pos){
+  if(!tempNode){ tempNode=new THREE.Mesh(nodeGeo,new THREE.MeshBasicMaterial({color:0xffcc00})); scene.add(tempNode); }
+  tempNode.visible=true; tempNode.position.copy(pos);
+}
+function moveTempNode(pos){ if(tempNode) tempNode.position.copy(pos); }
+function hideTempNode(){ if(tempNode) tempNode.visible=false; if(tempPreview){ scene.remove(tempPreview); tempPreview=null; } }
+function showTempPreview(A,B){
+  if(tempPreview) scene.remove(tempPreview);
+  tempPreview=makeTubeMesh(A,B);
+  tempPreview.material=tempPreview.material.clone();
+  tempPreview.material.transparent=true; tempPreview.material.opacity=0.5;
+  scene.add(tempPreview);
+}
+
+// Ресайз
+addEventListener('resize',()=>{
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+});
+
+// Цикл
+function tick(){ controls.update(); renderer.render(scene,camera); requestAnimationFrame(tick); }
+tick();
+updateStatus('Готово: «Линия» → 1-й тап → 2-й тап. Долгий тап по узлу — редактирование.');
+})();
+</script>
 </body>
 </html>
