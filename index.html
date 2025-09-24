@@ -16,10 +16,16 @@
   </style>
 </head>
 <body>
+  <!-- Подключаем Three.js -->
   <script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
+  <!-- Подключаем OrbitControls -->
   <script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
   
   <script>
+    // Проверим, загрузилась ли библиотека
+    console.log("THREE:", typeof THREE);
+    console.log("OrbitControls:", typeof THREE.OrbitControls);
+
     // Создаём сцену
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x202020);
@@ -36,7 +42,7 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Контроллер камеры (поворот, зум, панорама)
+    // Контроллер камеры (вращение и зум)
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
 
     // Сетка
@@ -56,7 +62,7 @@
     }
     animate();
 
-    // Подгон под экран
+    // Автоподгон окна
     window.addEventListener("resize", () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
