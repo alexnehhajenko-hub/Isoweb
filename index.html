@@ -1,131 +1,128 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Isoweb 3D — Диагностика загрузки</title>
-<style>
-  html,body{margin:0;height:100%;background:#0e0e0f;font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #status{position:fixed;left:10px;bottom:10px;z-index:10;background:#000a;color:#9fff9f;padding:8px 10px;border-radius:8px;font-size:12px;max-width:90vw;white-space:pre-wrap}
-  #menu{position:fixed;left:10px;top:10px;z-index:10;display:flex;gap:8px}
-  button{height:40px;padding:0 12px;border:0;border-radius:10px;background:#2b2d34;color:#fff;font-weight:700}
-  input[type=file]{display:none}
-  canvas{display:block;width:100vw;height:100vh}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Isoweb 3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #menu {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      display: flex;
+      gap: 10px;
+      z-index: 10;
+    }
+    #menu button {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      background: #333;
+      color: #fff;
+      cursor: pointer;
+    }
+    #menu button:hover {
+      background: #555;
+    }
+    #status {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: lime;
+      font-family: monospace;
+      font-size: 14px;
+    }
+  </style>
 </head>
 <body>
   <div id="menu">
-    <label><button id="btnPhoto">📷 Фото</button><input id="filePhoto" type="file" accept="image/*" capture="environment"></label>
-    <button id="btnClear">🧹 Удалить фон</button>
-    <button id="btnCenter">🎯 Центр</button>
+    <button onclick="loadPhoto()">📷 Фото</button>
+    <button onclick="removeBackground()">🧹 Удалить фон</button>
+    <button onclick="resetCamera()">🎯 Центр</button>
   </div>
-  <div id="status">Статус: старт…</div>
+  <div id="status">Статус: загружаю...</div>
 
-<script>
-(function(){
-  const status = document.getElementById('status');
-  const log = (t)=>status.textContent = 'Статус: ' + t;
+  <!-- Three.js и OrbitControls через jsDelivr -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/controls/OrbitControls.js"></script>
 
-  function addScript(src){
-    return new Promise((resolve,reject)=>{
-      const s=document.createElement('script');
-      s.src = src + (src.includes('?')?'&':'?') + 'v=' + Date.now(); // антикэш
-      s.onload = ()=>resolve(src);
-      s.onerror = ()=>reject(new Error('fail '+src));
-      document.head.appendChild(s);
-    });
-  }
+  <script>
+    let scene, camera, renderer, controls;
+    let backgroundMesh = null;
 
-  async function loadLibs(){
-    try{
-      log('гружу three.js с jsDelivr…');
-      await addScript('https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js');
-    }catch{
-      log('jsDelivr three не загрузился, пробую unpkg…');
-      await addScript('https://unpkg.com/three@0.160.1/build/three.min.js');
+    init();
+    animate();
+
+    function init() {
+      scene = new THREE.Scene();
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(5, 5, 5);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+      const gridHelper = new THREE.GridHelper(20, 20);
+      scene.add(gridHelper);
+
+      const axesHelper = new THREE.AxesHelper(5);
+      scene.add(axesHelper);
+
+      document.getElementById("status").innerText = "✅ 3D загружено";
+      window.addEventListener('resize', onWindowResize);
     }
-    if(typeof THREE==='undefined'){ throw new Error('THREE не появился'); }
-    log('three.js ок. Гружу OrbitControls…');
 
-    try{
-      await addScript('https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/controls/OrbitControls.js');
-    }catch{
-      log('jsDelivr OrbitControls не загрузился, пробую unpkg…');
-      await addScript('https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js');
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     }
-    if(!THREE.OrbitControls){ throw new Error('OrbitControls не появился'); }
-    log('OrbitControls ок. Инициализирую сцену…');
-  }
 
-  let scene, camera, renderer, controls;
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
 
-  function initScene(){
-    const DPR = Math.min(2, Math.max(1, window.devicePixelRatio||1));
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0e0e0f);
-
-    camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
-    camera.position.set(12,10,14);
-
-    renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setPixelRatio(DPR);
-    renderer.setSize(innerWidth, innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.8));
-    const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(10,15,8); scene.add(dl);
-
-    const grid = new THREE.GridHelper(100,100,0x3a3a3f,0x1f1f22);
-    grid.material.opacity=.6; grid.material.transparent=true;
-    scene.add(grid);
-    scene.add(new THREE.AxesHelper(2.5));
-
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; controls.dampingFactor = 0.08; controls.target.set(0,0,0);
-
-    addEventListener('resize', ()=>{
-      camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth, innerHeight);
-    }, {passive:true});
-
-    // Фото-фон
-    const file = document.getElementById('filePhoto');
-    const btnP = document.getElementById('btnPhoto');
-    const btnC = document.getElementById('btnClear');
-    const btnR = document.getElementById('btnCenter');
-
-    btnP.onclick = ()=> file.click();
-    file.onchange = (e)=>{
-      const f = e.target.files && e.target.files[0];
-      if(!f) return;
-      const reader = new FileReader();
-      reader.onload = ev=>{
-        const tex = new THREE.TextureLoader().load(ev.target.result, ()=>{
-          if(THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
-          scene.background = tex;
-          log('фон установлен ✅');
-        }, undefined, ()=>log('ошибка фото'));
+    // Кнопки меню
+    function loadPhoto() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = e => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          const texture = new THREE.TextureLoader().load(event.target.result);
+          if (backgroundMesh) scene.remove(backgroundMesh);
+          const geometry = new THREE.PlaneGeometry(20, 20);
+          const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+          backgroundMesh = new THREE.Mesh(geometry, material);
+          backgroundMesh.position.y = -0.01;
+          backgroundMesh.rotation.x = -Math.PI / 2;
+          scene.add(backgroundMesh);
+        };
+        reader.readAsDataURL(file);
       };
-      reader.readAsDataURL(f);
-      e.target.value = '';
-    };
-    btnC.onclick = ()=>{ scene.background = new THREE.Color(0x0e0e0f); log('фон удалён'); };
-    btnR.onclick = ()=>{ controls.target.set(0,0,0); camera.position.set(12,10,14); controls.update(); log('камера по центру'); };
-
-    (function loop(){ controls.update(); renderer.render(scene,camera); requestAnimationFrame(loop); })();
-    log('3D загружено ✅');
-  }
-
-  (async function start(){
-    try{
-      await loadLibs();
-      initScene();
-    }catch(err){
-      console.error(err);
-      log('ошибка: '+err.message+'\nПопробуй перезагрузить страницу или открыть в другом браузере.');
+      input.click();
     }
-  })();
-})();
-</script>
+
+    function removeBackground() {
+      if (backgroundMesh) {
+        scene.remove(backgroundMesh);
+        backgroundMesh = null;
+      }
+    }
+
+    function resetCamera() {
+      camera.position.set(5, 5, 5);
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+  </script>
 </body>
 </html>
