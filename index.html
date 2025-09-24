@@ -3,32 +3,28 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Isoweb — фото + разметка труб</title>
+<title>Isoweb — фото + разметка</title>
 <style>
-  :root { --bg:#0d0d0f; --panel:#1c1f26; --btn:#2b2f39; --txt:#eaecef; --accent:#6b8cff; }
+  :root { --bg:#0d0f12; --panel:#1c1f26; --txt:#eaecef; }
   html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
   #wrap{position:fixed;inset:0;overflow:hidden}
-  /* WebGL слой (фото+сетка) */
-  #gl{position:absolute;inset:0}
-  /* 2D-слой для разметки */
-  #draw{position:absolute;inset:0;touch-action:none}
-  /* Панель */
-  #bar{position:absolute;left:12px;top:12px;z-index:10;display:flex;gap:10px;flex-wrap:wrap}
-  .btn{background:var(--btn);border:1px solid rgba(255,255,255,.08);border-radius:12px;color:var(--txt);
-       padding:10px 14px;font-weight:700}
+
+  /* Порядок слоёв ВАЖЕН */
+  #gl   {position:absolute;inset:0;z-index:0}   /* WebGL (сетка/фото)         */
+  #grid2d{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.25}
+  #draw {position:absolute;inset:0;z-index:2;touch-action:none}  /* <- тут рисуем */
+
+  #bar{position:absolute;left:12px;top:12px;z-index:3;display:flex;gap:10px;flex-wrap:wrap}
+  .btn{background:#2b2f39;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:var(--txt);padding:10px 14px;font-weight:700}
   .btn.primary{background:linear-gradient(180deg,#7aa2ff,#5a7bff);color:#fff;border:none}
-  /* Статус */
-  #status{position:absolute;left:10px;bottom:10px;background:#0a0a0c;border:1px solid rgba(255,255,255,.08);
-          color:#7cff78;border-radius:10px;padding:6px 10px;font-size:12px;z-index:10}
-  /* Тонкая сетка поверх (опционально) */
-  #grid2d{pointer-events:none;position:absolute;inset:0;opacity:.25}
+  #status{position:absolute;left:10px;bottom:10px;z-index:3;background:#0a0a0c;border:1px solid rgba(255,255,255,.08);color:#7cff78;border-radius:10px;padding:6px 10px;font-size:12px}
 </style>
 </head>
 <body>
 <div id="wrap">
   <canvas id="gl"></canvas>
-  <canvas id="draw"></canvas>
   <svg id="grid2d"></svg>
+  <canvas id="draw"></canvas>
 
   <div id="bar">
     <button class="btn" id="btnPhoto">📷 Фото</button>
@@ -42,7 +38,7 @@
   <div id="status">Статус: загружаю 3D…</div>
 </div>
 
-<!-- three.js с jsDelivr -->
+<!-- CDN: three + OrbitControls -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
 <script>
@@ -52,10 +48,9 @@ const gl=document.getElementById('gl');
 const draw=document.getElementById('draw');
 const grid2d=document.getElementById('grid2d');
 const statusEl=document.getElementById('status');
-
 const setStatus = (t)=> statusEl.textContent = 'Статус: ' + t;
 
-/* ===== THREE сцена: сетка + фото как плоскость ===== */
+/* === THREE === */
 let scene,camera,renderer,controls,grid3d,axes,photoMesh=null;
 
 function init3D(){
@@ -63,70 +58,54 @@ function init3D(){
   camera=new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 2000);
   camera.position.set(0,2.5,7);
 
-  renderer=new THREE.WebGLRenderer({canvas:gl,antialias:true,alpha:false});
+  renderer=new THREE.WebGLRenderer({canvas:gl,antialias:true,alpha:true});
   renderer.setPixelRatio(DPR);
   renderer.setSize(innerWidth,innerHeight,false);
-  renderer.setClearColor(0x0d0d0f,1);
+  renderer.setClearAlpha(0); // фон страницы просвечивает (не чёрный ковёр)
 
   controls=new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping=true; controls.dampingFactor=0.08;
 
-  grid3d=new THREE.GridHelper(20, 40, 0x444444, 0x444444);
+  grid3d=new THREE.GridHelper(20, 40, 0x404040, 0x404040);
   scene.add(grid3d);
-
-  axes=new THREE.AxesHelper(3);
-  scene.add(axes);
+  axes=new THREE.AxesHelper(3); scene.add(axes);
 
   animate();
   setStatus('3D загружено');
 }
 function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
-function centerCam(){
-  camera.position.set(0,2.5,7);
-  controls.target.set(0,0,0);
-  controls.update();
-}
+function centerCam(){ camera.position.set(0,2.5,7); controls.target.set(0,0,0); controls.update(); }
 
-/* ===== Фото как текстура на плоскости ===== */
 function placePhoto(dataUrl){
   const loader=new THREE.TextureLoader();
   loader.load(dataUrl,(tex)=>{
-    // подгоняем плоскость под экранный аспект
-    const w=10, h=10; // 10×10 условно — не критично, просто фон
+    const w=12,h=12;
     const geo=new THREE.PlaneGeometry(w,h);
     const mat=new THREE.MeshBasicMaterial({map:tex, side:THREE.DoubleSide});
     if(photoMesh){ scene.remove(photoMesh); photoMesh.geometry.dispose(); photoMesh.material.dispose(); }
     photoMesh=new THREE.Mesh(geo,mat);
-    photoMesh.position.set(0,0,-0.02); // на фоне позади сетки
+    photoMesh.position.set(0,0,-0.02);
     scene.add(photoMesh);
     setStatus('✅ Фото загружено');
-  },()=>{},(err)=>{ setStatus('Ошибка загрузки фото'); console.error(err); });
+  },undefined,(err)=>{ setStatus('Ошибка загрузки фото'); console.error(err); });
 }
 function removePhoto(){
-  if(photoMesh){
-    scene.remove(photoMesh);
-    photoMesh.geometry.dispose();
-    photoMesh.material.dispose();
-    photoMesh=null;
-    setStatus('Фон удалён');
-  }
+  if(photoMesh){ scene.remove(photoMesh); photoMesh.geometry.dispose(); photoMesh.material.dispose(); photoMesh=null; }
+  setStatus('Фон удалён');
 }
 
-/* ===== 2D-рисование поверх (один отрезок за цикл) ===== */
+/* === 2D-рисование === */
 const ctx = draw.getContext('2d');
-const segs=[];   // {a:{x,y}, b:{x,y}}
-let tool='idle'; // 'idle' | 'awaitFirst' | 'awaitSecond'
-let first=null;  // {x,y}
-let preview=null;
+const segs=[]; let tool='idle'; let first=null,preview=null;
 
-function fitCanvases(){
-  const w=Math.round(innerWidth*DPR), h=Math.round(innerHeight*DPR);
-  // WebGL размер уже выставили в init; но при ресайзе обновим:
+function fitAll(){
   renderer.setSize(innerWidth, innerHeight, false);
-  // 2D
-  draw.width=w; draw.height=h;
-  draw.style.width=innerWidth+'px'; draw.style.height=innerHeight+'px';
-  // SVG-сетка (тонкая экранирующая сетка по экрану)
+  // 2D canvas
+  draw.width = Math.round(innerWidth*DPR);
+  draw.height= Math.round(innerHeight*DPR);
+  draw.style.width = innerWidth+'px';
+  draw.style.height= innerHeight+'px';
+  // экранная сетка
   grid2d.setAttribute('width', innerWidth);
   grid2d.setAttribute('height', innerHeight);
   grid2d.innerHTML='';
@@ -147,37 +126,26 @@ function fitCanvases(){
   }
   redraw();
 }
-addEventListener('resize', fitCanvases);
+addEventListener('resize', fitAll);
 
 function redraw(){
-  // очистка
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,draw.width,draw.height);
-
-  // нарисовать все существующие сегменты
   ctx.lineCap='round'; ctx.lineJoin='round';
-  for(const s of segs){
-    ctx.strokeStyle='#1f6bff';
-    ctx.lineWidth=10*DPR;
-    ctx.beginPath(); ctx.moveTo(s.a.x, s.a.y); ctx.lineTo(s.b.x, s.b.y); ctx.stroke();
-    // тень
-    ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth= (10*DPR)+4;
-  }
 
-  // предпросмотр
+  for(const s of segs){
+    ctx.strokeStyle='#1f6bff'; ctx.lineWidth=10*DPR;
+    ctx.beginPath(); ctx.moveTo(s.a.x, s.a.y); ctx.lineTo(s.b.x, s.b.y); ctx.stroke();
+  }
   if(tool==='awaitSecond' && first && preview){
-    ctx.strokeStyle='#1f6bff';
-    ctx.lineWidth=10*DPR;
+    ctx.strokeStyle='#1f6bff'; ctx.lineWidth=10*DPR;
     ctx.beginPath(); ctx.moveTo(first.x, first.y); ctx.lineTo(preview.x, preview.y); ctx.stroke();
   }
-  // видимая 1-я точка
   if(first){
     ctx.fillStyle='#ff3b30';
     ctx.beginPath(); ctx.arc(first.x, first.y, 6*DPR, 0, Math.PI*2); ctx.fill();
   }
 }
-
-// конвертация координат указателя -> пиксели canvas
 function pos(e){
   const r=draw.getBoundingClientRect();
   const sx=(e.clientX - r.left) * (draw.width/r.width);
@@ -185,58 +153,29 @@ function pos(e){
   return {x:sx, y:sy};
 }
 
-// обработчики
-draw.addEventListener('pointerdown', (e)=>{
-  // если не в режиме линии — просто отдаём управление камере
-  if(tool==='idle'){ return; }
+draw.addEventListener('pointerdown',(e)=>{
+  if(tool==='idle') return;             // вне режима линии — только камера
   e.preventDefault();
   const p=pos(e);
-  if(tool==='awaitFirst'){
-    first=p; preview=null; tool='awaitSecond';
-    setStatus('1-я точка поставлена — ткни 2-ю');
-    redraw(); return;
-  }
-  if(tool==='awaitSecond'){
-    preview=p;
-    segs.push({a:first, b:preview});
-    first=null; preview=null;
-    tool='idle';
-    setStatus('Сегмент готов. Чтобы нарисовать ещё — снова нажми «Линия».');
-    redraw(); return;
-  }
+  if(tool==='awaitFirst'){ first=p; preview=null; tool='awaitSecond'; setStatus('1-я точка есть — ткни 2-ю'); redraw(); return; }
+  if(tool==='awaitSecond'){ preview=p; segs.push({a:first,b:preview}); first=null; preview=null; tool='idle'; setStatus('Сегмент готов. Для следующего нажми «Линия».'); redraw(); return; }
 },{passive:false});
+draw.addEventListener('pointermove',(e)=>{ if(tool==='awaitSecond' && first){ preview=pos(e); redraw(); }},{passive:true});
 
-draw.addEventListener('pointermove', (e)=>{
-  if(tool!=='awaitSecond' || !first) return;
-  preview=pos(e); redraw();
-},{passive:true});
-
-/* ===== Кнопки ===== */
+/* === UI === */
 const $=id=>document.getElementById(id);
-
-$('btnPhoto').onclick=()=> $('fileInput').click();
-$('fileInput').onchange=(ev)=>{
-  const file=ev.target.files[0]; if(!file) return;
-  const fr=new FileReader();
-  fr.onload=(e)=> placePhoto(e.target.result);
-  fr.readAsDataURL(file);
-};
-
+$('btnPhoto').onclick = ()=> $('fileInput').click();
+$('fileInput').onchange = (ev)=>{ const f=ev.target.files[0]; if(!f) return; const fr=new FileReader(); fr.onload=e=>placePhoto(e.target.result); fr.readAsDataURL(f); };
 $('btnErasePhoto').onclick = removePhoto;
 $('btnCenter').onclick = centerCam;
-
-$('btnLine').onclick = ()=>{
-  tool='awaitFirst'; first=null; preview=null;
-  setStatus('Режим Линия: ткни 1-ю точку');
-};
-
+$('btnLine').onclick = ()=>{ tool='awaitFirst'; first=null; preview=null; setStatus('Режим Линия: ткни 1-ю точку'); };
 $('btnUndo').onclick = ()=>{
   if(tool==='awaitSecond' && first){ first=null; preview=null; tool='idle'; setStatus('Отменено'); redraw(); return; }
   if(segs.length){ segs.pop(); redraw(); setStatus('Удалён последний сегмент'); }
 };
 
 init3D();
-fitCanvases();
+fitAll();
 })();
 </script>
 </body>
