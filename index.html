@@ -1,28 +1,31 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — линия по тапам + 3D сетка</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>IsoPipe — изометрия труб по фото</title>
 <style>
-  :root{
-    --violet:#6b1dff; --violet2:#7c5bff; --ink:#111; --panel:#2b2d31;
-    --ui:#ffffff; --muted:#8b8f98; --accent:#1f6bff;
-  }
-  html,body{height:100%;margin:0;background:#f4f5f7;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overscroll-behavior:none}
+  :root{--ink:#0f1115;--ui:#fff;--vio:#6b1dff;--panel:#1c1f25;--sub:#8e93a0;}
+  html,body{height:100%;margin:0;background:#eef1f4;color:#111;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  /* сцена */
   #stage{position:fixed;inset:0;overflow:hidden}
-  /* фоновое фото */
-  #bg{position:absolute;inset:0;object-fit:contain;max-width:100%;max-height:100%;margin:auto;opacity:1;transition:opacity .15s}
-  /* холсты */
+  #bg{position:absolute;inset:0;object-fit:contain;max-width:100%;max-height:100%;margin:auto}
   canvas{position:absolute;inset:0;touch-action:none;display:block}
   #grid{pointer-events:none}
   /* панель */
-  .bar{position:fixed;left:10px;top:10px;z-index:5;display:flex;gap:10px;flex-wrap:wrap}
-  .btn{height:44px;border:0;border-radius:12px;padding:0 14px;font-weight:700;background:#fff;color:#111;box-shadow:0 2px 10px rgba(0,0,0,.12)}
-  .btn.primary{background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff}
-  .tog{height:44px;border-radius:12px;display:flex;align-items:center;gap:8px;background:#fff;color:#111;padding:0 14px;box-shadow:0 2px 10px rgba(0,0,0,.12)}
-  .tog input{width:18px;height:18px}
-  .status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.75);color:#9ff59f;padding:6px 8px;border-radius:8px;font-size:12px;z-index:6}
+  .bar{position:fixed;left:10px;top:10px;z-index:5;display:flex;flex-wrap:wrap;gap:8px}
+  .btn,.chip{height:42px;border:0;border-radius:12px;padding:0 14px;font-weight:700;background:#fff;color:#111;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+  .btn.primary{background:linear-gradient(180deg,#7d66ff,#6b1dff);color:#fff}
+  .btn.icon{width:42px;padding:0}
+  .chip{display:flex;align-items:center;gap:8px}
+  .chip input[type=checkbox]{width:18px;height:18px}
+  .stack{display:flex;gap:8px}
+  .panel{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.78);color:#d2ffd2;border-radius:10px;padding:8px 10px;font-size:12px;z-index:6}
+  .dock{position:fixed;right:10px;top:10px;display:flex;flex-direction:column;gap:8px;z-index:6}
+  .card{background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:10px 12px}
+  .row{display:flex;align-items:center;gap:10px;margin:6px 0}
+  .row label{color:#333;font-weight:600;min-width:64px}
+  input[type=range]{width:180px}
 </style>
 </head>
 <body>
@@ -32,182 +35,231 @@
   <canvas id="cv"></canvas>
 </div>
 
+<!-- верхняя панель -->
 <div class="bar">
-  <label class="btn">
-    📷 Фото
-    <input id="pick" type="file" accept="image/*" style="display:none">
-  </label>
+  <label class="btn">📷 Фото<input id="pick" type="file" accept="image/*" style="display:none"></label>
   <button id="btnClearBg" class="btn">🧹 Удалить фон</button>
-  <button id="btnCenter"  class="btn">🎯 Центр</button>
-  <button id="btnLine"    class="btn primary">📐 Линия</button>
-  <label class="tog"><input id="chkGrid" type="checkbox" checked> Сетка 3D</label>
+  <button id="btnCenter" class="btn">🎯 Центр</button>
+  <button id="btnLine" class="btn primary">📐 Линия</button>
+  <div class="stack">
+    <button id="zoomOut" class="btn icon">–</button>
+    <button id="zoomIn" class="btn icon">+</button>
+  </div>
+  <label class="chip"><input id="chkGrid" type="checkbox" checked> Сетка</label>
 </div>
-<div id="status" class="status">Статус: Готов</div>
+
+<!-- правая панель -->
+<div class="dock">
+  <div class="card">
+    <div class="row"><label>Ø, мм</label><input id="diam" type="range" min="8" max="120" value="40"><span id="diamV">40</span></div>
+    <div class="row"><label>Сетка</label><input id="gstep" type="range" min="12" max="80" value="40"><span id="gstepV">40</span></div>
+    <div class="row"><label>Изометрия</label><input id="iso" type="checkbox" checked></div>
+    <div class="row"><button id="undo" class="btn">↶ Назад</button></div>
+  </div>
+</div>
+
+<div id="status" class="panel">Статус: Готов</div>
 
 <script>
 (()=>{'use strict';
-/* ---------- базовые элементы ---------- */
+/* ====== базовые ====== */
 const DPR=Math.min(2,Math.max(1,devicePixelRatio||1));
-const cv = document.getElementById('cv');
-const g  = cv.getContext('2d',{alpha:true});
-const gridCv = document.getElementById('grid');
-const gg = gridCv.getContext('2d',{alpha:true});
-const bg = document.getElementById('bg');
-const statusEl = document.getElementById('status');
-function say(m){statusEl.textContent='Статус: '+m;}
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cg=document.getElementById('grid'), gg=cg.getContext('2d');
+const bg=document.getElementById('bg'); const statusEl=document.getElementById('status');
+const say=m=>statusEl.textContent='Статус: '+m;
 
-function fitCanvases(){
-  const w=innerWidth, h=innerHeight;
-  for(const c of [cv,gridCv]){c.width=Math.round(w*DPR); c.height=Math.round(h*DPR); c.style.width=w+'px'; c.style.height=h+'px';}
+function fit(){
+  const w=innerWidth,h=innerHeight;
+  for(const c of [cv,cg]){c.width=Math.round(w*DPR); c.height=Math.round(h*DPR); c.style.width=w+'px'; c.style.height=h+'px';}
   need(); drawGrid();
 }
-addEventListener('resize',fitCanvases,{passive:true});
+addEventListener('resize',fit,{passive:true});
 
-/* ---------- вид и трансформации ---------- */
-const view={tx:0,ty:0,scale:1};
-const clampScale=s=>Math.max(0.3,Math.min(6,s));
-function s2w(sx,sy){return{x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale};}
-function w2s(x,y){return{x:x*view.scale+view.tx, y:y*view.scale+view.ty};}
+const view={tx:0,ty:0,scale:1}; const clampS=s=>Math.max(0.25,Math.min(6,s));
+const s2w=(sx,sy)=>({x:(sx-view.tx)/view.scale,y:(sy-view.ty)/view.scale});
+const w2s=(x,y)=>({x:x*view.scale+view.tx,y:y*view.scale+view.ty});
 
-/* ---------- хранение сегментов ---------- */
-const segs=[];  // {a:{x,y}, b:{x,y}, d:diameter}
-const stack=[];
-let tool='idle';     // awaitFirst | awaitSecond
-let first=null;      // первая точка
-let preview=null;    // предпросмотр второй точки
-const params={diam:20,color:'#2b7bff'};
+/* ====== данные ====== */
+const pipes=[]; // {a:{x,y}, b:{x,y}, d}
+const stack=[]; // undo
+let tool='idle', first=null, preview=null;
+const params={d:40, color:'#2b7bff', iso:true};
+let gridOn=true, gridStep=40;
 
-/* ---------- рендер ---------- */
-let raf=0,dirty=false;
-function need(){dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}}
+/* ====== рисование ====== */
+let raf=0,dirty=false; function need(){dirty=true;if(!raf){raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}})}}
 
 function draw(){
-  // очистка
-  g.setTransform(1,0,0,1,0,0);
-  g.clearRect(0,0,cv.width,cv.height);
+  g.setTransform(1,0,0,1,0,0); g.clearRect(0,0,cv.width,cv.height);
 
-  // рисуем сегменты с учётом масштаба
+  // сортировка: сначала «магистрали» (длиннее) — лучше для т-стыков
+  const order=[...pipes].sort((p1,p2)=>len(p2)-len(p1));
+
   g.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
-  for(const s of segs){drawPipe(s.a,s.b,params.diam,params.color);}
-  // предпросмотр
-  if(tool==='awaitSecond'&&first&&preview){drawPipe(first,preview,params.diam,params.color,0.45,true);}
+  for(const p of order) drawPipe(p.a,p.b,p.d,params.color,1,false);
 
-  // маркер первой точки
-  if(first){const p=w2s(first.x,first.y); g.setTransform(1,0,0,1,0,0);
-    g.fillStyle='#ff5252'; g.beginPath(); g.arc(p.x*DPR,p.y*DPR,6*DPR,0,Math.PI*2); g.fill();
-  }
+  if(tool==='awaitSecond'&&first&&preview) drawPipe(first,preview,params.d,params.color,0.55,true);
+
+  // маркеры концов
+  g.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  g.fillStyle='rgba(255,80,80,.9)';
+  for(const p of [first].filter(Boolean)){g.beginPath();g.arc(p.x,p.y,5/view.scale,0,Math.PI*2);g.fill();}
 }
 
-function drawPipe(A,B,diam,color,alpha=1, dashed=false){
-  const dx=B.x-A.x, dy=B.y-A.y, len=Math.hypot(dx,dy)||1;
-  const nx=-dy/len, ny=dx/len;            // нормаль для толщины
-  const r=diam/2;
+function len(p){return Math.hypot(p.b.x-p.a.x,p.b.y-p.a.y);}
 
-  // тень
-  g.globalAlpha=alpha*0.5; g.fillStyle='rgba(0,0,0,.25)';
+/* изометричный «толстый штрих» + блик, скруглённые торцы */
+function drawPipe(A,B,diam,color,alpha=1, dashed=false){
+  const r=diam/2;
+  const dx=B.x-A.x, dy=B.y-A.y, L=Math.hypot(dx,dy)||1;
+  const nx=-dy/L, ny=dx/L; // нормаль
+
+  // подложка/тень
+  g.globalAlpha=alpha*0.35;
+  g.fillStyle='rgba(0,0,0,.25)';
   g.beginPath();
   g.moveTo(A.x+nx*(r+2),A.y+ny*(r+2));
   g.lineTo(B.x+nx*(r+2),B.y+ny*(r+2));
-  g.lineTo(B.x-nx*(r+2),B.y-ny*(r+2));
+  g.arc(B.x,B.y,r+2,Math.atan2(ny,nx),Math.atan2(-ny,-nx));
   g.lineTo(A.x-nx*(r+2),A.y-ny*(r+2));
+  g.arc(A.x,A.y,r+2,Math.atan2(-ny,-nx),Math.atan2(ny,nx));
   g.closePath(); g.fill();
 
-  // тело
-  g.globalAlpha=alpha; g.fillStyle=color;
+  // тело трубы
+  g.globalAlpha=alpha;
+  const grad = params.iso
+    ? (()=>{const gx=g.createLinearGradient(A.x+nx*r,A.y+ny*r,B.x+nx*r,B.y+ny*r);
+            gx.addColorStop(0, shade(color, -10));
+            gx.addColorStop(0.5, shade(color, +10));
+            gx.addColorStop(1, shade(color, -10)); return gx;})()
+    : color;
+
+  g.fillStyle=grad;
   if(dashed){g.setLineDash([12,10]); g.lineWidth=2/view.scale; g.strokeStyle=color;}
+
   g.beginPath();
-  g.moveTo(A.x+nx*r, A.y+ny*r);
-  g.lineTo(B.x+nx*r, B.y+ny*r);
-  g.lineTo(B.x-nx*r, B.y-ny*r);
-  g.lineTo(A.x-nx*r, A.y-ny*r);
+  g.moveTo(A.x+nx*r,A.y+ny*r);
+  g.lineTo(B.x+nx*r,B.y+ny*r);
+  g.arc(B.x,B.y,r,Math.atan2(ny,nx),Math.atan2(-ny,-nx));
+  g.lineTo(A.x-nx*r,A.y-ny*r);
+  g.arc(A.x,A.y,r,Math.atan2(-ny,-nx),Math.atan2(ny,nx));
   g.closePath(); g.fill();
   if(dashed){g.stroke(); g.setLineDash([]);}
+
+  // лёгкий блик по «верхней» кромке
+  if(params.iso){
+    g.globalAlpha=alpha*0.25; g.strokeStyle='#ffffff'; g.lineWidth=Math.max(1.2, r*0.15);
+    g.beginPath(); g.moveTo(A.x+nx*(r*0.55),A.y+ny*(r*0.55)); g.lineTo(B.x+nx*(r*0.55),B.y+ny*(r*0.55)); g.stroke();
+  }
   g.globalAlpha=1;
 }
 
-/* ---------- сетка «псевдо-3D» ---------- */
-let gridOn=true;
-function drawGrid(){
-  gg.setTransform(1,0,0,1,0,0);
-  gg.clearRect(0,0,gridCv.width,gridCv.height);
-  if(!gridOn) return;
-  const W=gridCv.width, H=gridCv.height;
-  const cx=W/2, cy=H*0.62; // линия горизонта пониже центра
-  const vp={x:cx, y:H*0.28}; // точка схода
-
-  gg.strokeStyle='rgba(255,255,255,.18)';
-  gg.lineWidth=1;
-
-  // продольные (к горизонту)
-  for(let y=cy; y<H; y+=32*DPR){
-    gg.beginPath(); gg.moveTo(0,y); gg.lineTo(W,y); gg.stroke();
-  }
-
-  // поперечные (к точке схода)
-  const step=48*DPR;
-  for(let x=-W; x<=W*2; x+=step){
-    gg.beginPath(); gg.moveTo(x,H); gg.lineTo(vp.x,vp.y); gg.stroke();
-  }
-
-  // оси
-  gg.strokeStyle='rgba(80,180,255,.35)';
-  gg.beginPath(); gg.moveTo(cx,0); gg.lineTo(cx,H); gg.stroke();
-  gg.strokeStyle='rgba(250,120,80,.35)';
-  gg.beginPath(); gg.moveTo(0,cy); gg.lineTo(W,cy); gg.stroke();
+/* утилита: корректировка цвета */
+function shade(hex, amt){
+  const c = hex.startsWith('#') ? hex.slice(1) : hex;
+  const n = parseInt(c,16); let r=(n>>16)+amt, g=((n>>8)&255)+amt, b=(n&255)+amt;
+  r=Math.max(0,Math.min(255,r)); g=Math.max(0,Math.min(255,g)); b=Math.max(0,Math.min(255,b));
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
 }
 
-/* ---------- ввод: пан/зум и тап для линий ---------- */
-const pointers=new Map(); let isPanning=false; let panLast=null;
+/* ====== сетка ====== */
+function drawGrid(){
+  gg.setTransform(1,0,0,1,0,0); gg.clearRect(0,0,cg.width,cg.height);
+  if(!gridOn) return;
+  const W=cg.width,H=cg.height, cx=W/2, cy=H*0.62, vp={x:cx,y:H*0.28};
+  gg.strokeStyle='rgba(255,255,255,.18)'; gg.lineWidth=1;
+
+  const step=gridStep*DPR;
+  for(let y=cy;y<H;y+=step){gg.beginPath();gg.moveTo(0,y);gg.lineTo(W,y);gg.stroke();}
+  for(let x=-W;x<=W*2;x+=step){gg.beginPath();gg.moveTo(x,H);gg.lineTo(vp.x,vp.y);gg.stroke();}
+
+  gg.strokeStyle='rgba(80,180,255,.30)';
+  gg.beginPath();gg.moveTo(cx,0);gg.lineTo(cx,H);gg.stroke();
+  gg.strokeStyle='rgba(250,120,80,.30)';
+  gg.beginPath();gg.moveTo(0,cy);gg.lineTo(W,cy);gg.stroke();
+}
+
+/* ====== ввод: пан/зум/рисование ====== */
+const ptr=new Map(); let pan=false, last=null;
+
 cv.addEventListener('pointerdown',e=>{
   e.preventDefault();
-  const sx=e.clientX*DPR, sy=e.clientY*DPR;
-  pointers.set(e.pointerId,{sx,sy});
-  // жест двумя пальцами — зум
-  if(pointers.size===2){return;}
-  // панорамирование одним пальцем, если не ждём точку
-  if(tool==='idle'){isPanning=true; panLast={sx,sy}; say('Перемещение'); return;}
-  // режим линия — ставим точки
-  if(tool==='awaitFirst'){first=s2w(sx,sy); tool='awaitSecond'; preview=null; say('Поставил 1-ю точку'); need(); return;}
-  if(tool==='awaitSecond'){preview=s2w(sx,sy); segs.push({a:first,b:preview, d:params.diam}); stack.push('seg'); first=null; preview=null; tool='idle'; say('Сегмент готов. Для следующего нажми «Линия».'); need(); return;}
+  const sx=e.clientX*DPR, sy=e.clientY*DPR; ptr.set(e.pointerId,{sx,sy});
+  if(ptr.size===2) return; // pinch
+  if(tool==='idle'){pan=true; last={sx,sy}; say('Перемещение'); return;}
+
+  if(tool==='awaitFirst'){
+    first=snapPoint(s2w(sx,sy)); tool='awaitSecond'; preview=null; say('Поставил 1-ю точку'); need(); return;
+  }
+  if(tool==='awaitSecond'){
+    const B=snapPoint(s2w(sx,sy));
+    // если касаемся середины другой трубы — рисуем Т-стык (просто добавляем сегмент, сортировка даст «магистраль» под низ)
+    pipes.push({a:first,b:B,d:params.d}); stack.push({type:'add'});
+    first=null; preview=null; tool='idle'; say('Сегмент готов. Для следующего нажми «Линия».'); need(); return;
+  }
 },{passive:false});
 
 cv.addEventListener('pointermove',e=>{
-  if(!pointers.has(e.pointerId))return;
-  const sx=e.clientX*DPR, sy=e.clientY*DPR; pointers.set(e.pointerId,{sx,sy});
-  if(pointers.size===2){
-    const [p0,p1]=[...pointers.values()];
-    const d0=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy)||1;
-    const k=e.pressure>0?1.0:1.0; // оставлено для iPadOS
-    const ns=clampScale(view.scale*(1 + ( (Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy)-d0)/(800*DPR) )));
+  if(!ptr.has(e.pointerId)) return;
+  const sx=e.clientX*DPR, sy=e.clientY*DPR; ptr.set(e.pointerId,{sx,sy});
+  if(ptr.size===2){
+    const [p0,p1]=[...ptr.values()];
+    const prev=[...ptr.values()].map(p=>({x:p.sx,y:p.sy}));
+    const d0=Math.hypot(prev[0].x-prev[1].x,prev[0].y-prev[1].y);
+    const d1=Math.hypot(p0.sx-p1.sx,p0.sy-p1.sy);
+    const ns=clampS(view.scale*(1+(d1-d0)/(900*DPR)));
+    // зум к центру
     const cx=innerWidth*DPR/2, cy=innerHeight*DPR/2;
     view.tx=cx-(cx-view.tx)*(ns/view.scale);
     view.ty=cy-(cy-view.ty)*(ns/view.scale);
     view.scale=ns; need(); return;
   }
-  if(isPanning&&panLast){view.tx+=(sx-panLast.sx); view.ty+=(sy-panLast.sy); panLast={sx,sy}; need(); return;}
-  if(tool==='awaitSecond'&&first){preview=s2w(sx,sy); need();}
+  if(pan&&last){view.tx+=(sx-last.sx); view.ty+=(sy-last.sy); last={sx,sy}; need(); return;}
+  if(tool==='awaitSecond'&&first){preview=snapPoint(s2w(sx,sy),true); need();}
 },{passive:true});
 
-cv.addEventListener('pointerup',e=>{pointers.delete(e.pointerId); if(isPanning&&pointers.size===0){isPanning=false; panLast=null;}},{passive:true});
+cv.addEventListener('pointerup',e=>{ptr.delete(e.pointerId); if(pan&&ptr.size===0){pan=false; last=null;}},{passive:true});
 
-/* ---------- кнопки ---------- */
+/* ====== снэп к концам ====== */
+function snapPoint(P,isPreview=false){
+  let best=null, bestD=12/DPR; // px
+  for(const seg of pipes){
+    for(const pt of [seg.a,seg.b]){
+      const S=w2s(pt.x,pt.y); const dd=Math.hypot(S.x-(P.x*view.scale+view.tx), S.y-(P.y*view.scale+view.ty))/DPR;
+      if(dd<bestD){best=pt; bestD=dd;}
+    }
+    // «середина» для Т-стыка
+    const t=projectOnSegment(P,seg.a,seg.b);
+    if(t>0.15&&t<0.85){ // разрешим среднюю часть
+      const mid={x:seg.a.x+(seg.b.x-seg.a.x)*t, y:seg.a.y+(seg.b.y-seg.a.y)*t};
+      const S=w2s(mid.x,mid.y); const dd=Math.hypot(S.x-(P.x*view.scale+view.tx), S.y-(P.y*view.scale+view.ty))/DPR;
+      if(dd<bestD){best=mid; bestD=dd;}
+    }
+  }
+  return best? {x:best.x,y:best.y} : P;
+}
+function projectOnSegment(P,A,B){
+  const vx=B.x-A.x, vy=B.y-A.y, L2=vx*vx+vy*vy||1;
+  const t=((P.x-A.x)*vx+(P.y-A.y)*vy)/L2; return Math.max(0,Math.min(1,t));
+}
+
+/* ====== UI ====== */
 document.getElementById('btnLine').onclick=()=>{tool='awaitFirst'; first=null; preview=null; say('Линия: ткни 1-ю точку');};
 document.getElementById('btnCenter').onclick=()=>{view.tx=0; view.ty=0; view.scale=1; need(); say('Центр');};
-document.getElementById('btnClearBg').onclick=()=>{bg.src=''; bg.removeAttribute('src'); say('Фон очищен');};
+document.getElementById('btnClearBg').onclick=()=>{bg.src=''; say('Фон очищен');};
+document.getElementById('zoomIn').onclick=()=>{const ns=clampS(view.scale*1.2); const cx=cv.width/2, cy=cv.height/2; view.tx=cx-(cx-view.tx)*(ns/view.scale); view.ty=cy-(cy-view.ty)*(ns/view.scale); view.scale=ns; need();};
+document.getElementById('zoomOut').onclick=()=>{const ns=clampS(view.scale/1.2); const cx=cv.width/2, cy=cv.height/2; view.tx=cx-(cx-view.tx)*(ns/view.scale); view.ty=cy-(cy-view.ty)*(ns/view.scale); view.scale=ns; need();};
+document.getElementById('chkGrid').onchange=e=>{gridOn=e.target.checked; drawGrid();};
+document.getElementById('diam').oninput=e=>{params.d=+e.target.value; document.getElementById('diamV').textContent=params.d; need();};
+document.getElementById('gstep').oninput=e=>{gridStep=+e.target.value; document.getElementById('gstepV').textContent=gridStep; drawGrid();};
+document.getElementById('iso').onchange=e=>{params.iso=e.target.checked; need();};
+document.getElementById('undo').onclick=()=>{pipes.pop(); need(); say('Шаг отменён');};
 
-document.getElementById('chkGrid').onchange=(e)=>{gridOn=e.target.checked; drawGrid();};
+document.getElementById('pick').onchange=e=>{const f=e.target.files?.[0]; if(!f) return; const url=URL.createObjectURL(f); bg.src=url; say('Фото добавлено');};
 
-/* ---------- загрузка фото ---------- */
-document.getElementById('pick').onchange=(e)=>{
-  const f=e.target.files?.[0]; if(!f) return;
-  const url=URL.createObjectURL(f);
-  bg.src=url;
-  say('Фото добавлено');
-};
-
-/* ---------- старт ---------- */
-fitCanvases();
-say('Готов: «Фото» для фона, «Сетка 3D» — вкл/выкл, «Линия» → 1-я точка → 2-я точка.');
+/* ====== старт ====== */
+fit(); drawGrid(); say('Готов: Фото → «Линия» (1-я точка → 2-я). Снэп к концам и к середине для Т-стыка; зум кнопками и пинчем.');
 })();
 </script>
 </body>
