@@ -2,12 +2,12 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — 3D + Фото (одним файлом)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pro Trace 3D + Фото</title>
 <style>
-  html,body{margin:0;height:100%;background:#0e0e0f;font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif}
+  html,body{margin:0;height:100%;background:#0e0e0f;font-family:sans-serif}
   #app{position:fixed;inset:0}
-  .bar{position:fixed;left:10px;top:10px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
+  .bar{position:fixed;left:10px;top:10px;z-index:10;display:flex;gap:8px}
   .btn{height:40px;padding:0 12px;border:0;border-radius:10px;background:#2b2b2f;color:#fff;font-weight:700}
   .btn.ghost{background:#4b4b52}
   input[type=file]{display:none}
@@ -27,97 +27,78 @@
 
   <div id="status" class="status">Статус: загружаю 3D…</div>
 
+<!-- Берём библиотеки прямо из CDN -->
+<script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
+
 <script>
 (()=>{ 'use strict';
-  const statusEl = document.getElementById('status');
-  const appEl = document.getElementById('app');
-  const setStatus = t => statusEl.textContent = 'Статус: ' + t;
-
-  // ===== Загрузка библиотек (CDN) одним файлом =====
-  function addScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; s.defer=true; document.head.appendChild(s); }); }
-  (async function load(){
-    try{
-      await addScript('https://unpkg.com/three@0.160.1/build/three.min.js');
-      await addScript('https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js');
-      init();
-    }catch(e){ setStatus('не удалось загрузить библиотеки'); console.error(e); }
-  })();
+  const statusEl=document.getElementById('status');
+  const appEl=document.getElementById('app');
+  const setStatus=t=>statusEl.textContent='Статус: '+t;
 
   function init(){
     setStatus('3D загружено');
-    const DPR = Math.min(2, Math.max(1, window.devicePixelRatio||1));
-
-    // Сцена
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0e0e0f);
-
-    // Камера
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
-    camera.position.set(12, 10, 14);
-
-    // Рендерер
-    const renderer = new THREE.WebGLRenderer({antialias:true});
+    const DPR=Math.min(2,Math.max(1,window.devicePixelRatio||1));
+    const scene=new THREE.Scene();
+    scene.background=new THREE.Color(0x0e0e0f);
+    const camera=new THREE.PerspectiveCamera(60,1,0.1,2000);
+    camera.position.set(12,10,14);
+    const renderer=new THREE.WebGLRenderer({antialias:true});
     renderer.setPixelRatio(DPR);
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(innerWidth,innerHeight);
     appEl.appendChild(renderer.domElement);
 
-    // Свет
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.8));
-    const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(10,15,8); scene.add(dl);
+    scene.add(new THREE.HemisphereLight(0xffffff,0x222233,0.8));
+    const dl=new THREE.DirectionalLight(0xffffff,0.6); dl.position.set(10,15,8); scene.add(dl);
 
-    // Сетка + оси
-    const grid = new THREE.GridHelper(100, 100, 0x3a3a3f, 0x1f1f22);
-    grid.material.opacity = 0.6; grid.material.transparent = true;
+    const grid=new THREE.GridHelper(100,100,0x3a3a3f,0x1f1f22);
+    grid.material.opacity=0.6; grid.material.transparent=true;
     scene.add(grid);
     scene.add(new THREE.AxesHelper(2.5));
 
-    // Управление камерой
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; controls.dampingFactor = 0.08; controls.target.set(0,0,0);
+    const controls=new THREE.OrbitControls(camera,renderer.domElement);
+    controls.enableDamping=true; controls.dampingFactor=0.08; controls.target.set(0,0,0);
 
-    // Ресайз
-    addEventListener('resize', ()=>{
-      camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth, innerHeight);
-    }, {passive:true});
+    addEventListener('resize',()=>{
+      camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth,innerHeight);
+    });
 
-    // ===== Фото как фон =====
-    const input = document.getElementById('bgUpload');
-    const btnClear = document.getElementById('btnClearBg');
-    const btnReset = document.getElementById('btnReset');
+    const input=document.getElementById('bgUpload');
+    const btnClear=document.getElementById('btnClearBg');
+    const btnReset=document.getElementById('btnReset');
 
-    input.addEventListener('change', (e)=>{
-      const file = e.target.files && e.target.files[0];
+    input.addEventListener('change',(e)=>{
+      const file=e.target.files&&e.target.files[0];
       if(!file) return;
-      const reader = new FileReader();
-      reader.onload = ev=>{
+      const reader=new FileReader();
+      reader.onload=ev=>{
         setStatus('ставлю фото фоном…');
-        const tex = new THREE.TextureLoader().load(ev.target.result, ()=>{
-          scene.background = tex;
-          // Корректное пространство цветов
-          if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+        const tex=new THREE.TextureLoader().load(ev.target.result,()=>{
+          scene.background=tex;
+          if(THREE.SRGBColorSpace) tex.colorSpace=THREE.SRGBColorSpace;
           setStatus('фон установлен');
-        }, undefined, ()=> setStatus('ошибка загрузки фото'));
+        },undefined,()=>setStatus('ошибка фото'));
       };
       reader.readAsDataURL(file);
-      e.target.value = '';
+      e.target.value='';
     });
 
-    btnClear.addEventListener('click', ()=>{
-      scene.background = new THREE.Color(0x0e0e0f);
+    btnClear.addEventListener('click',()=>{
+      scene.background=new THREE.Color(0x0e0e0f);
       setStatus('фон удалён');
     });
-
-    btnReset.addEventListener('click', ()=>{
+    btnReset.addEventListener('click',()=>{
       controls.target.set(0,0,0);
       camera.position.set(12,10,14);
       controls.update();
       setStatus('камера по центру');
     });
 
-    // Рендер-цикл
-    (function loop(){ controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+    (function loop(){controls.update();renderer.render(scene,camera);requestAnimationFrame(loop);})();
   }
+  init();
 })();
 </script>
 </body>
