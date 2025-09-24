@@ -1,73 +1,111 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pro Trace 3D</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #202020;
-    }
-    canvas {
-      display: block;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pro Trace 3D — robust boot</title>
+<style>
+  html,body{margin:0;height:100%;background:#111;overflow:hidden}
+  #status{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.75);color:#fff;
+          padding:6px 10px;border-radius:8px;font:12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;max-width:92vw}
+  canvas{display:block;width:100vw;height:100vh}
+</style>
 </head>
 <body>
-  <!-- Подключаем Three.js -->
-  <script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
-  <!-- Подключаем OrbitControls -->
-  <script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
-  
-  <script>
-    // Проверим, загрузилась ли библиотека
-    console.log("THREE:", typeof THREE);
-    console.log("OrbitControls:", typeof THREE.OrbitControls);
+  <div id="status">Статус: стартуем…</div>
 
-    // Создаём сцену
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x202020);
+<script>
+(async ()=>{
+  const say = (t)=>document.getElementById('status').textContent = t;
+  const loadOne = (src)=>new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=src; s.async=true; s.crossOrigin="anonymous";
+    s.onload=()=>res(src); s.onerror=()=>rej(new Error('fail '+src));
+    document.head.appendChild(s);
+  });
 
-    // Камера
-    const camera = new THREE.PerspectiveCamera(
-      75, window.innerWidth / window.innerHeight, 0.1, 1000
-    );
-    camera.position.set(5, 5, 5);
-    camera.lookAt(0, 0, 0);
-
-    // Рендерер
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    // Контроллер камеры (вращение и зум)
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-
-    // Сетка
-    const grid = new THREE.GridHelper(20, 20);
-    scene.add(grid);
-
-    // Свет
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(5, 10, 7);
-    scene.add(light);
-
-    // Анимация
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+  async function loadSequential(urls, name){
+    let lastErr=null;
+    for(const u of urls){
+      try{ say(`Загружаю ${name}: ${u}`); await loadOne(u); return u; }
+      catch(e){ lastErr=e; }
     }
-    animate();
+    throw lastErr||new Error(`Не удалось загрузить ${name}`);
+  }
 
-    // Автоподгон окна
-    window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script>
+  try{
+    // THREE
+    await loadSequential([
+      "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js",
+      "https://unpkg.com/three@0.160.1/build/three.min.js",
+      "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.1/three.min.js"
+    ], "three.js");
+
+    // OrbitControls
+    await loadSequential([
+      "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/controls/OrbitControls.js",
+      "https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js",
+      "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.1/examples/js/controls/OrbitControls.js"
+    ], "OrbitControls");
+  }catch(e){
+    say("❌ Библиотеки не загрузились. Проверь интернет / блокировщики. Подробнее в консоли.");
+    console.error(e);
+    return;
+  }
+
+  if(!(window.THREE && THREE.OrbitControls)){
+    say("❌ THREE или OrbitControls не найдены после загрузки.");
+    return;
+  }
+
+  // ====== SCENE ======
+  say("✅ 3D загружено — строю сцену…");
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x141414);
+
+  const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000);
+  camera.position.set(6,5,6);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+
+  // grid
+  const grid = new THREE.GridHelper(30, 60, 0x333333, 0x242424);
+  scene.add(grid);
+
+  // test cube (чтобы точно видеть, что всё работает)
+  const cube = new THREE.Mesh(
+    new THREE.BoxGeometry(1,1,1),
+    new THREE.MeshStandardMaterial({color:0x7c5bff})
+  );
+  cube.position.set(0,0.5,0);
+  scene.add(cube);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(3,5,2);
+  scene.add(dir);
+
+  addEventListener('resize', ()=>{
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  }, {passive:true});
+
+  (function tick(){
+    requestAnimationFrame(tick);
+    cube.rotation.y += 0.01;           // чуть вращаем куб для наглядности
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+
+  say("🟣 Готово: сетка + куб. Крути/зумь пальцами.");
+})();
+</script>
 </body>
 </html>
