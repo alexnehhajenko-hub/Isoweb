@@ -1,121 +1,118 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Pro Trace — 3D + Фото фон (одним файлом)</title>
-<style>
-  :root{--bg:#0e0e0f;--panel:#1a1b1f;--btn:#2b2d34;--text:#f5f5f7;--muted:#9aa0a6;--green:#3ddc84}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;touch-action:none;-webkit-user-select:none;user-select:none;background:#000}
-  .bar{position:fixed;left:12px;top:12px;z-index:10;display:flex;gap:10px;flex-wrap:wrap}
-  .btn{height:44px;padding:0 14px;border:0;border-radius:12px;background:var(--btn);color:#fff;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.25)}
-  .btn:active{transform:translateY(1px)}
-  .status{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#9fff9f;padding:6px 10px;border-radius:9px;font-size:12px;z-index:11}
-  input[type=file]{display:none}
-</style>
+  <meta charset="UTF-8">
+  <title>Isoweb 3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #menu {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    #menu button {
+      margin: 5px;
+      padding: 8px 12px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
-  <canvas id="cv"></canvas>
-
-  <div class="bar">
-    <button id="btnPhoto" class="btn">📷 Фото</button>
-    <button id="btnClear" class="btn">🧹 Удалить фон</button>
-    <button id="btnCenter" class="btn">🎯 Центр</button>
-    <input id="filePhoto" type="file" accept="image/*" capture="environment">
+  <div id="menu">
+    <button id="uploadPhoto">📷 Фото</button>
+    <button id="removeBg">🧹 Удалить фон</button>
+    <button id="center">🎯 Центр</button>
   </div>
 
-  <div id="status" class="status">Статус: загружаю 3D…</div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
 
-  <!-- three.js + OrbitControls с CDN -->
-  <script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    let scene, camera, renderer, controls;
+    let backgroundMesh = null;
 
-<script>
-(()=>{'use strict';
+    init();
+    animate();
 
-const DPR = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-const cv = document.getElementById('cv');
-const statusEl = document.getElementById('status');
-const log = (t)=>{ statusEl.textContent = 'Статус: ' + t; };
+    function init() {
+      scene = new THREE.Scene();
 
-// === three.js базовая сцена ===
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
-const renderer = new THREE.WebGLRenderer({canvas: cv, antialias: true, alpha: false});
-renderer.setPixelRatio(DPR);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 2, 5);
 
-const controls = new THREE.OrbitControls(camera, cv);
-controls.enableDamping = true;
-controls.dampingFactor = 0.06;
-controls.target.set(0,0,0);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
 
-// сетка и оси
-const grid = new THREE.GridHelper(1000, 40, 0x444444, 0x222222);
-grid.material.opacity = 0.7; grid.material.transparent = true;
-scene.add(grid);
-scene.add(new THREE.AxesHelper(200));
+      // Контролы
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
 
-// свет лёгкий, чтобы объекты (если появятся) не были чёрными
-const light = new THREE.HemisphereLight(0xffffff, 0x222233, 0.8);
-scene.add(light);
+      // Сетка
+      const gridHelper = new THREE.GridHelper(10, 10);
+      scene.add(gridHelper);
 
-function centerView(){
-  camera.position.set(350, 250, 350);
-  controls.target.set(0,0,0);
-  controls.update();
-}
-function fit(){
-  const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-addEventListener('resize', fit, {passive:true});
-fit();
-centerView();
+      // Оси
+      const axesHelper = new THREE.AxesHelper(5);
+      scene.add(axesHelper);
 
-// === фон из фото ===
-function setBackgroundFromFile(file){
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    const loader = new THREE.TextureLoader();
-    loader.load(e.target.result, (tex)=>{
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.minFilter = THREE.LinearFilter;
-      scene.background = tex;
-      log('Фон установлен ✅');
-    }, undefined, (err)=>{
-      log('Ошибка загрузки фона');
-      console.error(err);
-    });
-  };
-  reader.readAsDataURL(file);
-}
+      // Свет
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(5, 10, 7).normalize();
+      scene.add(light);
 
-// === UI ===
-document.getElementById('btnPhoto').onclick = ()=> document.getElementById('filePhoto').click();
-document.getElementById('filePhoto').onchange = (e)=>{
-  const f = e.target.files && e.target.files[0];
-  if(f) setBackgroundFromFile(f);
-  e.target.value = '';
-};
-document.getElementById('btnClear').onclick = ()=>{ scene.background = null; log('Фон очищен'); };
-document.getElementById('btnCenter').onclick = ()=>{ centerView(); log('Камера по центру'); };
+      // Кнопка "Фото"
+      document.getElementById('uploadPhoto').onclick = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = e => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = function(event) {
+            const texture = new THREE.TextureLoader().load(event.target.result);
+            if (backgroundMesh) scene.remove(backgroundMesh);
+            const geometry = new THREE.PlaneGeometry(10, 10);
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            backgroundMesh = new THREE.Mesh(geometry, material);
+            backgroundMesh.position.z = -5;
+            scene.add(backgroundMesh);
+          };
+          reader.readAsDataURL(file);
+        };
+        input.click();
+      };
 
-// === цикл отрисовки ===
-function tick(){
-  controls.update();
-  renderer.render(scene, camera);
-  requestAnimationFrame(tick);
-}
-tick();
+      // Кнопка "Удалить фон"
+      document.getElementById('removeBg').onclick = () => {
+        if (backgroundMesh) {
+          scene.remove(backgroundMesh);
+          backgroundMesh = null;
+        }
+      };
 
-log('3D загружено');
+      // Кнопка "Центр"
+      document.getElementById('center').onclick = () => {
+        controls.reset();
+      };
 
-})();
-</script>
+      window.addEventListener('resize', onWindowResize, false);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+  </script>
 </body>
 </html>
