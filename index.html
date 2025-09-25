@@ -1,148 +1,225 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>3D Трассировка труб</title>
-  <style>
-    body, html { margin:0; padding:0; overflow:hidden; background:#111; }
-    #ui { position:fixed; top:10px; left:10px; display:flex; gap:10px; z-index:10; }
-    button { padding:8px 12px; border:none; border-radius:8px; background:#444; color:white; font-size:14px; }
-    #settings { position:fixed; top:50px; left:10px; background:#fff; padding:10px; border-radius:8px; display:none; z-index:20; }
-    #settings label { display:block; margin:6px 0; font-size:14px; }
-    input[type=range] { width:120px; }
-    #bgInput { display:none; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pro Trace — фото + сетка + линии (одним файлом)</title>
+<style>
+  :root{--violet:#6b1dff; --violet2:#7c5bff; --ink:#14161a; --pane:#ffffff; --shadow:0 10px 30px rgba(0,0,0,.12)}
+  html,body{margin:0;height:100%;background:#f0f2f5;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #cv{position:fixed;inset:0;display:block;width:100vw;height:100vh;touch-action:none;-webkit-user-select:none;user-select:none}
+
+  /* UI */
+  .bar{position:fixed;left:12px;top:10px;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
+  .btn{height:40px;padding:0 12px;border:0;border-radius:12px;background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;font-weight:700;box-shadow:var(--shadow)}
+  .btn.ghost{background:#2f3238;color:#e9ecf3}
+  .btn.small{height:32px;font-size:13px;padding:0 10px}
+
+  .status{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.78);color:#eaf2ff;padding:6px 10px;border-radius:10px;font-size:13px;z-index:11;max-width:92vw}
+
+  .panel{position:fixed;right:12px;top:56px;z-index:12;min-width:220px;max-width:80vw;
+    background:var(--pane);color:#111;border-radius:16px;box-shadow:var(--shadow);padding:12px 12px 10px;display:none}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0}
+  .panel input[type=range]{width:140px}
+  .panel .title{font-weight:800;color:#2b2f36;margin-bottom:2px}
+</style>
 </head>
 <body>
-  <div id="ui">
-    <button id="lineBtn">Линия</button>
-    <button id="undoBtn">Назад</button>
-    <button id="photoBtn">Фото</button>
-    <button id="centerBtn">Центр</button>
-    <button id="settingsBtn">⚙️</button>
+  <canvas id="cv"></canvas>
+
+  <div class="bar">
+    <button id="btnLine"  class="btn">📐 Линия</button>
+    <button id="btnUndo"  class="btn ghost">↩ Назад</button>
+    <button id="btnPhoto" class="btn ghost">📷 Фото</button>
+    <button id="btnCenter" class="btn ghost">🎯 Центр</button>
+    <button id="btnGear"  class="btn ghost small" title="Настройки">⚙</button>
   </div>
 
-  <div id="settings">
-    <label>Ø, мм <input type="range" id="diameter" min="10" max="100" value="40"></label>
-    <label>Сетка <input type="range" id="grid" min="10" max="100" value="40"></label>
-    <label><input type="checkbox" id="isometry" checked> Изометрия</label>
-    <button onclick="toggleSettings()">Закрыть ✖</button>
+  <div id="panel" class="panel">
+    <div class="title">Настройки</div>
+    <div class="row"><span>Ø трубы</span><input id="rngWidth" type="range" min="6" max="40" value="14"></div>
+    <div class="row"><span>Сетка</span><input id="rngGridA" type="range" min="0" max="100" value="40"></div>
+    <div class="row"><button id="btnClose" class="btn small ghost" style="width:100%">Назад</button></div>
   </div>
 
-  <input type="file" id="bgInput" accept="image/*">
+  <div id="status" class="status">Статус: загрузка…</div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
-  <script>
-    let scene = new THREE.Scene();
-    let camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 2000);
-    camera.position.set(200,200,200);
+<script>
+(()=>{"use strict";
+/* ===== базовые переменные ===== */
+const DPR=Math.min(2,Math.max(1,window.devicePixelRatio||1));
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d',{alpha:false});
+const statusEl=document.getElementById('status');
+const panel=document.getElementById('panel');
 
-    let renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setSize(innerWidth, innerHeight);
-    document.body.appendChild(renderer.domElement);
+const view={tx:0,ty:0,scale:1};                  // трансформация мира → экран
+const clampScale=s=>Math.max(0.25,Math.min(6,s));
+const state={ tool:'idle', mode:'hand', first:null, preview:null };
 
-    let controls = new THREE.OrbitControls(camera, renderer.domElement);
+const segs=[];          // готовые сегменты (трубы)
+const stack=[];         // стек для «Назад»
 
-    // Сетка
-    let grid = new THREE.GridHelper(1000, 25);
-    scene.add(grid);
+const params={
+  linePx:14,                          // толщина «трубы»
+  lineColor:'#2b72ff',                // цвет трубы
+  endCap:'#e9f0ff',                   // цвет «торца»
+  grid:{ step:80, alpha:0.40 },       // сетка
+  bgColor:'#eef1f5'                   // фон, если нет фото
+};
+let bgImage=null;                     // фон-фото (HTMLImageElement|null)
 
-    // Свет
-    let light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
-    scene.add(light);
+/* ===== утилиты ===== */
+function updateStatus(msg=''){
+  const t = state.tool==='awaitFirst' ? 'Жду 1-ю точку'
+        : state.tool==='awaitSecond'? 'Жду 2-ю точку'
+        : 'Готов';
+  statusEl.textContent=`Статус: ${msg||'—'} ${msg?'| ':''}${t}`;
+}
+function fit(){ cv.width=Math.round(innerWidth*DPR); cv.height=Math.round(innerHeight*DPR); need(); }
+addEventListener('resize',fit,{passive:true});
+function s2w(sx,sy){ return {x:(sx-view.tx)/view.scale, y:(sy-view.ty)/view.scale}; }
+function w2s(x,y){ return {x:x*view.scale+view.tx, y:y*view.scale+view.ty}; }
+let raf=0,dirty=false; function need(){ dirty=true; if(!raf){ raf=requestAnimationFrame(()=>{raf=0;if(dirty){dirty=false;draw();}});} }
 
-    // Группа для труб
-    let pipes = new THREE.Group();
-    scene.add(pipes);
+/* ===== рисование ===== */
+function drawBackground(){
+  ctx.setTransform(1,0,0,1,0,0);
+  if(bgImage && bgImage.complete){
+    // вписываем фото по центру без искажений
+    const cw=cv.width, ch=cv.height;
+    const iw=bgImage.naturalWidth, ih=bgImage.naturalHeight;
+    const k=Math.min(cw/iw, ch/ih);
+    const w=iw*k, h=ih*k, x=(cw-w)/2, y=(ch-h)/2;
+    ctx.drawImage(bgImage,x,y,w,h);
+  }else{
+    ctx.fillStyle=params.bgColor;
+    ctx.fillRect(0,0,cv.width,cv.height);
+  }
+}
+function drawGrid(){
+  ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  const step=params.grid.step, a=params.grid.alpha;
+  ctx.lineWidth=1/view.scale;
+  // тонкие
+  ctx.strokeStyle=`rgba(90,100,120,${0.12*a})`;
+  ctx.beginPath();
+  const minX=(-view.tx)/view.scale, minY=(-view.ty)/view.scale;
+  const maxX=(cv.width -view.tx)/view.scale, maxY=(cv.height-view.ty)/view.scale;
+  const x0=Math.floor(minX/step)*step, y0=Math.floor(minY/step)*step;
+  for(let x=x0;x<=maxX;x+=step){ ctx.moveTo(x,minY); ctx.lineTo(x,maxY); }
+  for(let y=y0;y<=maxY;y+=step){ ctx.moveTo(minX,y); ctx.lineTo(maxX,y); }
+  ctx.stroke();
+  // оси
+  ctx.strokeStyle=`rgba(0,90,255,${0.45*a})`; ctx.beginPath(); ctx.moveTo(0,minY); ctx.lineTo(0,maxY); ctx.stroke();
+  ctx.strokeStyle=`rgba(255,60,0,${0.45*a})`;  ctx.beginPath(); ctx.moveTo(minX,0); ctx.lineTo(maxX,0); ctx.stroke();
+}
 
-    // Фон (фото)
-    let bgMesh = null;
+function drawSegments(){
+  ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  for(const s of segs){
+    // тень
+    ctx.lineCap='round';
+    ctx.strokeStyle='rgba(0,0,0,.12)';
+    ctx.lineWidth=(params.linePx+3)/view.scale;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+    // сама «труба»
+    ctx.strokeStyle=params.lineColor;
+    ctx.lineWidth=params.linePx/view.scale;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+    // торцы
+    ctx.fillStyle=params.endCap;
+    ctx.beginPath(); ctx.arc(s.a.x,s.a.y,(params.linePx/2)/view.scale,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(s.b.x,s.b.y,(params.linePx/2)/view.scale,0,Math.PI*2); ctx.fill();
+  }
+}
+function drawPreview(){
+  if(state.tool!=='awaitSecond' || !state.first || !state.preview) return;
+  ctx.setTransform(view.scale,0,0,view.scale,view.tx,view.ty);
+  ctx.lineCap='round';
+  ctx.strokeStyle=params.lineColor;
+  ctx.lineWidth=params.linePx/view.scale;
+  ctx.beginPath(); ctx.moveTo(state.first.x,state.first.y); ctx.lineTo(state.preview.x,state.preview.y); ctx.stroke();
+}
 
-    document.getElementById('photoBtn').onclick = () => {
-      document.getElementById('bgInput').click();
-    };
-    document.getElementById('bgInput').onchange = e => {
-      let file = e.target.files[0];
-      let reader = new FileReader();
-      reader.onload = function(ev) {
-        let tex = new THREE.TextureLoader().load(ev.target.result);
-        if (bgMesh) scene.remove(bgMesh);
-        let geo = new THREE.PlaneGeometry(2000, 2000);
-        let mat = new THREE.MeshBasicMaterial({map: tex, side: THREE.DoubleSide});
-        bgMesh = new THREE.Mesh(geo, mat);
-        bgMesh.position.z = -10;
-        scene.add(bgMesh);
-      };
-      reader.readAsDataURL(file);
-    };
+function draw(){
+  drawBackground();
+  drawGrid();
+  drawSegments();
+  drawPreview();
+}
 
-    // Логика рисования труб
-    let drawing = false;
-    let lastPoint = null;
-    let pipeDiameter = 40;
+/* ===== управление: зум/пан ===== */
+const pointers=new Map();let isPanning=false,panLast=null;let prevCenter=null,prevDist=null;
+function canvasXY(e){const r=cv.getBoundingClientRect();return{sx:(e.clientX-r.left)*(cv.width/r.width),sy:(e.clientY-r.top)*(cv.height/r.height)};}
+function centroid(){const a=[...pointers.values()];if(!a.length)return null;let sx=0,sy=0;for(const p of a){sx+=p.sx;sy+=p.sy;}return{sx:sx/a.length,sy:sy/a.length};}
+function dist2(a,b){return Math.abs(a.sx-b.sx)+Math.abs(a.sy-b.sy);}
 
-    document.getElementById('lineBtn').onclick = () => { drawing = true; };
-    document.getElementById('undoBtn').onclick = () => {
-      pipes.remove(pipes.children[pipes.children.length-1]);
-    };
-    document.getElementById('centerBtn').onclick = () => {
-      controls.target.set(0,0,0);
-      camera.position.set(200,200,200);
-    };
+cv.addEventListener('pointerdown',e=>{
+  const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
+  if(pointers.size===2){ const[p0,p1]=[...pointers.values()]; prevCenter=centroid(); prevDist=dist2(p0,p1); return; }
 
-    renderer.domElement.addEventListener('click', e => {
-      if (!drawing) return;
-      let mouse = new THREE.Vector2(
-        (e.clientX / innerWidth) * 2 - 1,
-        -(e.clientY / innerHeight) * 2 + 1
-      );
-      let ray = new THREE.Raycaster();
-      ray.setFromCamera(mouse, camera);
-      let plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
-      let point = new THREE.Vector3();
-      ray.ray.intersectPlane(plane, point);
+  // НЕ панорамируем одним пальцем — чтобы можно было ставить точки
+  if(state.tool==='awaitFirst'){ state.first=s2w(sx,sy); state.preview=null; state.tool='awaitSecond'; updateStatus('1-я точка есть'); need(); return; }
+  if(state.tool==='awaitSecond'){ state.preview=s2w(sx,sy); segs.push({a:state.first,b:state.preview}); stack.push('seg'); state.first=null; state.preview=null; state.tool='idle'; updateStatus('Сегмент готов. Для следующего нажми «Линия».'); need(); return; }
+},{passive:true});
 
-      if (lastPoint) {
-        let dir = new THREE.Vector3().subVectors(point, lastPoint);
-        let length = dir.length();
-        let geo = new THREE.CylinderGeometry(pipeDiameter/20, pipeDiameter/20, length, 16);
-        let mat = new THREE.MeshStandardMaterial({color:0x0077ff});
-        let cyl = new THREE.Mesh(geo, mat);
-        cyl.position.copy(lastPoint).add(dir.multiplyScalar(0.5));
-        cyl.lookAt(point);
-        pipes.add(cyl);
-
-        // Отвод (сфера на стыке)
-        let sphGeo = new THREE.SphereGeometry(pipeDiameter/20, 16, 16);
-        let sph = new THREE.Mesh(sphGeo, mat);
-        sph.position.copy(point);
-        pipes.add(sph);
-      }
-      lastPoint = point.clone();
-    });
-
-    // Настройки
-    document.getElementById('diameter').oninput = e => { pipeDiameter = e.target.value; };
-    function toggleSettings(){
-      let st = document.getElementById('settings');
-      st.style.display = (st.style.display=="none")?"block":"none";
+cv.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)) return;
+  const {sx,sy}=canvasXY(e); pointers.set(e.pointerId,{sx,sy});
+  if(pointers.size===2){
+    const nowC=centroid(); const[p0,p1]=[...pointers.values()]; const nowD=dist2(p0,p1);
+    if(prevCenter&&prevDist){
+      const k=nowD>0&&prevDist>0?(nowD/prevDist):1;
+      const ns=clampScale(view.scale*k);
+      const cx=nowC.sx,cy=nowC.sy;
+      view.tx=cx-(cx-view.tx)*(ns/view.scale);
+      view.ty=cy-(cy-view.ty)*(ns/view.scale);
+      view.scale=ns; need();
     }
-    document.getElementById('settingsBtn').onclick = toggleSettings;
+    prevCenter=nowC; prevDist=nowD; return;
+  }
+  if(state.tool==='awaitSecond'&&state.first){ state.preview=s2w(sx,sy); need(); }
+},{passive:true});
 
-    // Рендер
-    function animate(){
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
+cv.addEventListener('pointerup',e=>{ pointers.delete(e.pointerId); if(pointers.size<2){prevCenter=null;prevDist=null;} },{passive:true});
 
-    window.addEventListener('resize', ()=>{
-      camera.aspect = innerWidth/innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth, innerHeight);
-    });
-  </script>
+/* ===== кнопки ===== */
+const $=id=>document.getElementById(id);
+$('btnLine').onclick = ()=>{ state.tool='awaitFirst'; state.first=null; state.preview=null; updateStatus('Режим Линия: ткни 1-ю точку'); };
+$('btnUndo').onclick = ()=>{
+  if(state.tool==='awaitSecond'&&state.first){ state.first=null; state.preview=null; state.tool='idle'; need(); updateStatus('Сегмент отменён'); return; }
+  const last=stack.pop(); if(!last){ updateStatus('Нечего отменять'); return; }
+  if(last==='seg'&&segs.length) segs.pop(); need(); updateStatus('Отменено');
+};
+$('btnCenter').onclick = ()=>{ view.tx=cv.width/2; view.ty=cv.height/2; view.scale=1; need(); updateStatus('Центр'); };
+$('btnGear').onclick = ()=>{ panel.style.display='block'; };
+$('btnClose').onclick = ()=>{ panel.style.display='none'; };
+
+$('rngWidth').oninput = e=>{ params.linePx=+e.target.value; need(); };
+$('rngGridA').oninput = e=>{ params.grid.alpha=(+e.target.value)/100; need(); };
+
+$('btnPhoto').onclick = ()=>{
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*';
+  input.onchange = (ev)=>{
+    const file=ev.target.files?.[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload = e=>{
+      bgImage=new Image(); bgImage.onload=()=>{ need(); updateStatus('Фото добавлено'); };
+      bgImage.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+};
+
+/* старт */
+fit();
+view.tx=cv.width/2; view.ty=cv.height/2; // небольшой комфорт
+updateStatus('Готово: нажми «Линия» → 1-я точка → 2-я точка.');
+need();
+})();
+</script>
 </body>
 </html>
