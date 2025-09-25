@@ -2,409 +2,385 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Трассировка труб — one file</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Трассировка труб — 2.5D</title>
 <style>
   :root{
-    --ui:#15171a; --ink:#eef2f7; --ink2:#c7d0db; --accent:#6ea8fe; --ok:#19c37d;
+    --ui-bg: rgba(20,20,22,.9);
+    --ui-txt: #e9eef7;
+    --accent: #6ea8ff;
+    --line: #3da1ff;
+    --grid: rgba(255,255,255,.12);
   }
-  html,body{height:100%;margin:0;background:#0e0f10;color:var(--ink);font:16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";}
-  #toolbar{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;z-index:10;pointer-events:auto;flex-wrap:wrap}
-  #toolbar .group{display:flex;gap:8px;background:rgba(18,20,23,.75);backdrop-filter: blur(8px);border:1px solid #2a2e35;border-radius:14px;padding:6px}
-  button{color:var(--ink);background:#1d2026;border:1px solid #2b3036;border-radius:12px;padding:8px 12px}
-  button.active{background:#5c7cff;border-color:#6ea8fe;color:#fff;box-shadow:0 0 0 2px rgba(110,168,254,.25) inset}
-  input[type=file]{display:none}
-  #status{position:fixed;left:12px;bottom:14px;z-index:10;background:rgba(0,0,0,.55);padding:8px 12px;border-radius:12px;border:1px solid #2a2e35;color:#bfe7cb}
-  #canvas{position:absolute;inset:0;touch-action:none}
-  /* settings dialog */
-  #btnSettings{font-size:18px}
-  dialog{border:none;border-radius:16px;padding:16px 18px;background:var(--ui);color:var(--ink);width:min(92vw,420px)}
-  dialog::backdrop{background:rgba(0,0,0,.35)}
-  dialog h3{margin:0 0 10px}
-  dialog label{display:block;margin:10px 0}
-  dialog .row{display:flex;align-items:center;gap:10px}
-  dialog input[type=range]{width:100%}
-  dialog menu{display:flex;justify-content:flex-end;gap:8px;margin:10px 0 0}
-  /* grid crosshair */
-  .axis-tip{position:fixed;right:12px;top:12px;z-index:9;color:var(--ink2);font-size:12px;opacity:.8}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#0e0f12;color:var(--ui-txt);
+            font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif}
+  /* Холст */
+  #stage{position:fixed;inset:0;overflow:hidden;touch-action:none;background:#0e0f12}
+  #content{position:absolute;left:0;top:0; transform-origin:0 0;}
+  #bg{display:block;position:absolute;left:0;top:0;max-width:none;max-height:none;user-select:none;pointer-events:none}
+  canvas.layer{position:absolute;left:0;top:0;pointer-events:none;max-width:none;max-height:none}
+  /* UI */
+  #ui{position:fixed;left:8px;top:8px;display:flex;gap:8px;flex-wrap:wrap;z-index:10}
+  .btn{background:var(--ui-bg);color:var(--ui-txt);border:1px solid rgba(255,255,255,.1);
+       padding:10px 14px;border-radius:12px;backdrop-filter:blur(6px);
+       box-shadow:0 6px 18px rgba(0,0,0,.25);font-weight:600}
+  .btn.active{outline:2px solid var(--accent)}
+  .btn:active{transform:translateY(1px)}
+  #status{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.55);padding:10px 12px;border-radius:10px;
+          font-size:14px}
+  /* Панель параметров (вынесена, не перекрывает кнопки) */
+  #panel{position:fixed;right:10px;top:10px;width:280px;background:var(--ui-bg);border:1px solid rgba(255,255,255,.1);
+         border-radius:14px;padding:12px 12px 6px;display:none;z-index:11}
+  #panel.open{display:block}
+  #panel h3{margin:0 0 8px 0;font-size:16px}
+  .row{display:flex;align-items:center;justify-content:space-between;margin:10px 0}
+  .row label{font-size:14px;opacity:.9}
+  input[type="range"]{width:160px}
+  input[type="checkbox"]{transform:scale(1.1)}
 </style>
 </head>
 <body>
-  <div id="toolbar">
-    <div class="group">
-      <button id="btnLine" class="active">Линия</button>
-      <button id="btnBack">Назад</button>
-      <button id="btnPhoto">Фото</button>
-      <label><input id="file" type="file" accept="image/*" /></label>
-      <button id="btnCenter">Центр</button>
-      <button id="btnSave">Сохранить</button>
-      <button id="btnLoad">Загрузить</button>
-      <button id="btnSettings" title="Параметры">⚙️</button>
+  <div id="stage">
+    <div id="content">
+      <img id="bg" alt="">
+      <canvas id="grid" class="layer"></canvas>
+      <canvas id="draw" class="layer"></canvas>
+      <canvas id="preview" class="layer"></canvas>
     </div>
   </div>
 
-  <div class="axis-tip">пинч/двумя пальцами — масштаб, одним пальцем по пустому — перенос</div>
-  <canvas id="canvas"></canvas>
-  <div id="status">Статус: готов</div>
+  <div id="ui">
+    <button id="btnLine" class="btn">Линия</button>
+    <button id="btnUndo" class="btn">Назад</button>
+    <label class="btn" style="cursor:pointer">Фото
+      <input id="file" type="file" accept="image/*" style="display:none">
+    </label>
+    <button id="btnCenter" class="btn">Центр</button>
+    <button id="btnSave" class="btn">Сохранить</button>
+    <button id="btnGear" class="btn">⚙</button>
+  </div>
 
-  <!-- Settings dialog -->
-  <dialog id="settingsDialog">
-    <form method="dialog" id="settingsForm">
-      <h3>Параметры</h3>
-      <label>Ø трубы, мм
-        <input type="range" id="diameterRange" min="10" max="200" step="1">
-        <span id="diameterValue"></span>
-      </label>
-      <label>Сетка, px
-        <input type="range" id="gridRange" min="10" max="120" step="1">
-        <span id="gridValue"></span>
-      </label>
-      <label class="row"><input type="checkbox" id="isoCheck"> <span>Изометрия (2.5D)</span></label>
-      <label class="row"><input type="checkbox" id="magnetCheck" checked> <span>Магнит 0/45/90°</span></label>
-      <menu>
-        <button value="cancel">Отмена</button>
-        <button id="applySettings" value="ok">Применить</button>
-      </menu>
-    </form>
-  </dialog>
+  <div id="panel">
+    <h3>Параметры</h3>
+    <div class="row"><label>Ø, мм</label><input id="pipeRange" type="range" min="10" max="120" value="40"></div>
+    <div class="row"><label>Сетка</label><input id="gridRange" type="range" min="16" max="120" value="48"></div>
+    <div class="row"><label>Магнит 0/45/90</label><input id="snapChk" type="checkbox" checked></div>
+    <div class="row"><label>Изометрия (2.5D)</label><input id="isoChk" type="checkbox" checked></div>
+  </div>
+
+  <div id="status">Готов</div>
 
 <script>
-(() => {
-  const cvs = document.getElementById('canvas');
-  const ctx = cvs.getContext('2d');
-  const statusEl = document.getElementById('status');
+(()=>{
+  const el = s => document.querySelector(s);
+  const $stage   = el('#stage');
+  const $content = el('#content');
+  const $bg      = el('#bg');
+  const $grid    = el('#grid');
+  const $draw    = el('#draw');
+  const $preview = el('#preview');
+  const $status  = el('#status');
 
-  const file = document.getElementById('file');
-  const btnPhoto = document.getElementById('btnPhoto');
-  const btnLine = document.getElementById('btnLine');
-  const btnBack = document.getElementById('btnBack');
-  const btnCenter = document.getElementById('btnCenter');
-  const btnSave = document.getElementById('btnSave');
-  const btnLoad = document.getElementById('btnLoad');
-  const btnSettings = document.getElementById('btnSettings');
+  // UI
+  const btnLine   = el('#btnLine');
+  const btnUndo   = el('#btnUndo');
+  const btnCenter = el('#btnCenter');
+  const btnSave   = el('#btnSave');
+  const btnGear   = el('#btnGear');
+  const fileInput = el('#file');
+  const panel     = el('#panel');
 
-  // dialog
-  const dlg = document.getElementById('settingsDialog');
-  const diameterRange = document.getElementById('diameterRange');
-  const gridRange = document.getElementById('gridRange');
-  const isoCheck = document.getElementById('isoCheck');
-  const magnetCheck = document.getElementById('magnetCheck');
-  const diameterValue = document.getElementById('diameterValue');
-  const gridValue = document.getElementById('gridValue');
-  const applyBtn = document.getElementById('applySettings');
+  const pipeRange = el('#pipeRange');
+  const gridRange = el('#gridRange');
+  const snapChk   = el('#snapChk');
+  const isoChk    = el('#isoChk');
 
-  // world state
-  const app = window.app = {
-    // view
-    zoom: 1,
-    tx: 0, ty: 0,             // translate in screen px
-    // photo
-    bg: null, bgW:0, bgH:0,
-    // drawing
-    mode: 'line',
-    pipeDiameter: 40,     // мм (визуально: пиксели = мм при зуме=1)
-    gridSize: 40,
-    isometric: false,
-    magnet: true,
-    segments: []          // [{a:{x,y}, b:{x,y}} ...] — в мировых координатах
+  // Состояние "мира"
+  const state = {
+    worldW: 1600,
+    worldH: 1000,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    minScale: .25,
+    maxScale: 6,
+    drawing: false,
+    startPt: null,
+    segments: [],       // {a:{x,y}, b:{x,y}, d:diameter}
+    diameter: 40,
+    gridStep: 48,
+    snap: true,
+    iso: true
   };
 
-  // ======= utils =======
-  const setStatus = (t)=> statusEl.textContent = 'Статус: ' + t;
-  function resize(){
-    cvs.width = innerWidth * devicePixelRatio;
-    cvs.height = innerHeight * devicePixelRatio;
-    cvs.style.width = innerWidth+'px';
-    cvs.style.height = innerHeight+'px';
-    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
-    draw();
-  }
-  addEventListener('resize', resize, {passive:true});
-  resize();
-
-  // экран->мир и мир->экран
-  function screenToWorld(x,y){
-    return { x:(x - app.tx)/app.zoom, y:(y - app.ty)/app.zoom };
-  }
-  function worldToScreen(p){
-    return { x:p.x*app.zoom + app.tx, y:p.y*app.zoom + app.ty };
+  // Инициализация пустого холста
+  function setupWorld(w, h){
+    state.worldW = w; state.worldH = h;
+    [$bg,$grid,$draw,$preview].forEach(l=>{ l.width = w; l.height = h; });
+    $content.style.width  = w+'px';
+    $content.style.height = h+'px';
+    fitToScreen();
+    drawGrid();
+    redraw();
   }
 
-  // магнит 0/45/90 относительно последней точки
-  function snapPoint(base, p){
-    if(!app.magnet || !base) return p;
-    const dx = p.x - base.x, dy = p.y - base.y;
-    const ang = Math.atan2(dy, dx); // -PI..PI
-    // к ближайшему из 0, 45°, 90°, 135°, 180°, ...
-    const step = Math.PI/4; // 45°
-    const r = Math.hypot(dx,dy);
-    const snapped = Math.round(ang/step)*step;
-    return { x: base.x + Math.cos(snapped)*r, y: base.y + Math.sin(snapped)*r };
+  // Центрировать и вписать
+  function fitToScreen(){
+    const vw = $stage.clientWidth, vh = $stage.clientHeight;
+    const s = Math.min(vw/state.worldW, vh/state.worldH);
+    state.scale = s*0.98;
+    state.offsetX = (vw - state.worldW*state.scale)/2;
+    state.offsetY = (vh - state.worldH*state.scale)/2;
+    applyView();
+  }
+  function applyView(){
+    $content.style.transform = `translate(${state.offsetX}px,${state.offsetY}px) scale(${state.scale})`;
   }
 
-  // ======= drawing =======
+  // ---------- Рендер ----------
   function drawGrid(){
-    const g = app.gridSize;
-    const w = cvs.width/devicePixelRatio, h = cvs.height/devicePixelRatio;
+    const g = $grid.getContext('2d');
+    g.clearRect(0,0,$grid.width,$grid.height);
+    const step = state.gridStep;
+    g.strokeStyle = 'rgba(255,255,255,.1)';
+    g.lineWidth = 1;
+    g.beginPath();
+    for(let x=0;x<=state.worldW;x+=step){ g.moveTo(x,0); g.lineTo(x,state.worldH); }
+    for(let y=0;y<=state.worldH;y+=step){ g.moveTo(0,y); g.lineTo(state.worldW,y); }
+    g.stroke();
+    // оси
+    g.strokeStyle='rgba(255,80,80,.5)';
+    g.beginPath(); g.moveTo(state.worldW/2,0); g.lineTo(state.worldW/2,state.worldH); g.stroke();
+    g.strokeStyle='rgba(80,180,255,.5)';
+    g.beginPath(); g.moveTo(0,state.worldH/2); g.lineTo(state.worldW,state.worldH/2); g.stroke();
+  }
+  function redraw(){
+    const ctx = $draw.getContext('2d');
+    ctx.clearRect(0,0,$draw.width,$draw.height);
+    for(const s of state.segments){
+      drawPipe(ctx, s.a, s.b, s.d);
+    }
+  }
+  function drawPreview(pEnd){
+    const pctx = $preview.getContext('2d');
+    pctx.clearRect(0,0,$preview.width,$preview.height);
+    if(!state.startPt || !pEnd) return;
+    drawPipe(pctx, state.startPt, pEnd, state.diameter, true);
+  }
 
-    // найти сдвиг сетки в экранных координатах
-    const x0 = ((-app.tx/app.zoom)%g + g)%g;
-    const y0 = ((-app.ty/app.zoom)%g + g)%g;
+  // Рисование «трубы»: основной прямой сегмент + полукруглые торцы
+  function drawPipe(ctx, A, B, D, dashed=false){
+    const r = D/2;
+    const dx = B.x-A.x, dy = B.y-A.y;
+    const L = Math.hypot(dx,dy) || 1;
+    const nx = dx/L, ny = dy/L;           // единичное вдоль
+    const px = -ny, py = nx;              // единичное поперёк
+    const c1x = A.x + px*r, c1y = A.y + py*r;
+    const c2x = A.x - px*r, c2y = A.y - py*r;
+    const c3x = B.x + px*r, c3y = B.y + py*r;
+    const c4x = B.x - px*r, c4y = B.y - py*r;
 
     ctx.save();
-    ctx.globalAlpha = .35;
-    ctx.strokeStyle = '#2a2f38';
     ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0,0,0,.25)';
+    ctx.fillStyle = getPipeGradient(ctx, A, B, D);
 
-    // вертикали
-    for(let x=x0; x<w; x+=g){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
-    // горизонтали
-    for(let y=y0; y<h; y+=g){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+    if(dashed){ ctx.setLineDash([10,8]); ctx.strokeStyle='rgba(255,255,255,.5)'; }
 
-    // оси
-    const c = worldToScreen({x:0,y:0});
-    ctx.globalAlpha = .55;
-    ctx.strokeStyle = '#ff6b6b'; // x
-    ctx.beginPath(); ctx.moveTo(0,c.y); ctx.lineTo(w,c.y); ctx.stroke();
-    ctx.strokeStyle = '#6bd3ff'; // y
-    ctx.beginPath(); ctx.moveTo(c.x,0); ctx.lineTo(c.x,h); ctx.stroke();
-
-    if(app.isometric){
-      ctx.globalAlpha = .25;
-      ctx.strokeStyle = '#97a6ff';
-      // изометрические направляющие 30°/150°
-      const spacing = g*2;
-      // линия под углом, рисуем через параллели
-      const drawIso = (angle)=> {
-        const k = Math.tan(angle);
-        // y = k(x - xShift)
-        for(let y=-h; y<2*h; y+=spacing){
-          ctx.beginPath();
-          ctx.moveTo(0, y + (x0)*k);
-          ctx.lineTo(w, y + (x0 + w)*k);
-          ctx.stroke();
-        }
-      }
-      drawIso(Math.PI/6);     // 30°
-      drawIso(Math.PI - Math.PI/6); // 150°
-    }
+    ctx.beginPath();
+    // полукруг у старта
+    ctx.arc(A.x, A.y, r, Math.atan2(py,px), Math.atan2(-py,-px), true);
+    // боковая стенка
+    ctx.lineTo(c4x, c4y);
+    // полукруг у конца
+    ctx.arc(B.x, B.y, r, Math.atan2(-py,-px), Math.atan2(py,px), true);
+    // вторая стенка
+    ctx.lineTo(c1x, c1y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
-
-  function drawBackground(){
-    if(!app.bg) return;
-    // фон — это просто изображение под текущим трансформом (увеличивается и двигается вместе)
-    const p = worldToScreen({x:0,y:0}); // экранная позиция мирового (0,0)
-    const w = app.bgW*app.zoom, h = app.bgH*app.zoom;
-    ctx.globalAlpha = 1;
-    ctx.drawImage(app.bg, p.x, p.y, w, h);
+  // Псевдо-объём (2.5D) — свет сверху
+  function getPipeGradient(ctx, A, B, D){
+    if(!state.iso){
+      const g = ctx.createLinearGradient(A.x,A.y,B.x,B.y);
+      g.addColorStop(0,'#3da1ff'); g.addColorStop(1,'#1b67ff');
+      return g;
+    }
+    const r = D/2;
+    const g = ctx.createLinearGradient(0, A.y-r, 0, A.y+r);
+    g.addColorStop(0,'#8ec5ff');
+    g.addColorStop(.5,'#2b7cff');
+    g.addColorStop(1,'#0b3a7a');
+    return g;
   }
 
-  function drawPipes(){
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#4da3ff';
-    ctx.fillStyle = '#4da3ff';
+  // ---------- Геометрия/координаты ----------
+  function screenToWorld(clientX, clientY){
+    const rect = $stage.getBoundingClientRect();
+    const x = (clientX - rect.left - state.offsetX) / state.scale;
+    const y = (clientY - rect.top  - state.offsetY) / state.scale;
+    return {x:clamp(x,0,state.worldW), y:clamp(y,0,state.worldH)};
+  }
+  const clamp = (v,a,b)=> Math.max(a,Math.min(b,v));
 
-    for(const s of app.segments){
-      const a = worldToScreen(s.a);
-      const b = worldToScreen(s.b);
-      const px = (app.pipeDiameter/10) * (app.zoom*0.5); // приятная толщина визуально
-      ctx.lineWidth = Math.max(2, px);
+  // Магнит 0/45/90
+  function snapPoint(p, origin){
+    if(!state.snap || !origin) return p;
+    let dx = p.x-origin.x, dy = p.y-origin.y;
+    const ang = Math.atan2(dy,dx);
+    const snaps = [0, Math.PI/4, Math.PI/2, -Math.PI/4, -Math.PI/2, Math.PI];
+    let best = snaps[0], bestDiff = 99;
+    for(const s of snaps){
+      let d = Math.abs(ang - s);
+      if(d>Math.PI) d = 2*Math.PI - d;
+      if(d<bestDiff){ bestDiff=d; best=s; }
+    }
+    const L = Math.hypot(dx,dy);
+    return {x: origin.x + Math.cos(best)*L, y: origin.y + Math.sin(best)*L};
+  }
 
-      ctx.beginPath();
-      ctx.moveTo(a.x,a.y);
-      ctx.lineTo(b.x,b.y);
-      ctx.stroke();
+  // ---------- Жесты (панорамирование, пинч-зум) ----------
+  const pointers = new Map();
+  let lastPan = {x:0,y:0};
+  let pinchBase = null;
 
-      // округлённые торцы (дополнительно лёгкий отблеск)
-      const capR = ctx.lineWidth/2;
-      ctx.beginPath(); ctx.arc(a.x,a.y, capR, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(b.x,b.y, capR, 0, Math.PI*2); ctx.fill();
-
-      // «полутень» (изометрия)
-      if(app.isometric){
-        ctx.save(); ctx.globalAlpha = .12;
-        ctx.lineWidth = Math.max(1, px*1.4);
-        ctx.strokeStyle = '#000';
-        ctx.beginPath(); ctx.moveTo(a.x+px*.15,a.y+px*.15); ctx.lineTo(b.x+px*.15,b.y+px*.15);
-        ctx.stroke(); ctx.restore();
+  $stage.addEventListener('pointerdown', ev=>{
+    $stage.setPointerCapture(ev.pointerId);
+    pointers.set(ev.pointerId, {x:ev.clientX,y:ev.clientY});
+    if(state.drawing){ // в режиме рисования — клики для точек
+      const p = screenToWorld(ev.clientX, ev.clientY);
+      if(!state.startPt){               // шаг 2: выбрать старт
+        state.startPt = p;
+        $status.textContent = 'Старт поставлен. Ткни конечную точку.';
+      }else{                            // шаг 3: выбрать финиш и завершить
+        const end = snapPoint(p, state.startPt);
+        state.segments.push({a:state.startPt, b:end, d:state.diameter});
+        state.startPt = null;
+        state.drawing = false;
+        btnLine.classList.remove('active');
+        $preview.getContext('2d').clearRect(0,0,$preview.width,$preview.height);
+        redraw();
+        $status.textContent = 'Линия готова. Нажми «Линия» чтобы начать новую.';
       }
+      ev.preventDefault();
+      return;
     }
-  }
+    // не рисуем — значит начинаем пан
+    lastPan.x = ev.clientX;
+    lastPan.y = ev.clientY;
+    ev.preventDefault();
+  }, {passive:false});
 
-  function draw(){
-    const w = cvs.width/devicePixelRatio, h = cvs.height/devicePixelRatio;
-    ctx.clearRect(0,0,w,h);
-    drawBackground();
-    drawGrid();
-    drawPipes();
-  }
+  $stage.addEventListener('pointermove', ev=>{
+    if(!pointers.has(ev.pointerId)) return;
+    const prev = pointers.get(ev.pointerId);
+    pointers.set(ev.pointerId, {x:ev.clientX,y:ev.clientY});
 
-  // ======= input: draw lines =======
-  let tempStart = null;      // мировая начальная точка очередного сегмента
-  let panning = false;
-  let lastPan = null;
-  let pinchDist = 0;
-
-  function startPointer(x,y, id, touchesCount){
-    const world = screenToWorld(x,y);
-    if(touchesCount===2){ panning=false; lastPan=null; return; }
-    // если на пустом месте длительно — панорамирование одним пальцем
-    // (простое правило: если не активна «Линия» — перемещаем)
-    if(app.mode!=='line'){ panning=true; lastPan={x,y}; return; }
-
-    tempStart = world;
-  }
-  function movePointer(x,y, touchesCount){
-    if(touchesCount===2) return; // pinch обрабатываем отдельно
-    if(panning && lastPan){
-      app.tx += x - lastPan.x; app.ty += y - lastPan.y; lastPan = {x,y}; draw(); return;
+    // предпросмотр линии в режиме рисования
+    if(state.drawing && state.startPt && pointers.size===1){
+      const p = screenToWorld(ev.clientX, ev.clientY);
+      drawPreview(snapPoint(p, state.startPt));
+      ev.preventDefault(); return;
     }
-  }
-  function endPointer(x,y){
-    if(panning){ panning=false; lastPan=null; return; }
-    if(!tempStart) return;
-    const endW = screenToWorld(x,y);
-    const snapped = app.magnet ? snapPoint(tempStart, endW) : endW;
-    if( Math.hypot(snapped.x-tempStart.x, snapped.y-tempStart.y) > 1 ){
-      app.segments.push({a:tempStart, b:snapped});
-      setStatus('Сегмент готов. Для следующего нажми «Линия». | Готов');
-      draw();
+
+    // Пинч-зум
+    if(pointers.size===2 && !state.drawing){
+      const [p1,p2] = [...pointers.values()];
+      const cx = (p1.x+p2.x)/2, cy=(p1.y+p2.y)/2;
+      const dist = Math.hypot(p1.x-p2.x, p1.y-p2.y);
+      if(!pinchBase){
+        pinchBase = {dist, scale:state.scale, cx, cy, ox:state.offsetX, oy:state.offsetY};
+      }else{
+        const k = clamp(pinchBase.scale * (dist/pinchBase.dist), state.minScale, state.maxScale);
+        // масштаб вокруг центра жеста
+        const worldBefore = screenToWorld(pinchBase.cx, pinchBase.cy);
+        state.scale = k;
+        const worldAfter  = screenToWorld(pinchBase.cx, pinchBase.cy);
+        state.offsetX += (worldAfter.x - worldBefore.x)*state.scale;
+        state.offsetY += (worldAfter.y - worldBefore.y)*state.scale;
+        applyView();
+      }
+      ev.preventDefault(); return;
     }
-    tempStart = null;
-  }
+    pinchBase=null;
 
-  // mouse
-  cvs.addEventListener('mousedown', e => startPointer(e.clientX, e.clientY, 0, 1));
-  addEventListener('mousemove', e => movePointer(e.clientX, e.clientY, 1));
-  addEventListener('mouseup',   e => endPointer(e.clientX, e.clientY));
-
-  // touch
-  cvs.addEventListener('touchstart', e=>{
-    if(e.touches.length===2){
-      // pinch start
-      pinchDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-    }else{
-      startPointer(e.touches[0].clientX, e.touches[0].clientY, e.touches[0].identifier, e.touches.length);
+    // Панорамирование одним пальцем (вне режима рисования)
+    if(pointers.size===1 && !state.drawing){
+      const dx = ev.clientX - lastPan.x;
+      const dy = ev.clientY - lastPan.y;
+      state.offsetX += dx;
+      state.offsetY += dy;
+      lastPan.x = ev.clientX; lastPan.y = ev.clientY;
+      applyView();
+      ev.preventDefault(); return;
     }
   }, {passive:false});
 
-  cvs.addEventListener('touchmove', e=>{
-    if(e.touches.length===2){
-      const d = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      const factor = d/pinchDist;
-      pinchDist = d;
-      zoomAt((e.touches[0].clientX+e.touches[1].clientX)/2, (e.touches[0].clientY+e.touches[1].clientY)/2, factor);
-      e.preventDefault();
-    }else{
-      movePointer(e.touches[0].clientX, e.touches[0].clientY, e.touches.length);
-    }
-  }, {passive:false});
-
-  cvs.addEventListener('touchend', e=>{
-    if(e.touches.length===0 && e.changedTouches.length===1){
-      endPointer(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-    }
+  $stage.addEventListener('pointerup', ev=>{
+    $stage.releasePointerCapture?.(ev.pointerId);
+    pointers.delete(ev.pointerId);
+    if(pointers.size<2) pinchBase=null;
   });
 
-  // wheel zoom
-  cvs.addEventListener('wheel', (e)=>{
-    const factor = e.deltaY<0 ? 1.1 : 0.9;
-    zoomAt(e.clientX, e.clientY, factor);
-  }, {passive:true});
+  // ---------- Кнопки ----------
+  btnLine.onclick = ()=>{
+    state.drawing = !state.drawing;
+    state.startPt = null;
+    btnLine.classList.toggle('active', state.drawing);
+    $status.textContent = state.drawing ? 'Режим: ЛИНИЯ. Ткни старт.' : 'Готов';
+    if(!state.drawing) $preview.getContext('2d').clearRect(0,0,$preview.width,$preview.height);
+  };
+  btnUndo.onclick = ()=>{
+    if(state.drawing && state.startPt){
+      state.startPt=null;
+      $preview.getContext('2d').clearRect(0,0,$preview.width,$preview.height);
+      $status.textContent='Старт отменён. Ткни старт.';
+      return;
+    }
+    state.segments.pop(); redraw();
+    $status.textContent='Отменено последнее действие';
+  };
+  btnCenter.onclick = ()=>{ fitToScreen(); $status.textContent='По центру'; };
+  btnSave.onclick = ()=>{
+    // Сохранить композицию (фото+рисунок) в PNG
+    const tmp = document.createElement('canvas');
+    tmp.width = state.worldW; tmp.height = state.worldH;
+    const t = tmp.getContext('2d');
+    if($bg.src) t.drawImage($bg,0,0);
+    t.drawImage($grid,0,0);
+    t.drawImage($draw,0,0);
+    const url = tmp.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href=url; a.download='trace.png'; a.click();
+    $status.textContent='Сохранено как trace.png';
+  };
+  btnGear.onclick = ()=>{ panel.classList.toggle('open'); };
 
-  function zoomAt(cx,cy, factor){
-    // масштабирование с сохранением точки под курсором
-    const before = screenToWorld(cx,cy);
-    app.zoom = Math.max(0.1, Math.min(10, app.zoom*factor));
-    const after = screenToWorld(cx,cy);
-    app.tx += (after.x - before.x)*app.zoom;
-    app.ty += (after.y - before.y)*app.zoom;
-    draw();
-  }
+  // Панель
+  pipeRange.oninput = ()=>{ state.diameter = +pipeRange.value; drawPreview(null); };
+  gridRange.oninput = ()=>{ state.gridStep = +gridRange.value; drawGrid(); };
+  snapChk.onchange = ()=>{ state.snap = snapChk.checked; };
+  isoChk.onchange  = ()=>{ state.iso  = isoChk.checked; redraw(); };
 
-  // ======= buttons =======
-  btnLine.onclick = () => { app.mode='line'; btnLine.classList.add('active'); setStatus('режим: линия'); };
-  btnBack.onclick = () => { app.segments.pop(); draw(); setStatus('Отменено.'); };
-  btnCenter.onclick = () => { app.tx=innerWidth/2; app.ty=innerHeight/2; app.zoom=1; draw(); setStatus('Центр'); };
-
-  btnPhoto.onclick = ()=> file.click();
-  file.onchange = (ev)=>{
-    const f = ev.target.files[0]; if(!f) return;
+  // Загрузка фото
+  fileInput.onchange = e=>{
+    const f = e.target.files[0]; if(!f) return;
     const url = URL.createObjectURL(f);
-    const img = new Image(); img.onload = ()=>{
-      app.bg = img; app.bgW = img.width; app.bgH = img.height;
-      // поместим левый верхний угол в (0,0) мира, а экран сцентрируем
-      app.tx = 0; app.ty = 0; app.zoom = Math.min(innerWidth/img.width, innerHeight/img.height)*0.9;
-      draw(); setStatus('Фото загружено');
+    const img = new Image();
+    img.onload = ()=>{
+      $bg.src = url;
+      setupWorld(img.naturalWidth, img.naturalHeight);
+      $status.textContent = 'Фото загружено. Можно рисовать.';
     };
     img.src = url;
   };
 
-  // save/load (JSON)
-  btnSave.onclick = ()=>{
-    const data = {
-      segments: app.segments, pipeDiameter: app.pipeDiameter, gridSize: app.gridSize,
-      isometric: app.isometric, magnet: app.magnet
-    };
-    const blob = new Blob([JSON.stringify(data)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'trace.json';
-    a.click();
-    setStatus('Сохранено в trace.json');
-  };
-  btnLoad.onclick = ()=>{
-    const i = document.createElement('input');
-    i.type='file'; i.accept='application/json';
-    i.onchange = e=>{
-      const f = e.target.files[0]; if(!f) return;
-      f.text().then(txt=>{
-        try{
-          const d = JSON.parse(txt);
-          app.segments = d.segments||[];
-          app.pipeDiameter = d.pipeDiameter||app.pipeDiameter;
-          app.gridSize = d.gridSize||app.gridSize;
-          app.isometric = !!d.isometric;
-          app.magnet = !!d.magnet;
-          syncFormFromSettings();
-          draw(); setStatus('Загружено из файла');
-        }catch(err){ setStatus('Ошибка загрузки JSON'); }
-      });
-    };
-    i.click();
-  };
-
-  // ======= settings dialog logic =======
-  function syncFormFromSettings(){
-    diameterRange.value = app.pipeDiameter;
-    gridRange.value = app.gridSize;
-    isoCheck.checked = app.isometric;
-    magnetCheck.checked = app.magnet;
-    diameterValue.textContent = app.pipeDiameter+' мм';
-    gridValue.textContent = app.gridSize+' px';
-  }
-  function applySettingsFromForm(){
-    app.pipeDiameter = +diameterRange.value;
-    app.gridSize = +gridRange.value;
-    app.isometric = isoCheck.checked;
-    app.magnet = magnetCheck.checked;
-    draw();
-  }
-  btnSettings.onclick = ()=>{ syncFormFromSettings(); dlg.showModal(); };
-  diameterRange.oninput = ()=> diameterValue.textContent = diameterRange.value+' мм';
-  gridRange.oninput = ()=> gridValue.textContent = gridRange.value+' px';
-  applyBtn.onclick = (e)=>{ e.preventDefault(); applySettingsFromForm(); dlg.close('ok'); setStatus('Параметры применены'); };
-
-  // старт: слегка сдвинуть центр
-  app.tx = innerWidth/2; app.ty = innerHeight/2; draw();
+  // Старт с пустым холстом, вписанным в экран
+  setupWorld(1600, 1000);
+  $status.textContent = 'Готов. Загрузите фото или рисуйте на сетке.';
 })();
 </script>
 </body>
