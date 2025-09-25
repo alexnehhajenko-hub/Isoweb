@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Pro Trace — угол с шагом 1°</title>
+<title>Pro Trace — свободная правка конца</title>
 <style>
   html,body{margin:0;height:100%;background:#0f1115;color:#eef2f7;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;overflow:hidden}
   #wrap{position:fixed;inset:0;overflow:hidden;background:#0f1115}
@@ -19,9 +19,10 @@
   #panel input[type=range]{width:180px}
   #status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.6);padding:8px 12px;border-radius:10px;border:1px solid #2e3340;font-size:14px;z-index:11}
   #hud{position:fixed;right:10px;bottom:10px;z-index:11;background:rgba(24,26,33,.9);border:1px solid #2e3340;border-radius:10px;
-       padding:8px 10px;display:flex;align-items:center;gap:10px}
+       padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   #hud .val{min-width:90px}
-  #hud .mini{padding:6px 8px;border-radius:8px;border:1px solid #2e3340;background:#1c1f26;color:#eef2f7}
+  .mini{padding:6px 8px;border-radius:8px;border:1px solid #2e3340;background:#1c1f26;color:#eef2f7}
+  .mini.tgl-on{outline:2px solid #6aa6ff}
   #file{display:none}
 </style>
 </head>
@@ -42,19 +43,18 @@
     <div class="row"><span>Ø, мм</span><input id="diam" type="range" min="10" max="200" value="40"><b id="dVal">40</b></div>
     <div class="row"><span>Сетка</span><input id="grid" type="range" min="10" max="120" value="40"><b id="gVal">40</b></div>
     <div class="row" style="justify-content:flex-start">
-      <label style="display:flex;gap:8px;align-items:center">
-        <input id="lockAng" type="checkbox"> Фиксировать угол
-      </label>
+      <label style="display:flex;gap:8px;align-items:center"><input id="lockAng" type="checkbox"> Фиксировать угол</label>
     </div>
-    <div class="row" id="angleRow" style="opacity:.9">
+    <div class="row" id="angleRow">
       <span>Угол, °</span>
       <input id="angDeg" type="range" min="0" max="180" step="1" value="0">
       <b id="angVal">0</b>
     </div>
     <div class="row" style="justify-content:flex-start">
-      <label style="display:flex;gap:8px;align-items:center">
-        <input id="snap" type="checkbox" checked> Магнит 0/45/90° (когда фиксация выключена)
-      </label>
+      <label style="display:flex;gap:8px;align-items:center"><input id="snap" type="checkbox" checked> Магнит 0/45/90° (если фиксация выключена)</label>
+    </div>
+    <div class="row" style="justify-content:flex-start">
+      <label style="display:flex;gap:8px;align-items:center"><input id="editSnap" type="checkbox" checked> Привязка при правке</label>
     </div>
   </div>
 
@@ -63,6 +63,7 @@
     <span class="val" id="hudLen">L 0</span>
     <button id="minus1" class="mini">−1°</button>
     <button id="plus1"  class="mini">+1°</button>
+    <button id="freeBtn" class="mini" title="Свободная правка без привязки">Free</button>
   </div>
 
   <input id="file" type="file" accept="image/*"/>
@@ -79,8 +80,9 @@ const S = {
   drawing:false, first:null, preview:null,
   // углы
   lockAngle:false, angDeg:0, snap45:true,
-  // редактирование
+  // правка
   nodes:[], dragNode:null, longPress:null,
+  editSnap:true,          // привязка при правке включена?
   // жесты
   pinch:null, tap:{x:0,y:0,t:0, moved:false}
 };
@@ -101,12 +103,15 @@ const snapInp = document.getElementById('snap');
 const lockAng = document.getElementById('lockAng');
 const angDeg  = document.getElementById('angDeg'); const angVal=document.getElementById('angVal');
 const angleRow= document.getElementById('angleRow');
+const editSnap= document.getElementById('editSnap');
 
 const hud = document.getElementById('hud');
 const hudAngle = document.getElementById('hudAngle');
 const hudLen = document.getElementById('hudLen');
 const minus1 = document.getElementById('minus1');
 const plus1  = document.getElementById('plus1');
+const freeBtn= document.getElementById('freeBtn');
+
 const statusEl= document.getElementById('status');
 const setStatus = t => statusEl.textContent = 'Статус: ' + t;
 
@@ -125,43 +130,37 @@ addEventListener('resize', resize, {passive:true});
 const toWorld  = (x,y)=>({ x:(x - S.ox)/S.scale, y:(y - S.oy)/S.scale });
 const toScreen = (x,y)=>({ x:x*S.scale + S.ox,   y:y*S.scale + S.oy   });
 
-// ===== Вычисления угла/длины
+// ===== Вычисления
 function vecInfo(a,b){
   const dx=b.x-a.x, dy=b.y-a.y;
   const L=Math.hypot(dx,dy);
-  let deg = (Math.atan2(dy,dx)*180/Math.PI+360)%360; // 0..360
-  if(deg>180) deg=360-deg; // симметрия для 0..180
+  let deg = (Math.atan2(dy,dx)*180/Math.PI+360)%360;
+  if(deg>180) deg=360-deg;
   return {L,deg};
 }
 
-// ===== Ограничение точки по правилам (фиксация/магнит)
-function constrainPoint(base, p){
-  const dx=p.x-base.x, dy=p.y-base.y;
-  const L=Math.hypot(dx,dy);
+// ===== Правила ограничения точки
+function constrainPoint(base, p, editing=false){
+  if(editing && !S.editSnap) return p; // свободная правка конца — без привязок
+  const dx=p.x-base.x, dy=p.y-base.y, L=Math.hypot(dx,dy);
   if(L<1e-6) return p;
 
   if(S.lockAngle && S.angDeg>0){
     const r = S.angDeg*Math.PI/180;
-    // выбираем направление (вперёд/назад) ближе к текущему
     const ang= Math.atan2(dy,dx);
-    // возможны ±r, ±(π-r)
     const candidates=[ r, -r, Math.PI-r, -(Math.PI-r) ];
     let best=candidates[0], dmin=1e9;
-    for(const c of candidates){
-      let d = Math.abs(ang - c); if(d>Math.PI) d=2*Math.PI - d;
-      if(d<dmin){dmin=d; best=c;}
-    }
+    for(const c of candidates){ let d=Math.abs(ang-c); if(d>Math.PI) d=2*Math.PI-d; if(d<dmin){dmin=d; best=c;} }
     return { x: base.x + Math.cos(best)*L, y: base.y + Math.sin(best)*L };
   }
 
   if(S.snap45){
-    const step=Math.PI/4;
-    const ang=Math.atan2(dy,dx);
+    const step=Math.PI/4, ang=Math.atan2(dy,dx);
     const s=Math.round(ang/step)*step;
     return { x: base.x + Math.cos(s)*L, y: base.y + Math.sin(s)*L };
   }
 
-  return p; // свободно
+  return p;
 }
 
 // ===== Рендер
@@ -183,13 +182,10 @@ function drawGrid(){
 function drawSeg(s, preview=false){
   const a=toScreen(s.a.x,s.a.y), b=toScreen(s.b.x,s.b.y);
   const w = Math.max(2, S.pipe*S.scale*0.45);
-  // тень
   ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=w+4; ctx.lineCap='round';
   ctx.beginPath(); ctx.moveTo(a.x+1.5,a.y+1.5); ctx.lineTo(b.x+1.5,b.y+1.5); ctx.stroke();
-  // труба
   ctx.strokeStyle = preview?'#7fc1ff':'#4da3ff'; ctx.lineWidth=w; ctx.lineCap='round';
   ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-  // торцы
   ctx.fillStyle=ctx.strokeStyle; const r=w/2;
   ctx.beginPath(); ctx.arc(a.x,a.y,r,0,Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.arc(b.x,b.y,r,0,Math.PI*2); ctx.fill();
@@ -216,6 +212,8 @@ function updateHUD(a,b){
   const en = S.lockAngle;
   minus1.disabled = plus1.disabled = !en;
   minus1.style.opacity = plus1.style.opacity = en?1:.5;
+  // иконка свободной правки
+  freeBtn.classList.toggle('tgl-on', !S.editSnap && !!S.dragNode);
 }
 function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
@@ -224,13 +222,11 @@ function draw(){
   if(S.drawing && S.first && S.preview) drawSeg({a:S.first, b:S.preview}, true);
   drawNodes();
   if(S.drawing && S.first && S.preview) updateHUD(S.first, S.preview);
-  else if(S.dragNode){
-    const L = S.segs[S.dragNode.seg];
-    updateHUD(L.a, L.b);
-  } else updateHUD(null,null);
+  else if(S.dragNode){ const L=S.segs[S.dragNode.seg]; updateHUD(L.a,L.b); }
+  else updateHUD(null,null);
 }
 
-// ===== Узлы (концы труб)
+// ===== Узлы
 function rebuildNodes(){
   S.nodes.length=0;
   S.segs.forEach((s,i)=>{
@@ -266,19 +262,18 @@ function pinchMove(a,b){
 }
 function pinchEnd(){ S.pinch=null; }
 
-// ===== Ввод: тап-рисование, лонг-пресс редактирование
+// ===== Ввод
 const TAP_MOVE=12, TAP_TIME=350, LONG_MS=500;
 let touchMap=new Map();
 
 cv.addEventListener('pointerdown', e=>{
   cv.setPointerCapture(e.pointerId);
   S.tap={x:e.clientX,y:e.clientY,t:performance.now(),moved:false};
-  // возможный long-press на узле
   const n = pickNodeAt(e.clientX,e.clientY);
   if(n){
     S.longPress = setTimeout(()=>{
       S.dragNode = {seg:n.seg, end:n.end};
-      setStatus('Редактирование: тяните конец трубы');
+      setStatus(S.editSnap? 'Правка (с привязкой)':'Правка (свободно)');
       draw();
     }, LONG_MS);
   }else{
@@ -295,12 +290,12 @@ cv.addEventListener('pointermove', e=>{
     const L = S.segs[S.dragNode.seg]; if(!L) return;
     let p = toWorld(e.clientX,e.clientY);
     const other = (S.dragNode.end==='a') ? L.b : L.a;
-    p = constrainPoint(other, p);
+    p = constrainPoint(other, p, true); // editing=true
     L[S.dragNode.end] = p;
     rebuildNodes(); draw();
   } else if(S.drawing && S.first){
     let p = toWorld(e.clientX,e.clientY);
-    S.preview = constrainPoint(S.first, p);
+    S.preview = constrainPoint(S.first, p, false); // при рисовании остаётся логика фиксации/магнита
     draw();
   }
 },{passive:false});
@@ -315,7 +310,7 @@ cv.addEventListener('pointerup', e=>{
     if(!S.first){
       S.first = w; S.preview=null; setStatus('1-я точка есть. Ткни вторую.');
     }else{
-      const end = constrainPoint(S.first, w);
+      const end = constrainPoint(S.first, w, false);
       S.segs.push({a:{...S.first}, b:{...end}});
       S.first=null; S.preview=null; S.drawing=false; btnLine.classList.remove('active');
       rebuildNodes();
@@ -325,23 +320,17 @@ cv.addEventListener('pointerup', e=>{
   }
 },{passive:false});
 
-// touch (два пальца — пинч)
+// touch (двумя пальцами — пинч)
 cv.addEventListener('touchstart', e=>{
   for(const t of e.changedTouches) touchMap.set(t.identifier,{x:t.clientX,y:t.clientY});
-  if(touchMap.size===2){
-    const [a,b] = [...touchMap.values()];
-    pinchBegin(a,b);
-  }
+  if(touchMap.size===2){ const [a,b]=[...touchMap.values()]; pinchBegin(a,b); }
 },{passive:false});
 cv.addEventListener('touchmove', e=>{
   for(const t of e.changedTouches) touchMap.set(t.identifier,{x:t.clientX,y:t.clientY});
-  if(touchMap.size===2){
-    const [a,b] = [...touchMap.values()];
-    pinchMove(a,b); e.preventDefault(); return;
-  }
+  if(touchMap.size===2){ const [a,b]=[...touchMap.values()]; pinchMove(a,b); e.preventDefault(); return; }
   if(S.drawing && S.first && e.touches.length===1){
     const t=e.touches[0]; let p=toWorld(t.clientX,t.clientY);
-    S.preview = constrainPoint(S.first, p); draw();
+    S.preview = constrainPoint(S.first, p, false); draw();
   }
 },{passive:false});
 cv.addEventListener('touchend', e=>{
@@ -383,21 +372,22 @@ document.addEventListener('pointerdown',e=>{
 diamInp.oninput=()=>{ S.pipe=+diamInp.value; dVal.textContent=diamInp.value; draw(); };
 gridInp.oninput=()=>{ S.grid=+gridInp.value; gVal.textContent=gridInp.value; draw(); };
 snapInp.onchange=()=>{ S.snap45=snapInp.checked; };
+lockAng.onchange=()=>{ S.lockAngle=lockAng.checked; angleRow.style.opacity = S.lockAngle?1:.5; };
+angDeg.oninput=()=>{ S.angDeg=+angDeg.value; angVal.textContent=S.angDeg; if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview,false); draw(); } };
+editSnap.onchange=()=>{ S.editSnap=editSnap.checked; if(S.dragNode) setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); };
 
-lockAng.onchange=()=>{
-  S.lockAngle=lockAng.checked;
-  angleRow.style.opacity = S.lockAngle?1:.5;
-};
-angDeg.oninput=()=>{ S.angDeg=+angDeg.value; angVal.textContent=S.angDeg; if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview); draw(); } };
-angVal.textContent=angDeg.value;
-
-// HUD подстройка угла во время рисования/редактирования
-minus1.onclick=()=>{ if(!S.lockAngle) return; S.angDeg=Math.max(0, S.angDeg-1); angDeg.value=S.angDeg; angVal.textContent=S.angDeg; if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview); draw(); } if(S.dragNode){ const L=S.segs[S.dragNode.seg]; const other=(S.dragNode.end==='a')?L.b:L.a; L[S.dragNode.end]=constrainPoint(other,L[S.dragNode.end]); rebuildNodes(); draw(); } };
-plus1.onclick =()=>{ if(!S.lockAngle) return; S.angDeg=Math.min(180, S.angDeg+1); angDeg.value=S.angDeg; angVal.textContent=S.angDeg; if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview); draw(); } if(S.dragNode){ const L=S.segs[S.dragNode.seg]; const other=(S.dragNode.end==='a')?L.b:L.a; L[S.dragNode.end]=constrainPoint(other,L[S.dragNode.end]); rebuildNodes(); draw(); } };
+// HUD
+minus1.onclick=()=>{ if(!S.lockAngle) return; S.angDeg=Math.max(0, S.angDeg-1); angDeg.value=S.angDeg; angVal.textContent=S.angDeg;
+  if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview,false); draw(); }
+  if(S.dragNode){ const L=S.segs[S.dragNode.seg]; const other=(S.dragNode.end==='a')?L.b:L.a; L[S.dragNode.end]=constrainPoint(other,L[S.dragNode.end],true); rebuildNodes(); draw(); } };
+plus1.onclick =()=>{ if(!S.lockAngle) return; S.angDeg=Math.min(180, S.angDeg+1); angDeg.value=S.angDeg; angVal.textContent=S.angDeg;
+  if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview,false); draw(); }
+  if(S.dragNode){ const L=S.segs[S.dragNode.seg]; const other=(S.dragNode.end==='a')?L.b:L.a; L[S.dragNode.end]=constrainPoint(other,L[S.dragNode.end],true); rebuildNodes(); draw(); } };
+freeBtn.onclick =()=>{ S.editSnap=!S.editSnap; if(S.dragNode) setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); draw(); };
 
 // старт
 resize();
-setStatus('Готов: Линия → 1-й тап → 2-й тап. Долгое нажатие на торце — правка. Фиксация угла — в ⚙.');
+setStatus('Готов: Линия → 1-й тап → 2-й тап. Долгое нажатие на торце — правка. Free — без привязки.');
 })();
 </script>
 </body>
