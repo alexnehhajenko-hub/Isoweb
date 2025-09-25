@@ -1,212 +1,342 @@
-<!doctype html><html lang="ru"><head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Трассировка труб • 3D</title>
-<style>
-  html,body{margin:0;height:100%;background:#0b0b0b;color:#eee;font-family:system-ui,Arial}
-  #ui{position:fixed;inset:10px auto auto 10px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
-  .btn{background:#1f1f1f;border:1px solid #333;color:#fff;border-radius:12px;padding:10px 14px;font-weight:600}
-  .btn:active{transform:scale(.98)}
-  #status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.55);
-          border:1px solid #333;border-radius:8px;padding:8px 10px;font-size:13px}
-  #file{display:none}
-  canvas{display:block}
-</style>
-</head><body>
-<div id="ui">
-  <button id="lineBtn" class="btn">Линия</button>
-  <button id="undoBtn" class="btn">Назад</button>
-  <label class="btn" for="file">📷 Фото</label>
-  <button id="clearBg" class="btn">🧹 Удалить фон</button>
-  <button id="centerBtn" class="btn">🎯 Центр</button>
-</div>
-<input id="file" type="file" accept="image/*"/>
-<div id="status">Готов</div>
-<script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <title>IsoPipe — чертим по фото</title>
+  <style>
+    :root{--ui-bg:#1e1e1e;--ui:#2c2c2c;--txt:#eaeaea;--accent:#6aa6ff}
+    html,body{margin:0;height:100%;background:#111;color:var(--txt);font:16px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Inter,Arial}
+    #app{position:fixed;inset:0;touch-action:none;overscroll-behavior:none}
+    #c{position:absolute;inset:0;background:#111}
+    /* UI */
+    .bar{position:fixed;left:8px;right:8px;top:8px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
+    .btn{background:linear-gradient(#5b5bff,#4a68ff);color:#fff;border:0;border-radius:14px;padding:10px 14px;font-weight:600}
+    .btn.gray{background:#2a2a2a}
+    .pill{background:#2a2a2a;color:#ddd;border-radius:12px;padding:8px 12px}
+    .right{margin-left:auto}
+    #status{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.55);color:#bff2b5;border-radius:10px;padding:8px 10px;font-size:13px}
+    #file{display:none}
+    /* плавающее меню настроек */
+    #panel{position:fixed;right:8px;top:8px;z-index:11;background:#1b1b1b;border-radius:16px;padding:12px 12px 10px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:none;min-width:220px}
+    #panel h4{margin:0 0 8px 0;font-size:14px;opacity:.85}
+    #panel label{display:flex;align-items:center;justify-content:space-between;margin:8px 0;font-size:14px}
+    input[type=range]{width:130px}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="c"></canvas>
+
+    <div class="bar">
+      <button id="modeLine" class="btn">Линия</button>
+      <button id="undo" class="pill">Назад</button>
+      <label class="pill" style="cursor:pointer;">
+        📷 Фото
+        <input id="file" type="file" accept="image/*">
+      </label>
+      <button id="center" class="pill">🎯 Центр</button>
+      <button id="gear" class="pill right">⚙️</button>
+    </div>
+
+    <div id="panel">
+      <h4>Настройки</h4>
+      <label>Ø, мм <input id="diam" type="range" min="10" max="120" value="40"></label>
+      <label>Сетка <input id="grid" type="range" min="0" max="80" value="40"></label>
+      <label>Магнит 0/45/90° <input id="snap" type="checkbox" checked></label>
+      <label>Цвет трубы <input id="color" type="color" value="#3478ff"></label>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+        <button id="close" class="btn gray">Готово</button>
+      </div>
+    </div>
+
+    <div id="status">Статус: готов</div>
+  </div>
+
 <script>
 (() => {
-  // ---------- базовая сцена ----------
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0b0b);
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
 
-  const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 1000);
-  camera.position.set(0, 0, 4);
-
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(innerWidth, innerHeight);
-  document.body.appendChild(renderer.domElement);
-
-  const controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = .08;
-  controls.screenSpacePanning = true; // чтоб панорамить без «подпрыгиваний»
-
-  // мягкий свет, чтобы трубы смотрелись объёмно
-  const amb = new THREE.AmbientLight(0xffffff, .9);
-  scene.add(amb);
-  const dir = new THREE.DirectionalLight(0xffffff, .6);
-  dir.position.set(1,2,2);
-  scene.add(dir);
-
-  // группа с фоном и трубами
-  const world = new THREE.Group();
-  scene.add(world);
-
-  // ---------- плоскость с фото (фон внутри сцены) ----------
-  let photoMesh = null;
-  const loader = new THREE.TextureLoader();
-  function setPhotoFromURL(url){
-    loader.load(url, (tex)=>{
-      tex.colorSpace = THREE.SRGBColorSpace;
-      addPhotoPlane(tex.image.naturalWidth||tex.image.width, tex.image.naturalHeight||tex.image.height, tex);
-    }, undefined, ()=> setStatus('Ошибка загрузки изображения'));
-  }
-
-  function addPhotoPlane(imgW, imgH, texture){
-    // удалим старое фото
-    if(photoMesh){ world.remove(photoMesh); photoMesh.geometry.dispose(); }
-    // считаем аспект
-    const aspect = imgW / imgH;
-    // размер плоскости в мировых единицах так, чтобы она целиком влазила в экран
-    const baseH = 3;            // «высота» фото в мировых единицах
-    const baseW = baseH * aspect;
-    const geom = new THREE.PlaneGeometry(baseW, baseH);
-    const mat  = new THREE.MeshBasicMaterial({map:texture, transparent:true});
-    photoMesh = new THREE.Mesh(geom, mat);
-    photoMesh.position.set(0,0,0);       // фото в нуле
-    world.add(photoMesh);
-
-    // поставим камеру спереди и чуть дальше
-    camera.position.set(0,0, Math.max(baseW,baseH)*1.2);
-    camera.lookAt(0,0,0);
-    controls.target.set(0,0,0);
-    controls.update();
-
-    // сетка поверх фото (очень прозрачная)
-    addOrUpdateGrid(Math.max(baseW, baseH));
-  }
-
-  // ---------- сетка ----------
-  let grid=null;
-  function addOrUpdateGrid(size){
-    if(grid){ world.remove(grid); grid.geometry.dispose(); }
-    const div = 20;
-    grid = new THREE.GridHelper(size*1.4, div, 0x4466ff, 0x4466ff);
-    grid.rotation.x = Math.PI/2;     // сделать её «плоской» поверх фото
-    grid.material.opacity = .12;
-    grid.material.transparent = true;
-    grid.position.z = 0.001;         // на волосок ближе к камере, чтобы не мерцало
-    world.add(grid);
-  }
-
-  // ---------- рисование труб ----------
-  const pipesGroup = new THREE.Group();
-  world.add(pipesGroup);
-  const points = [];
-  let drawMode = false;
-  let diameterMM = 40;
-  const R = () => (diameterMM/1000)/2 || 0.02; // радиус в «метрах» сцены (грубо)
-
-  function addPipeSegment(a,b){
-    const path = new THREE.LineCurve3(a,b);
-    const geo = new THREE.TubeGeometry(path, 1, R(), 20, false);
-    const mat = new THREE.MeshStandardMaterial({color:0x2d6cff, roughness:.35, metalness:.05});
-    const tube = new THREE.Mesh(geo, mat);
-    pipesGroup.add(tube);
-
-    // «полуотводы» на концах (небольшие сферические заглушки)
-    const capG = new THREE.SphereGeometry(R(), 16, 16);
-    const cap1 = new THREE.Mesh(capG, mat); cap1.position.copy(a); pipesGroup.add(cap1);
-    const cap2 = new THREE.Mesh(capG, mat); cap2.position.copy(b); pipesGroup.add(cap2);
-  }
-
-  // преобразуем координаты экрана в точку на плоскости фото (z≈0)
-  const ray = new THREE.Raycaster();
-  const ndc = new THREE.Vector2();
-  function screenToWorld(x,y){
-    ndc.x =  (x / innerWidth ) * 2 - 1;
-    ndc.y = -(y / innerHeight) * 2 + 1;
-    ray.setFromCamera(ndc, camera);
-    if(photoMesh){
-      const plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0); // плоскость Z=0
-      const out = new THREE.Vector3();
-      ray.ray.intersectPlane(plane, out);
-      return out;
-    }
-    return null;
-  }
-
-  function onPointerDown(e){
-    if(!drawMode) return;
-    const touch = e.touches ? e.touches[0] : e;
-    const p = screenToWorld(touch.clientX, touch.clientY);
-    if(!p) return;
-    points.push(p.clone());
-    if(points.length>=2){
-      const a = points[points.length-2];
-      const b = points[points.length-1];
-      addPipeSegment(a,b);
-    }
-    setStatus('Точка: '+p.x.toFixed(2)+', '+p.y.toFixed(2));
-  }
-
-  renderer.domElement.addEventListener('pointerdown', onPointerDown);
-
-  // ---------- кнопки ----------
+  // --- UI ---
   const file = document.getElementById('file');
-  file.addEventListener('change', e=>{
+  const st  = (msg)=>{document.getElementById('status').textContent='Статус: ' + msg};
+
+  const gear = document.getElementById('gear');
+  const panel = document.getElementById('panel');
+  gear.onclick = ()=> panel.style.display = 'block';
+  document.getElementById('close').onclick = ()=> panel.style.display = 'none';
+
+  const diamEl = document.getElementById('diam');
+  const gridEl = document.getElementById('grid');
+  const snapEl = document.getElementById('snap');
+  const colorEl= document.getElementById('color');
+
+  // --- сцена ---
+  let W=0,H=0, DPR = Math.max(1, Math.min(3, window.devicePixelRatio||1));
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = Math.round(W*DPR);
+    canvas.height= Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    draw();
+  }
+  new ResizeObserver(resize).observe(document.getElementById('app'));
+
+  // фон-фото
+  let img = null;     // Image
+  let imgW=0, imgH=0;
+
+  // трансформация «всей сцены» (фото+трубы+сетка)
+  const view = {x:0,y:0, scale:1};
+  function resetView() {
+    view.scale = Math.min(W/imgW || 1, H/imgH || 1);
+    view.x = (W - imgW*view.scale)/2;
+    view.y = (H - imgH*view.scale)/2;
+  }
+
+  // геометрия «труб» — набор сегментов
+  /** сегмент = {pts:[[x,y],[x2,y2],...], color, d} */
+  const pipes = [];
+  let current = null;
+  let modeLine = true;
+
+  // helpers
+  const toWorld = (sx,sy)=>[(sx-view.x)/view.scale,(sy-view.y)/view.scale];
+  const toScreen= (wx,wy)=>[wx*view.scale+view.x, wy*view.scale+view.y];
+
+  function snapDir(ax,ay,bx,by){
+    if(!snapEl.checked) return [bx,by];
+    const dx=bx-ax, dy=by-ay;
+    const ang = Math.atan2(dy,dx);
+    const step = Math.PI/4; // 45°
+    const snapAng = Math.round(ang/step)*step;
+    const len = Math.hypot(dx,dy);
+    return [ax+Math.cos(snapAng)*len, ay+Math.sin(snapAng)*len];
+  }
+
+  // рисование
+  function drawGrid() {
+    const g = +gridEl.value;
+    if (!g) return;
+    ctx.save();
+    ctx.beginPath();
+    const step = g;
+    const w = img ? imgW : W/view.scale;
+    const h = img ? imgH : H/view.scale;
+
+    ctx.strokeStyle='rgba(255,255,255,.12)';
+    ctx.lineWidth = 1;
+
+    // вертикали
+    for(let x=0;x<=w;x+=step){
+      const [sx1,sy1]=toScreen(x,0);
+      const [sx2,sy2]=toScreen(x,h);
+      ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2);
+    }
+    // горизонтали
+    for(let y=0;y<=h;y+=step){
+      const [sx1,sy1]=toScreen(0,y);
+      const [sx2,sy2]=toScreen(w,y);
+      ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPipes() {
+    for (const seg of pipes) {
+      paintSegment(seg);
+    }
+    if (current) paintSegment(current);
+  }
+
+  function paintSegment(seg){
+    if (seg.pts.length<2) return;
+    ctx.save();
+    ctx.lineJoin='round';
+    ctx.lineCap='round';
+    ctx.strokeStyle = seg.color || colorEl.value;
+    ctx.lineWidth = (seg.d || (+diamEl.value)) * view.scale / 10; // визуальная толщина
+
+    // рисуем ломаную с округлениями (имитация «отводов»)
+    ctx.beginPath();
+    seg.pts.forEach((p,i)=>{
+      const [sx,sy]=toScreen(p[0],p[1]);
+      if(i===0) ctx.moveTo(sx,sy);
+      else ctx.lineTo(sx,sy);
+    });
+    ctx.stroke();
+
+    // концевые «полукруги»
+    const r = ctx.lineWidth/2;
+    for (const ends of [seg.pts[0], seg.pts[seg.pts.length-1]]){
+      const [sx,sy]=toScreen(ends[0],ends[1]);
+      ctx.beginPath();
+      ctx.arc(sx,sy,r,0,Math.PI*2);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    // фон
+    if (img) {
+      ctx.save();
+      ctx.setTransform(view.scale*DPR,0,0,view.scale*DPR,(view.x)*DPR,(view.y)*DPR);
+      ctx.drawImage(img,0,0,imgW,imgH);
+      ctx.restore();
+    } else {
+      // приятный фон, если фото нет
+      ctx.fillStyle='#151515'; ctx.fillRect(0,0,W,H);
+    }
+    drawGrid();
+    drawPipes();
+  }
+
+  // загрузка фото
+  file.onchange = (e)=>{
     const f = e.target.files[0];
     if(!f) return;
     const url = URL.createObjectURL(f);
-    setPhotoFromURL(url);
-    setStatus('Фото загружено');
-  });
-
-  document.getElementById('clearBg').onclick = ()=>{
-    if(photoMesh){ world.remove(photoMesh); photoMesh.geometry.dispose(); photoMesh=null; }
-    setStatus('Фон удалён');
+    const im = new Image();
+    im.onload = ()=>{
+      img = im; imgW = im.width; imgH = im.height;
+      resetView();
+      st('фото загружено');
+      draw();
+      URL.revokeObjectURL(url);
+    };
+    im.src = url;
   };
 
-  document.getElementById('centerBtn').onclick = ()=>{
-    controls.target.set(0,0,0);
-    camera.position.set(0,0, camera.position.length());
-    controls.update();
-    setStatus('Камера по центру');
+  // Центрировать
+  document.getElementById('center').onclick = ()=>{
+    if (img) { resetView(); draw(); }
   };
 
-  document.getElementById('lineBtn').onclick = ()=>{
-    drawMode = !drawMode;
-    document.getElementById('lineBtn').textContent = drawMode ? 'Линия (вкл)' : 'Линия';
-    setStatus(drawMode? 'Режим рисования: ВКЛ' : 'Режим рисования: ВЫКЛ');
+  // Режим «Линия»
+  document.getElementById('modeLine').onclick = ()=>{
+    modeLine = true; st('режим: линия');
+  };
+  // Undo
+  document.getElementById('undo').onclick = ()=>{
+    if (current && current.pts.length>1){ current.pts.pop(); }
+    else current = null, pipes.pop();
+    draw();
   };
 
-  document.getElementById('undoBtn').onclick = ()=>{
-    // удалить последний сегмент (трубу + 2 заглушки)
-    const removeN = 3;
-    for(let i=0;i<removeN && pipesGroup.children.length;i++){
-      const m = pipesGroup.children.pop();
-      m.geometry?.dispose?.(); m.material?.dispose?.();
-    }
-    points.pop();
-    setStatus('Шаг отменён');
-  };
+  // жесты (пан/зум/рисование)
+  let touches = new Map();
+  let lastScale = 1, lastCenter=null;
 
-  // ---------- рендер ----------
-  function animate(){
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene,camera);
+  function getTouches() {
+    return [...touches.values()];
   }
-  animate();
+  function centroid(ts) {
+    const n=ts.length; let x=0,y=0; ts.forEach(t=>{x+=t.x;y+=t.y}); return {x:x/n,y:y/n};
+    }
+  function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
 
-  // ---------- помощники ----------
-  function setStatus(t){ document.getElementById('status').textContent = t; }
+  function onPointerDown(x,y,id,isTouch){
+    touches.set(id,{x,y});
+    if (touches.size===1 && modeLine) {
+      // старт новой трубы или продолжение
+      const [wx,wy]=toWorld(x,y);
+      if (!current) current = {pts:[[wx,wy]], color: colorEl.value, d:+diamEl.value};
+      else current.pts.push([wx,wy]);
+      draw();
+    }
+    if (touches.size===2) {
+      const ts = getTouches();
+      lastScale = dist(ts[0],ts[1]);
+      lastCenter= centroid(ts);
+    }
+  }
+  function onPointerMove(x,y,id){
+    if (!touches.has(id)) return;
+    touches.set(id,{x,y});
+    const ts = getTouches();
 
-  // начальное мягкое фото-сообщение (если сразу заливают url)
-  setStatus('Загрузите фото (кнопка «Фото»), затем жмите «Линия» и ставьте точки.');
-  // автоматически подгрузим предыдущий фон, если был (не обязательно)
+    if (ts.length===1 && modeLine && current) {
+      // перемещаем последнюю точку
+      const [ax,ay] = current.pts[current.pts.length-2] || current.pts[0];
+      let [wx,wy]=toWorld(x,y);
+      if (current.pts.length>=2){
+        [wx,wy]=snapDir(ax,ay,wx,wy);
+      }
+      current.pts[current.pts.length-1]=[wx,wy];
+      draw();
+    }
+    if (ts.length===2) {
+      const c = centroid(ts);
+      const ds = dist(ts[0],ts[1]);
+      // зум вокруг центра жеста
+      const k = ds / lastScale;
+      if (isFinite(k) && k>0) {
+        const before = toWorld(c.x,c.y);
+        view.scale = Math.max(0.2, Math.min(8, view.scale*k));
+        const after  = toWorld(c.x,c.y);
+        view.x += (c.x - (after[0]*view.scale)) - (c.x - (before[0]*view.scale));
+        view.y += (c.y - (after[1]*view.scale)) - (c.y - (before[1]*view.scale));
+      }
+      // пан
+      view.x += (c.x - lastCenter.x);
+      view.y += (c.y - lastCenter.y);
+      lastCenter = c; lastScale = ds;
+      draw();
+    }
+  }
+  function onPointerUp(id){
+    touches.delete(id);
+    if (current && current.pts.length===1) current=null; // одиночный тап — не сохраняем
+    draw();
+  }
+
+  // мышь
+  let mid=1;
+  canvas.addEventListener('mousedown',e=>onPointerDown(e.clientX,e.clientY,mid=false?0:++mid,false));
+  window.addEventListener('mousemove',e=>onPointerMove(e.clientX,e.clientY,mid));
+  window.addEventListener('mouseup',  ()=>onPointerUp(mid));
+
+  // сенсор
+  canvas.addEventListener('touchstart',e=>{
+    for(const t of e.changedTouches) onPointerDown(t.clientX,t.clientY,t.identifier,true);
+    e.preventDefault();
+  },{passive:false});
+  canvas.addEventListener('touchmove',e=>{
+    for(const t of e.changedTouches) onPointerMove(t.clientX,t.clientY,t.identifier);
+    e.preventDefault();
+  },{passive:false});
+  canvas.addEventListener('touchend',e=>{
+    for(const t of e.changedTouches) onPointerUp(t.identifier);
+    e.preventDefault();
+  },{passive:false});
+  canvas.addEventListener('touchcancel',e=>{
+    for(const t of e.changedTouches) touches.delete(t.identifier);
+    e.preventDefault();
+  },{passive:false});
+
+  // колесо — зум около курсора
+  canvas.addEventListener('wheel',e=>{
+    const k = Math.exp(-e.deltaY/300);
+    const cx = e.clientX, cy = e.clientY;
+    const before = toWorld(cx,cy);
+    view.scale = Math.max(0.2, Math.min(8, view.scale*k));
+    const after  = toWorld(cx,cy);
+    view.x += (cx - (after[0]*view.scale)) - (cx - (before[0]*view.scale));
+    view.y += (cy - (after[1]*view.scale)) - (cy - (before[1]*view.scale));
+    draw();
+    e.preventDefault();
+  }, {passive:false});
+
+  // первичный рендер
+  resize();
+  st('готов. Загрузите фото и рисуйте');
 })();
 </script>
-</body></html>
+</body>
+</html>
