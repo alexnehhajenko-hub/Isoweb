@@ -1,186 +1,212 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IsoPipe 3D</title>
-  <style>
-    body, html { margin:0; padding:0; overflow:hidden; background:#000; }
-    #ui { position:fixed; top:10px; left:10px; z-index:10; }
-    button { margin:3px; padding:6px 10px; border:none; border-radius:8px; background:#333; color:#fff; }
-    button:active { background:#555; }
-    #settingsPanel {
-      position:fixed; top:10px; right:10px; padding:10px;
-      background:#fff; border-radius:10px; display:none; z-index:11;
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Трассировка труб • 3D</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b0b;color:#eee;font-family:system-ui,Arial}
+  #ui{position:fixed;inset:10px auto auto 10px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
+  .btn{background:#1f1f1f;border:1px solid #333;color:#fff;border-radius:12px;padding:10px 14px;font-weight:600}
+  .btn:active{transform:scale(.98)}
+  #status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.55);
+          border:1px solid #333;border-radius:8px;padding:8px 10px;font-size:13px}
+  #file{display:none}
+  canvas{display:block}
+</style>
+</head><body>
+<div id="ui">
+  <button id="lineBtn" class="btn">Линия</button>
+  <button id="undoBtn" class="btn">Назад</button>
+  <label class="btn" for="file">📷 Фото</label>
+  <button id="clearBg" class="btn">🧹 Удалить фон</button>
+  <button id="centerBtn" class="btn">🎯 Центр</button>
+</div>
+<input id="file" type="file" accept="image/*"/>
+<div id="status">Готов</div>
+<script src="https://unpkg.com/three@0.160.1/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+  // ---------- базовая сцена ----------
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0b0b);
+
+  const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 1000);
+  camera.position.set(0, 0, 4);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = .08;
+  controls.screenSpacePanning = true; // чтоб панорамить без «подпрыгиваний»
+
+  // мягкий свет, чтобы трубы смотрелись объёмно
+  const amb = new THREE.AmbientLight(0xffffff, .9);
+  scene.add(amb);
+  const dir = new THREE.DirectionalLight(0xffffff, .6);
+  dir.position.set(1,2,2);
+  scene.add(dir);
+
+  // группа с фоном и трубами
+  const world = new THREE.Group();
+  scene.add(world);
+
+  // ---------- плоскость с фото (фон внутри сцены) ----------
+  let photoMesh = null;
+  const loader = new THREE.TextureLoader();
+  function setPhotoFromURL(url){
+    loader.load(url, (tex)=>{
+      tex.colorSpace = THREE.SRGBColorSpace;
+      addPhotoPlane(tex.image.naturalWidth||tex.image.width, tex.image.naturalHeight||tex.image.height, tex);
+    }, undefined, ()=> setStatus('Ошибка загрузки изображения'));
+  }
+
+  function addPhotoPlane(imgW, imgH, texture){
+    // удалим старое фото
+    if(photoMesh){ world.remove(photoMesh); photoMesh.geometry.dispose(); }
+    // считаем аспект
+    const aspect = imgW / imgH;
+    // размер плоскости в мировых единицах так, чтобы она целиком влазила в экран
+    const baseH = 3;            // «высота» фото в мировых единицах
+    const baseW = baseH * aspect;
+    const geom = new THREE.PlaneGeometry(baseW, baseH);
+    const mat  = new THREE.MeshBasicMaterial({map:texture, transparent:true});
+    photoMesh = new THREE.Mesh(geom, mat);
+    photoMesh.position.set(0,0,0);       // фото в нуле
+    world.add(photoMesh);
+
+    // поставим камеру спереди и чуть дальше
+    camera.position.set(0,0, Math.max(baseW,baseH)*1.2);
+    camera.lookAt(0,0,0);
+    controls.target.set(0,0,0);
+    controls.update();
+
+    // сетка поверх фото (очень прозрачная)
+    addOrUpdateGrid(Math.max(baseW, baseH));
+  }
+
+  // ---------- сетка ----------
+  let grid=null;
+  function addOrUpdateGrid(size){
+    if(grid){ world.remove(grid); grid.geometry.dispose(); }
+    const div = 20;
+    grid = new THREE.GridHelper(size*1.4, div, 0x4466ff, 0x4466ff);
+    grid.rotation.x = Math.PI/2;     // сделать её «плоской» поверх фото
+    grid.material.opacity = .12;
+    grid.material.transparent = true;
+    grid.position.z = 0.001;         // на волосок ближе к камере, чтобы не мерцало
+    world.add(grid);
+  }
+
+  // ---------- рисование труб ----------
+  const pipesGroup = new THREE.Group();
+  world.add(pipesGroup);
+  const points = [];
+  let drawMode = false;
+  let diameterMM = 40;
+  const R = () => (diameterMM/1000)/2 || 0.02; // радиус в «метрах» сцены (грубо)
+
+  function addPipeSegment(a,b){
+    const path = new THREE.LineCurve3(a,b);
+    const geo = new THREE.TubeGeometry(path, 1, R(), 20, false);
+    const mat = new THREE.MeshStandardMaterial({color:0x2d6cff, roughness:.35, metalness:.05});
+    const tube = new THREE.Mesh(geo, mat);
+    pipesGroup.add(tube);
+
+    // «полуотводы» на концах (небольшие сферические заглушки)
+    const capG = new THREE.SphereGeometry(R(), 16, 16);
+    const cap1 = new THREE.Mesh(capG, mat); cap1.position.copy(a); pipesGroup.add(cap1);
+    const cap2 = new THREE.Mesh(capG, mat); cap2.position.copy(b); pipesGroup.add(cap2);
+  }
+
+  // преобразуем координаты экрана в точку на плоскости фото (z≈0)
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  function screenToWorld(x,y){
+    ndc.x =  (x / innerWidth ) * 2 - 1;
+    ndc.y = -(y / innerHeight) * 2 + 1;
+    ray.setFromCamera(ndc, camera);
+    if(photoMesh){
+      const plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0); // плоскость Z=0
+      const out = new THREE.Vector3();
+      ray.ray.intersectPlane(plane, out);
+      return out;
     }
-    #settingsPanel label { display:block; margin:5px 0 2px; }
-    canvas { display:block; }
-  </style>
-</head>
-<body>
-  <div id="ui">
-    <button id="lineBtn">Линия</button>
-    <button id="undoBtn">Назад</button>
-    <button id="photoBtn">Фото</button>
-    <button id="centerBtn">Центр</button>
-    <button id="settingsBtn">⚙</button>
-    <input type="file" id="bgInput" accept="image/*" style="display:none">
-  </div>
+    return null;
+  }
 
-  <div id="settingsPanel">
-    <label>Ø трубы (мм)</label>
-    <input type="range" id="diameter" min="10" max="100" value="40">
-    <label>Размер сетки</label>
-    <input type="range" id="gridSize" min="10" max="100" value="40">
-    <label><input type="checkbox" id="isometry" checked> Изометрия</label>
-    <br><button id="closeSettings">Закрыть</button>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/controls/OrbitControls.js"></script>
-
-  <script>
-    let scene = new THREE.Scene();
-    let camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
-    let renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    // Сетка
-    let gridSize = 40;
-    let gridHelper = new THREE.GridHelper(1000, gridSize, 0x444444, 0x888888);
-    scene.add(gridHelper);
-
-    // Камера и управление
-    camera.position.set(200,200,200);
-    let controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.screenSpacePanning = true;
-
-    // Свет
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-    let dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    dirLight.position.set(100,200,100);
-    scene.add(dirLight);
-
-    // Фон
-    let bgTexture = null;
-    function setBackground(img) {
-      let loader = new THREE.TextureLoader();
-      loader.load(img, tex => {
-        scene.background = tex;
-      });
+  function onPointerDown(e){
+    if(!drawMode) return;
+    const touch = e.touches ? e.touches[0] : e;
+    const p = screenToWorld(touch.clientX, touch.clientY);
+    if(!p) return;
+    points.push(p.clone());
+    if(points.length>=2){
+      const a = points[points.length-2];
+      const b = points[points.length-1];
+      addPipeSegment(a,b);
     }
+    setStatus('Точка: '+p.x.toFixed(2)+', '+p.y.toFixed(2));
+  }
 
-    // Трубы
-    let pipes = [];
-    let startPoint = null;
-    let diameter = 40;
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
-    function addPipe(p1, p2) {
-      let dir = new THREE.Vector3().subVectors(p2, p1);
-      let length = dir.length();
-      let mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+  // ---------- кнопки ----------
+  const file = document.getElementById('file');
+  file.addEventListener('change', e=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    const url = URL.createObjectURL(f);
+    setPhotoFromURL(url);
+    setStatus('Фото загружено');
+  });
 
-      let geometry = new THREE.CylinderGeometry(diameter/2, diameter/2, length, 16);
-      let material = new THREE.MeshStandardMaterial({color:0x0077ff});
-      let cylinder = new THREE.Mesh(geometry, material);
+  document.getElementById('clearBg').onclick = ()=>{
+    if(photoMesh){ world.remove(photoMesh); photoMesh.geometry.dispose(); photoMesh=null; }
+    setStatus('Фон удалён');
+  };
 
-      // Ориентация
-      cylinder.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0,1,0),
-        dir.clone().normalize()
-      );
-      cylinder.position.copy(mid);
+  document.getElementById('centerBtn').onclick = ()=>{
+    controls.target.set(0,0,0);
+    camera.position.set(0,0, camera.position.length());
+    controls.update();
+    setStatus('Камера по центру');
+  };
 
-      scene.add(cylinder);
-      pipes.push(cylinder);
+  document.getElementById('lineBtn').onclick = ()=>{
+    drawMode = !drawMode;
+    document.getElementById('lineBtn').textContent = drawMode ? 'Линия (вкл)' : 'Линия';
+    setStatus(drawMode? 'Режим рисования: ВКЛ' : 'Режим рисования: ВЫКЛ');
+  };
+
+  document.getElementById('undoBtn').onclick = ()=>{
+    // удалить последний сегмент (трубу + 2 заглушки)
+    const removeN = 3;
+    for(let i=0;i<removeN && pipesGroup.children.length;i++){
+      const m = pipesGroup.children.pop();
+      m.geometry?.dispose?.(); m.material?.dispose?.();
     }
+    points.pop();
+    setStatus('Шаг отменён');
+  };
 
-    // Управление кнопками
-    document.getElementById("lineBtn").onclick = () => {
-      renderer.domElement.onclick = (event) => {
-        let mouse = new THREE.Vector2(
-          (event.clientX / window.innerWidth) * 2 - 1,
-          -(event.clientY / window.innerHeight) * 2 + 1
-        );
-        let raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(mouse, camera);
-        let plane = new THREE.Plane(new THREE.Vector3(0,1,0),0);
-        let point = new THREE.Vector3();
-        raycaster.ray.intersectPlane(plane, point);
+  // ---------- рендер ----------
+  function animate(){
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene,camera);
+  }
+  animate();
 
-        if (!startPoint) {
-          startPoint = point.clone();
-        } else {
-          addPipe(startPoint, point);
-          startPoint = null;
-        }
-      };
-    };
+  // ---------- помощники ----------
+  function setStatus(t){ document.getElementById('status').textContent = t; }
 
-    document.getElementById("undoBtn").onclick = () => {
-      let last = pipes.pop();
-      if (last) scene.remove(last);
-    };
-
-    document.getElementById("photoBtn").onclick = () => {
-      document.getElementById("bgInput").click();
-    };
-    document.getElementById("bgInput").onchange = (e) => {
-      let file = e.target.files[0];
-      if (file) setBackground(URL.createObjectURL(file));
-    };
-
-    document.getElementById("centerBtn").onclick = () => {
-      controls.reset();
-    };
-
-    document.getElementById("settingsBtn").onclick = () => {
-      document.getElementById("settingsPanel").style.display = "block";
-    };
-    document.getElementById("closeSettings").onclick = () => {
-      document.getElementById("settingsPanel").style.display = "none";
-    };
-
-    document.getElementById("diameter").oninput = (e) => {
-      diameter = e.target.value;
-    };
-
-    document.getElementById("gridSize").oninput = (e) => {
-      scene.remove(gridHelper);
-      gridHelper = new THREE.GridHelper(1000, e.target.value, 0x444444, 0x888888);
-      scene.add(gridHelper);
-    };
-
-    document.getElementById("isometry").oninput = (e) => {
-      if (e.target.checked) {
-        camera.toOrthographic = true;
-        let aspect = window.innerWidth / window.innerHeight;
-        camera = new THREE.OrthographicCamera(-200*aspect,200*aspect,200,-200,1,2000);
-        camera.position.set(200,200,200);
-        controls = new THREE.OrbitControls(camera, renderer.domElement);
-      } else {
-        camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
-        camera.position.set(200,200,200);
-        controls = new THREE.OrbitControls(camera, renderer.domElement);
-      }
-    };
-
-    // Анимация
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script>
-</body>
-</html>
+  // начальное мягкое фото-сообщение (если сразу заливают url)
+  setStatus('Загрузите фото (кнопка «Фото»), затем жмите «Линия» и ставьте точки.');
+  // автоматически подгрузим предыдущий фон, если был (не обязательно)
+})();
+</script>
+</body></html>
