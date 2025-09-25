@@ -3,26 +3,28 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Pro Trace — свободная правка конца</title>
+<title>Pro Trace — свободная правка + отводы</title>
 <style>
-  html,body{margin:0;height:100%;background:#0f1115;color:#eef2f7;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;overflow:hidden}
-  #wrap{position:fixed;inset:0;overflow:hidden;background:#0f1115}
-  #cv{position:absolute;inset:0;touch-action:none}
+  :root{--bg:#0f1115;--fg:#eef2f7;--ui:#1c1f26;--bd:#2e3340;--acc:#6aa6ff}
+  *{-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+            font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;overflow:hidden}
+  #wrap{position:fixed;inset:0;overflow:hidden;background:var(--bg)}
+  #cv{position:absolute;inset:0;touch-action:none;-webkit-tap-highlight-color:transparent}
   .bar{position:fixed;left:10px;top:10px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
-  .btn{background:#1c1f26;border:1px solid #2e3340;color:#eef2f7;padding:10px 14px;border-radius:12px;font-weight:700}
-  .btn.active{outline:2px solid #6aa6ff}
+  .btn{background:var(--ui);border:1px solid var(--bd);color:var(--fg);padding:10px 14px;border-radius:12px;font-weight:700}
+  .btn.active{outline:2px solid var(--acc)}
   #gear{position:fixed;right:10px;top:10px;z-index:12}
-  #panel{position:fixed;right:10px;top:58px;width:320px;max-width:92vw;background:rgba(24,26,33,.96);
-         border:1px solid #2e3340;border-radius:14px;padding:12px;box-shadow:0 14px 36px rgba(0,0,0,.35);display:none;z-index:20}
+  #panel{position:fixed;right:10px;top:58px;width:330px;max-width:92vw;background:rgba(24,26,33,.96);
+         border:1px solid var(--bd);border-radius:14px;padding:12px;box-shadow:0 14px 36px rgba(0,0,0,.35);display:none;z-index:20}
   #panel h3{margin:0 0 8px}
   #panel .row{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:10px 0}
   #panel input[type=range]{width:180px}
-  #status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.6);padding:8px 12px;border-radius:10px;border:1px solid #2e3340;font-size:14px;z-index:11}
-  #hud{position:fixed;right:10px;bottom:10px;z-index:11;background:rgba(24,26,33,.9);border:1px solid #2e3340;border-radius:10px;
-       padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  #status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.6);padding:8px 12px;border-radius:10px;border:1px solid var(--bd);font-size:14px;z-index:11}
+  #hud{position:fixed;right:10px;bottom:10px;z-index:11;background:rgba(24,26,33,.9);border:1px solid var(--bd);border-radius:10px;
+       padding:8px 10px;display:none;align-items:center;gap:8px;flex-wrap:wrap}
   #hud .val{min-width:90px}
-  .mini{padding:6px 8px;border-radius:8px;border:1px solid #2e3340;background:#1c1f26;color:#eef2f7}
-  .mini.tgl-on{outline:2px solid #6aa6ff}
+  .mini{padding:6px 8px;border-radius:8px;border:1px solid var(--bd);background:var(--ui);color:var(--fg)}
   #file{display:none}
 </style>
 </head>
@@ -40,51 +42,44 @@
   <button id="gear" class="btn" title="Параметры">⚙</button>
   <div id="panel">
     <h3>Параметры</h3>
-    <div class="row"><span>Ø, мм</span><input id="diam" type="range" min="10" max="200" value="40"><b id="dVal">40</b></div>
-    <div class="row"><span>Сетка</span><input id="grid" type="range" min="10" max="120" value="40"><b id="gVal">40</b></div>
+    <div class="row"><span>Ø трубы, мм</span><input id="diam" type="range" min="10" max="200" value="40"><b id="dVal">40</b></div>
+    <div class="row"><span>Сетка, мм</span><input id="grid" type="range" min="10" max="120" value="40"><b id="gVal">40</b></div>
+    <div class="row"><span>Радиус отвода (визуально)</span><input id="bend" type="range" min="0" max="200" value="60"><b id="bVal">60</b></div>
     <div class="row" style="justify-content:flex-start">
-      <label style="display:flex;gap:8px;align-items:center"><input id="lockAng" type="checkbox"> Фиксировать угол</label>
-    </div>
-    <div class="row" id="angleRow">
-      <span>Угол, °</span>
-      <input id="angDeg" type="range" min="0" max="180" step="1" value="0">
-      <b id="angVal">0</b>
+      <label style="display:flex;gap:8px;align-items:center"><input id="snap" type="checkbox" checked> Магнит 0/45/90° (только при рисовании)</label>
     </div>
     <div class="row" style="justify-content:flex-start">
-      <label style="display:flex;gap:8px;align-items:center"><input id="snap" type="checkbox" checked> Магнит 0/45/90° (если фиксация выключена)</label>
-    </div>
-    <div class="row" style="justify-content:flex-start">
-      <label style="display:flex;gap:8px;align-items:center"><input id="editSnap" type="checkbox" checked> Привязка при правке</label>
+      <label style="display:flex;gap:8px;align-items:center"><input id="editSnap" type="checkbox"> Привязка при правке</label>
     </div>
   </div>
 
-  <div id="hud" style="display:none">
+  <div id="hud">
     <span class="val" id="hudAngle">∠ 0°</span>
     <span class="val" id="hudLen">L 0</span>
-    <button id="minus1" class="mini">−1°</button>
-    <button id="plus1"  class="mini">+1°</button>
-    <button id="freeBtn" class="mini" title="Свободная правка без привязки">Free</button>
   </div>
 
   <input id="file" type="file" accept="image/*"/>
-  <div id="status">Готов: Линия → 1-й тап → 2-й тап. Долгое нажатие на торце — правка.</div>
+  <div id="status">Готов: Линия → 1-й тап → 2-й тап. Долгое нажатие на торце — свободная правка.</div>
 
 <script>
 (()=>{
 // ===== Состояние
 const S = {
+  // трансформация
   scale: 1, ox: 0, oy: 0, minS:.2, maxS:6,
+  // фон
   img:null, iw:0, ih:0,
-  pipe:40, grid:40,
-  segs:[],                 // [{a:{x,y}, b:{x,y}}]
+  // параметры
+  pipe:40, grid:40, bend:60,       // bend — визуальная «мягкость» угла
+  snap45:true,                      // магнит при рисовании
+  editSnap:false,                   // ПРАВКА: по умолчанию свободная (без привязки)
+  // геометрия
+  segs:[],                          // [{a:{x,y}, b:{x,y}}]
   drawing:false, first:null, preview:null,
-  // углы
-  lockAngle:false, angDeg:0, snap45:true,
-  // правка
+  // редактирование
   nodes:[], dragNode:null, longPress:null,
-  editSnap:true,          // привязка при правке включена?
   // жесты
-  pinch:null, tap:{x:0,y:0,t:0, moved:false}
+  pinch:null, tap:{x:0,y:0,t:0,moved:false}
 };
 
 // ===== DOM
@@ -99,20 +94,13 @@ const panel   = document.getElementById('panel');
 const fileInp = document.getElementById('file');
 const diamInp = document.getElementById('diam'); const dVal=document.getElementById('dVal');
 const gridInp = document.getElementById('grid'); const gVal=document.getElementById('gVal');
+const bendInp = document.getElementById('bend'); const bVal=document.getElementById('bVal');
 const snapInp = document.getElementById('snap');
-const lockAng = document.getElementById('lockAng');
-const angDeg  = document.getElementById('angDeg'); const angVal=document.getElementById('angVal');
-const angleRow= document.getElementById('angleRow');
 const editSnap= document.getElementById('editSnap');
-
 const hud = document.getElementById('hud');
 const hudAngle = document.getElementById('hudAngle');
-const hudLen = document.getElementById('hudLen');
-const minus1 = document.getElementById('minus1');
-const plus1  = document.getElementById('plus1');
-const freeBtn= document.getElementById('freeBtn');
-
-const statusEl= document.getElementById('status');
+const hudLen   = document.getElementById('hudLen');
+const statusEl = document.getElementById('status');
 const setStatus = t => statusEl.textContent = 'Статус: ' + t;
 
 // ===== Размеры
@@ -130,78 +118,162 @@ addEventListener('resize', resize, {passive:true});
 const toWorld  = (x,y)=>({ x:(x - S.ox)/S.scale, y:(y - S.oy)/S.scale });
 const toScreen = (x,y)=>({ x:x*S.scale + S.ox,   y:y*S.scale + S.oy   });
 
-// ===== Вычисления
+// ===== Вспомогательные
 function vecInfo(a,b){
   const dx=b.x-a.x, dy=b.y-a.y;
   const L=Math.hypot(dx,dy);
-  let deg = (Math.atan2(dy,dx)*180/Math.PI+360)%360;
-  if(deg>180) deg=360-deg;
+  let deg=(Math.atan2(dy,dx)*180/Math.PI+360)%360; if(deg>180) deg=360-deg;
   return {L,deg};
 }
-
-// ===== Правила ограничения точки
-function constrainPoint(base, p, editing=false){
-  if(editing && !S.editSnap) return p; // свободная правка конца — без привязок
+function snapPoint45(base,p){
+  if(!S.snap45 || !base) return p;
   const dx=p.x-base.x, dy=p.y-base.y, L=Math.hypot(dx,dy);
-  if(L<1e-6) return p;
-
-  if(S.lockAngle && S.angDeg>0){
-    const r = S.angDeg*Math.PI/180;
-    const ang= Math.atan2(dy,dx);
-    const candidates=[ r, -r, Math.PI-r, -(Math.PI-r) ];
-    let best=candidates[0], dmin=1e9;
-    for(const c of candidates){ let d=Math.abs(ang-c); if(d>Math.PI) d=2*Math.PI-d; if(d<dmin){dmin=d; best=c;} }
-    return { x: base.x + Math.cos(best)*L, y: base.y + Math.sin(best)*L };
-  }
-
-  if(S.snap45){
-    const step=Math.PI/4, ang=Math.atan2(dy,dx);
-    const s=Math.round(ang/step)*step;
-    return { x: base.x + Math.cos(s)*L, y: base.y + Math.sin(s)*L };
-  }
-
-  return p;
+  const step=Math.PI/4, s=Math.round(Math.atan2(dy,dx)/step)*step;
+  return {x: base.x + Math.cos(s)*L, y: base.y + Math.sin(s)*L};
 }
 
-// ===== Рендер
+// ===== Сборка полилиний из отрезков для round-отводов
+// ключ точки (с допуском) — чтобы совпавшие вершины считались соединёнными
+const EPS=1e-3;
+const keyPt = p => `${Math.round(p.x/EPS)}_${Math.round(p.y/EPS)}`;
+
+function buildPolylines(segs){
+  // граф: вершина -> список соседей
+  const adj = new Map();
+  function addEdge(a,b){
+    const ka=keyPt(a), kb=keyPt(b);
+    if(!adj.has(ka)) adj.set(ka,{pt:a, next:new Map()});
+    if(!adj.has(kb)) adj.set(kb,{pt:b, next:new Map()});
+    adj.get(ka).next.set(kb,(adj.get(ka).next.get(kb)||0)+1);
+    adj.get(kb).next.set(ka,(adj.get(kb).next.get(ka)||0)+1);
+  }
+  for(const s of segs) addEdge(s.a,s.b);
+
+  // функция взять и удалить одно ребро a-b
+  function consume(a,b){
+    const ka=keyPt(a), kb=keyPt(b);
+    const ma=adj.get(ka).next, mb=adj.get(kb).next;
+    if(!ma.has(kb)) return false;
+    ma.set(kb, ma.get(kb)-1); if(ma.get(kb)<=0) ma.delete(kb);
+    mb.set(ka, mb.get(ka)-1); if(mb.get(ka)<=0) mb.delete(ka);
+    return true;
+  }
+
+  // карта для поиска ребра по двум вершинам (для последовательности точек)
+  const edgeSet = new Map();
+  for(const s of segs){
+    const ka=keyPt(s.a), kb=keyPt(s.b);
+    const id=ka<kb?ka+'|'+kb:kb+'|'+ka;
+    if(!edgeSet.has(id)) edgeSet.set(id, []);
+    edgeSet.get(id).push(s);
+  }
+  function popEdge(a,b){
+    const ka=keyPt(a), kb=keyPt(b);
+    const id=ka<kb?ka+'|'+kb:kb+'|'+ka;
+    const arr=edgeSet.get(id)||[];
+    return arr.length ? arr.pop() : null;
+  }
+
+  // стартовые вершины — со степенью !=2
+  const starts=[];
+  for(const [k,node] of adj){
+    const deg=[...node.next.values()].reduce((s,v)=>s+v,0);
+    if(deg!==2) starts.push(node.pt);
+  }
+
+  const used = new Set();
+  const polylines=[];
+
+  function walk(startPt){
+    // найти любой исходящий
+    const st = adj.get(keyPt(startPt));
+    if(!st || st.next.size===0) return;
+    let prev=null; let current=startPt;
+    const pts=[current];
+    // выбираем первое ребро
+    let nextKey = st.next.keys().next().value;
+    let nextPt = adj.get(nextKey).pt;
+    while(nextPt){
+      // потребляем ребро current-nextPt
+      if(!consume(current,nextPt)) break;
+      const e = popEdge(current,nextPt);
+      const id=e? JSON.stringify(e) : keyPt(current)+'|'+keyPt(nextPt);
+      if(used.has(id)) break;
+      used.add(id);
+      current = nextPt;
+      pts.push(current);
+      const node = adj.get(keyPt(current));
+      // выбрать следующего соседа, который не равен prev
+      let cand=null;
+      for(const k2 of node.next.keys()){
+        const pt2=adj.get(k2).pt;
+        cand = pt2; // возьмём любой; если есть prev — стараться не возвращаться
+        if(!prev || keyPt(pt2)!==keyPt(prev)) break;
+      }
+      prev = pts.length>=2? pts[pts.length-2] : null;
+      // если тупик — завершаем
+      if(!cand) break;
+      nextPt=cand;
+    }
+    if(pts.length>=2) polylines.push(pts);
+  }
+
+  // проход с «концов»
+  for(const s of starts) walk(s);
+  // оставшиеся циклы (все степени = 2)
+  for(const [k,node] of adj){
+    if(node.next.size>0) walk(node.pt);
+  }
+  return polylines;
+}
+
+// ===== Рисование
 function drawBG(){
   if(!S.img) return;
   const p = toScreen(0,0);
   ctx.drawImage(S.img, p.x, p.y, S.iw*S.scale, S.ih*S.scale);
 }
 function drawGrid(){
-  const step = S.grid*S.scale;
-  if(step<8) return;
-  ctx.save();
-  ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1;
+  const step = S.grid*S.scale; if(step<8) return;
+  ctx.save(); ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1;
   const x0=((S.ox%step)+step)%step, y0=((S.oy%step)+step)%step;
   for(let x=x0;x<cv.width;x+=step){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,cv.height); ctx.stroke(); }
   for(let y=y0;y<cv.height;y+=step){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(cv.width,y); ctx.stroke(); }
   ctx.restore();
 }
-function drawSeg(s, preview=false){
-  const a=toScreen(s.a.x,s.a.y), b=toScreen(s.b.x,s.b.y);
-  const w = Math.max(2, S.pipe*S.scale*0.45);
-  ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=w+4; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(a.x+1.5,a.y+1.5); ctx.lineTo(b.x+1.5,b.y+1.5); ctx.stroke();
-  ctx.strokeStyle = preview?'#7fc1ff':'#4da3ff'; ctx.lineWidth=w; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-  ctx.fillStyle=ctx.strokeStyle; const r=w/2;
-  ctx.beginPath(); ctx.arc(a.x,a.y,r,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(b.x,b.y,r,0,Math.PI*2); ctx.fill();
-}
-function drawNodes(){
-  ctx.save();
-  const R = Math.max(6, S.pipe*S.scale*0.35);
-  for(const n of S.nodes){
-    const s = toScreen(n.x,n.y);
-    ctx.beginPath(); ctx.arc(s.x,s.y,R,0,Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fill();
-    const active = (S.dragNode && S.dragNode.seg===n.seg && S.dragNode.end===n.end);
-    ctx.strokeStyle = active ? '#ffd166' : 'rgba(255,255,255,.35)';
-    ctx.lineWidth=2; ctx.stroke();
+function drawPipes(){
+  // строим полилинии и рисуем их одним штрихом — будет «отвод» в стыках
+  const polys = buildPolylines(S.segs);
+  const W = Math.max(2, S.pipe*S.scale*0.45);
+  const round = Math.max(0, S.bend)*S.scale*0.01; // визуальный «радиус» — мягкость на изгибе
+  ctx.lineCap='round';
+  ctx.lineJoin='round';
+  ctx.miterLimit = 6 + round*10;
+
+  // тень
+  ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=W+4;
+  for(const pts of polys){
+    ctx.beginPath();
+    const s0=toScreen(pts[0].x,pts[0].y); ctx.moveTo(s0.x+1.5,s0.y+1.5);
+    for(let i=1;i<pts.length;i++){ const s=toScreen(pts[i].x,pts[i].y); ctx.lineTo(s.x+1.5,s.y+1.5); }
+    ctx.stroke();
   }
-  ctx.restore();
+
+  // основная труба
+  ctx.strokeStyle='#4da3ff'; ctx.lineWidth=W;
+  for(const pts of polys){
+    ctx.beginPath();
+    const s0=toScreen(pts[0].x,pts[0].y); ctx.moveTo(s0.x,s0.y);
+    for(let i=1;i<pts.length;i++){ const s=toScreen(pts[i].x,pts[i].y); ctx.lineTo(s.x,s.y); }
+    ctx.stroke();
+  }
+
+  // предпросмотр текущего сегмента (если рисуем)
+  if(S.drawing && S.first && S.preview){
+    ctx.strokeStyle='#7fc1ff'; ctx.lineWidth=W;
+    const a=toScreen(S.first.x,S.first.y), b=toScreen(S.preview.x,S.preview.y);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
 }
 function updateHUD(a,b){
   if(!a||!b){ hud.style.display='none'; return; }
@@ -209,24 +281,16 @@ function updateHUD(a,b){
   hudAngle.textContent = `∠ ${Math.round(deg)}°`;
   hudLen.textContent   = `L ${Math.round(L)} мм`;
   hud.style.display='flex';
-  const en = S.lockAngle;
-  minus1.disabled = plus1.disabled = !en;
-  minus1.style.opacity = plus1.style.opacity = en?1:.5;
-  // иконка свободной правки
-  freeBtn.classList.toggle('tgl-on', !S.editSnap && !!S.dragNode);
 }
 function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
-  drawBG(); drawGrid();
-  for(const s of S.segs) drawSeg(s,false);
-  if(S.drawing && S.first && S.preview) drawSeg({a:S.first, b:S.preview}, true);
-  drawNodes();
-  if(S.drawing && S.first && S.preview) updateHUD(S.first, S.preview);
+  drawBG(); drawGrid(); drawPipes();
+  if(S.drawing && S.first && S.preview) updateHUD(S.first,S.preview);
   else if(S.dragNode){ const L=S.segs[S.dragNode.seg]; updateHUD(L.a,L.b); }
-  else updateHUD(null,null);
+  else hud.style.display='none';
 }
 
-// ===== Узлы
+// ===== Узлы (концы труб) — для входа в правку
 function rebuildNodes(){
   S.nodes.length=0;
   S.segs.forEach((s,i)=>{
@@ -235,11 +299,11 @@ function rebuildNodes(){
   });
 }
 function pickNodeAt(clientX,clientY){
-  const p = toWorld(clientX,clientY);
-  const tol = Math.max(10, S.pipe/2)/S.scale;
+  const p=toWorld(clientX,clientY);
+  const tol=Math.max(10,S.pipe/2)/S.scale;
   let best=null, dmin=1e9;
   for(const n of S.nodes){
-    const d = Math.hypot(p.x-n.x, p.y-n.y);
+    const d=Math.hypot(p.x-n.x,p.y-n.y);
     if(d<tol && d<dmin){ dmin=d; best=n; }
   }
   return best;
@@ -247,80 +311,69 @@ function pickNodeAt(clientX,clientY){
 
 // ===== Пинч-зум
 function pinchBegin(a,b){
-  S.pinch = { d: Math.hypot(b.x-a.x,b.y-a.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2, sc:S.scale, ox:S.ox, oy:S.oy };
+  S.pinch={ d:Math.hypot(b.x-a.x,b.y-a.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2, sc:S.scale, ox:S.ox, oy:S.oy };
 }
 function pinchMove(a,b){
   if(!S.pinch) return;
-  const d = Math.hypot(b.x-a.x,b.y-a.y);
-  let s = Math.min(S.maxS, Math.max(S.minS, S.pinch.sc*(d/S.pinch.d)));
-  const wx = (S.pinch.cx - S.pinch.ox)/S.pinch.sc;
-  const wy = (S.pinch.cy - S.pinch.oy)/S.pinch.sc;
-  S.scale = s;
-  S.ox = S.pinch.cx - wx*s;
-  S.oy = S.pinch.cy - wy*s;
-  draw();
+  const d=Math.hypot(b.x-a.x,b.y-a.y);
+  let s=Math.min(S.maxS, Math.max(S.minS, S.pinch.sc*(d/S.pinch.d)));
+  const wx=(S.pinch.cx-S.pinch.ox)/S.pinch.sc, wy=(S.pinch.cy-S.pinch.oy)/S.pinch.sc;
+  S.scale=s; S.ox=S.pinch.cx - wx*s; S.oy=S.pinch.cy - wy*s; draw();
 }
 function pinchEnd(){ S.pinch=null; }
 
 // ===== Ввод
-const TAP_MOVE=12, TAP_TIME=350, LONG_MS=500;
+const TAP_MOVE=12, TAP_TIME=350, LONG_MS=450;
 let touchMap=new Map();
 
 cv.addEventListener('pointerdown', e=>{
   cv.setPointerCapture(e.pointerId);
   S.tap={x:e.clientX,y:e.clientY,t:performance.now(),moved:false};
-  const n = pickNodeAt(e.clientX,e.clientY);
+  // готовим лонг-пресс для правки
+  const n=pickNodeAt(e.clientX,e.clientY);
   if(n){
-    S.longPress = setTimeout(()=>{
-      S.dragNode = {seg:n.seg, end:n.end};
-      setStatus(S.editSnap? 'Правка (с привязкой)':'Правка (свободно)');
-      draw();
-    }, LONG_MS);
+    S.longPress=setTimeout(()=>{ S.dragNode={seg:n.seg,end:n.end}; setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); }, LONG_MS);
   }else{
-    S.longPress = setTimeout(()=>{}, LONG_MS);
+    S.longPress=setTimeout(()=>{}, LONG_MS);
   }
 },{passive:false});
 
 cv.addEventListener('pointermove', e=>{
-  if(Math.hypot(e.clientX-S.tap.x, e.clientY-S.tap.y) > TAP_MOVE){
-    S.tap.moved = true;
-    if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
+  if(Math.hypot(e.clientX-S.tap.x, e.clientY-S.tap.y)>TAP_MOVE){
+    S.tap.moved=true; if(S.longPress){clearTimeout(S.longPress); S.longPress=null;}
   }
   if(S.dragNode){
-    const L = S.segs[S.dragNode.seg]; if(!L) return;
-    let p = toWorld(e.clientX,e.clientY);
-    const other = (S.dragNode.end==='a') ? L.b : L.a;
-    p = constrainPoint(other, p, true); // editing=true
-    L[S.dragNode.end] = p;
-    rebuildNodes(); draw();
-  } else if(S.drawing && S.first){
-    let p = toWorld(e.clientX,e.clientY);
-    S.preview = constrainPoint(S.first, p, false); // при рисовании остаётся логика фиксации/магнита
-    draw();
+    const L=S.segs[S.dragNode.seg]; if(!L) return;
+    let p=toWorld(e.clientX,e.clientY);
+    const other=(S.dragNode.end==='a')?L.b:L.a;
+    // ПРАВКА: если editSnap=false — никак не ограничиваем
+    if(S.editSnap) p=snapPoint45(other,p);
+    L[S.dragNode.end]=p; rebuildNodes(); draw();
+  }else if(S.drawing && S.first){
+    let p=toWorld(e.clientX,e.clientY);
+    if(S.snap45) p=snapPoint45(S.first,p);
+    S.preview=p; draw();
   }
 },{passive:false});
 
 cv.addEventListener('pointerup', e=>{
-  if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
+  if(S.longPress){clearTimeout(S.longPress); S.longPress=null;}
   if(S.dragNode){ S.dragNode=null; setStatus('Готов'); draw(); return; }
-  const isTap = !S.tap.moved && (performance.now()-S.tap.t<=TAP_TIME);
+  const isTap=!S.tap.moved && (performance.now()-S.tap.t<=TAP_TIME);
   if(isTap){
-    const w = toWorld(e.clientX,e.clientY);
+    const w=toWorld(e.clientX,e.clientY);
     if(!S.drawing) return;
-    if(!S.first){
-      S.first = w; S.preview=null; setStatus('1-я точка есть. Ткни вторую.');
-    }else{
-      const end = constrainPoint(S.first, w, false);
+    if(!S.first){ S.first=w; S.preview=null; setStatus('1-я точка: ткни вторую'); }
+    else{
+      let end=w; if(S.snap45) end=snapPoint45(S.first,w);
       S.segs.push({a:{...S.first}, b:{...end}});
       S.first=null; S.preview=null; S.drawing=false; btnLine.classList.remove('active');
-      rebuildNodes();
-      setStatus('Линия готова. Для новой снова нажми «Линия».');
-      draw();
+      rebuildNodes(); setStatus('Линия готова. Для новой — снова «Линия».'); draw();
     }
   }
 },{passive:false});
 
-// touch (двумя пальцами — пинч)
+// touch: пинч двумя пальцами
 cv.addEventListener('touchstart', e=>{
   for(const t of e.changedTouches) touchMap.set(t.identifier,{x:t.clientX,y:t.clientY});
   if(touchMap.size===2){ const [a,b]=[...touchMap.values()]; pinchBegin(a,b); }
@@ -329,8 +382,7 @@ cv.addEventListener('touchmove', e=>{
   for(const t of e.changedTouches) touchMap.set(t.identifier,{x:t.clientX,y:t.clientY});
   if(touchMap.size===2){ const [a,b]=[...touchMap.values()]; pinchMove(a,b); e.preventDefault(); return; }
   if(S.drawing && S.first && e.touches.length===1){
-    const t=e.touches[0]; let p=toWorld(t.clientX,t.clientY);
-    S.preview = constrainPoint(S.first, p, false); draw();
+    const t=e.touches[0]; let p=toWorld(t.clientX,t.clientY); if(S.snap45) p=snapPoint45(S.first,p); S.preview=p; draw();
   }
 },{passive:false});
 cv.addEventListener('touchend', e=>{
@@ -370,24 +422,14 @@ document.addEventListener('pointerdown',e=>{
   if(panel.style.display!=='none' && !panel.contains(e.target) && e.target!==gear) panel.style.display='none';
 });
 diamInp.oninput=()=>{ S.pipe=+diamInp.value; dVal.textContent=diamInp.value; draw(); };
-gridInp.oninput=()=>{ S.grid=+gridInp.value; gVal.textContent=gridInp.value; draw(); };
+gridInp.oninput=()=>{ S.grid=+gridInp.value; gVal.textContent=S.grid; draw(); };
+bendInp.oninput=()=>{ S.bend=+bendInp.value; bVal.textContent=S.bend; draw(); };
 snapInp.onchange=()=>{ S.snap45=snapInp.checked; };
-lockAng.onchange=()=>{ S.lockAngle=lockAng.checked; angleRow.style.opacity = S.lockAngle?1:.5; };
-angDeg.oninput=()=>{ S.angDeg=+angDeg.value; angVal.textContent=S.angDeg; if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview,false); draw(); } };
 editSnap.onchange=()=>{ S.editSnap=editSnap.checked; if(S.dragNode) setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); };
-
-// HUD
-minus1.onclick=()=>{ if(!S.lockAngle) return; S.angDeg=Math.max(0, S.angDeg-1); angDeg.value=S.angDeg; angVal.textContent=S.angDeg;
-  if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview,false); draw(); }
-  if(S.dragNode){ const L=S.segs[S.dragNode.seg]; const other=(S.dragNode.end==='a')?L.b:L.a; L[S.dragNode.end]=constrainPoint(other,L[S.dragNode.end],true); rebuildNodes(); draw(); } };
-plus1.onclick =()=>{ if(!S.lockAngle) return; S.angDeg=Math.min(180, S.angDeg+1); angDeg.value=S.angDeg; angVal.textContent=S.angDeg;
-  if(S.drawing&&S.first&&S.preview){ S.preview=constrainPoint(S.first,S.preview,false); draw(); }
-  if(S.dragNode){ const L=S.segs[S.dragNode.seg]; const other=(S.dragNode.end==='a')?L.b:L.a; L[S.dragNode.end]=constrainPoint(other,L[S.dragNode.end],true); rebuildNodes(); draw(); } };
-freeBtn.onclick =()=>{ S.editSnap=!S.editSnap; if(S.dragNode) setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); draw(); };
 
 // старт
 resize();
-setStatus('Готов: Линия → 1-й тап → 2-й тап. Долгое нажатие на торце — правка. Free — без привязки.');
+setStatus('Готов: Линия → 1-й тап → 2-й тап. Правка конца: долгий тап. По умолчанию — свободно.');
 })();
 </script>
 </body>
