@@ -1,342 +1,388 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>IsoPipe — чертим по фото</title>
-  <style>
-    :root{--ui-bg:#1e1e1e;--ui:#2c2c2c;--txt:#eaeaea;--accent:#6aa6ff}
-    html,body{margin:0;height:100%;background:#111;color:var(--txt);font:16px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Inter,Arial}
-    #app{position:fixed;inset:0;touch-action:none;overscroll-behavior:none}
-    #c{position:absolute;inset:0;background:#111}
-    /* UI */
-    .bar{position:fixed;left:8px;right:8px;top:8px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
-    .btn{background:linear-gradient(#5b5bff,#4a68ff);color:#fff;border:0;border-radius:14px;padding:10px 14px;font-weight:600}
-    .btn.gray{background:#2a2a2a}
-    .pill{background:#2a2a2a;color:#ddd;border-radius:12px;padding:8px 12px}
-    .right{margin-left:auto}
-    #status{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.55);color:#bff2b5;border-radius:10px;padding:8px 10px;font-size:13px}
-    #file{display:none}
-    /* плавающее меню настроек */
-    #panel{position:fixed;right:8px;top:8px;z-index:11;background:#1b1b1b;border-radius:16px;padding:12px 12px 10px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:none;min-width:220px}
-    #panel h4{margin:0 0 8px 0;font-size:14px;opacity:.85}
-    #panel label{display:flex;align-items:center;justify-content:space-between;margin:8px 0;font-size:14px}
-    input[type=range]{width:130px}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Трассировка труб по фото</title>
+<style>
+  :root { --ui:#1f2937; --accent:#6366f1; --bg:#111; --panel:rgba(20,20,22,.9); }
+  html,body{height:100%;margin:0;background:#0f0f10;color:#fff;font-family:-apple-system,system-ui,Segoe UI,Roboto,Inter,Arial}
+  #wrap{position:fixed;inset:0;overflow:hidden;touch-action:none}
+  canvas{position:absolute;inset:0;background:#0d0f12}
+  #ui{position:fixed;left:.5rem;top:.5rem;display:flex;gap:.5rem;flex-wrap:wrap;z-index:3}
+  .btn{background:var(--panel);border:1px solid #2a2e37;color:#fff;border-radius:.8rem;padding:.55rem .9rem;font-weight:600}
+  .btn.active{outline:2px solid var(--accent)}
+  .row{display:flex;gap:.5rem;align-items:center}
+  .panel{position:fixed;right:.5rem;top:.5rem;background:var(--panel);border:1px solid #2a2e37;border-radius:1rem;padding:.8rem;z-index:3}
+  .panel h4{margin:.2rem 0 .6rem 0}
+  .panel label{font-size:.92rem;opacity:.9;display:block;margin:.35rem 0 .15rem}
+  input[type="range"]{width:200px}
+  #hint{position:fixed;left:.5rem;bottom:.5rem;background:rgba(0,0,0,.6);padding:.5rem .7rem;border-radius:.7rem;font-size:.9rem}
+  .sep{height:1px;background:#2a2e37;margin:.5rem 0}
+</style>
 </head>
 <body>
-  <div id="app">
-    <canvas id="c"></canvas>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <canvas id="overlay" style="pointer-events:none"></canvas>
+</div>
 
-    <div class="bar">
-      <button id="modeLine" class="btn">Линия</button>
-      <button id="undo" class="pill">Назад</button>
-      <label class="pill" style="cursor:pointer;">
-        📷 Фото
-        <input id="file" type="file" accept="image/*">
-      </label>
-      <button id="center" class="pill">🎯 Центр</button>
-      <button id="gear" class="pill right">⚙️</button>
-    </div>
+<div id="ui">
+  <button class="btn" id="photoBtn">📷 Фото</button>
+  <button class="btn" id="calibBtn">📏 Калибровка</button>
+  <button class="btn active" id="lineBtn">📐 Линия</button>
+  <button class="btn" id="teeBtn">┬ Тройник</button>
+  <button class="btn" id="valveBtn">🚦 Кран</button>
+  <button class="btn" id="undoBtn">↩️ Назад</button>
+  <button class="btn" id="centerBtn">🎯 Центр</button>
+  <button class="btn" id="saveBtn">💾 Сохранить</button>
+  <button class="btn" id="loadBtn">📂 Загрузить</button>
+</div>
 
-    <div id="panel">
-      <h4>Настройки</h4>
-      <label>Ø, мм <input id="diam" type="range" min="10" max="120" value="40"></label>
-      <label>Сетка <input id="grid" type="range" min="0" max="80" value="40"></label>
-      <label>Магнит 0/45/90° <input id="snap" type="checkbox" checked></label>
-      <label>Цвет трубы <input id="color" type="color" value="#3478ff"></label>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
-        <button id="close" class="btn gray">Готово</button>
-      </div>
-    </div>
-
-    <div id="status">Статус: готов</div>
+<div class="panel">
+  <h4>Параметры</h4>
+  <label>Ø, мм</label>
+  <input id="diam" type="range" min="10" max="200" value="40"/>
+  <div class="row"><span style="width:60px;opacity:.8">Сетка</span>
+    <input id="grid" type="range" min="0" max="80" value="40">
   </div>
+  <label class="row"><input id="iso" type="checkbox" checked style="margin-right:.5rem">Изометрия (2.5D)</label>
+  <div class="sep"></div>
+  <label class="row"><input id="snap" type="checkbox" checked style="margin-right:.5rem">Магнит 0/45/90°</label>
+</div>
+
+<div id="hint">Статус: режим линия. Калибруй фото перед рисованием (📏).</div>
+<input id="file" type="file" accept="image/*" hidden/>
+<input id="jsonFile" type="file" accept="application/json" hidden/>
 
 <script>
-(() => {
-  const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+const canvas = $('c'), ctx = canvas.getContext('2d');
+const overlay = $('overlay'), octx = overlay.getContext('2d');
+let W=innerWidth, H=innerHeight;
+canvas.width = overlay.width = W;
+canvas.height = overlay.height = H;
 
-  // --- UI ---
-  const file = document.getElementById('file');
-  const st  = (msg)=>{document.getElementById('status').textContent='Статус: ' + msg};
+let state = {
+  bg: null, bgW:0, bgH:0,
+  // мировые трансформации (пан/зум) — единственные для фото и труб
+  scale: 1, panX: 0, panY: 0,
+  // калибровка: мм/пиксель
+  mmPerPx: 1, calibrated:false,
+  mode: 'line', // line|calib|tee|valve
+  pipes: [], // [{points:[{x,y}], d}]
+  fittings: [], // [{type:'tee'|'valve', x,y, rot}]
+  tempPts: [],
+  snap: true,
+  iso: true,
+  grid: 40,
+  dmm: 40
+};
 
-  const gear = document.getElementById('gear');
-  const panel = document.getElementById('panel');
-  gear.onclick = ()=> panel.style.display = 'block';
-  document.getElementById('close').onclick = ()=> panel.style.display = 'none';
+// ========= helpers
+function toWorld(x,y){ // экран -> мир
+  const s=state.scale; 
+  return { x:(x - state.panX)/s, y:(y - state.panY)/s };
+}
+function toScreen(x,y){ // мир -> экран
+  const s=state.scale;
+  return { x: x*s + state.panX, y: y*s + state.panY };
+}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function angle(a,b){
+  return Math.atan2(b.y-a.y,b.x-a.x);
+}
+function snapAngle(rad){
+  if(!state.snap) return rad;
+  const step = Math.PI/4; // 45°
+  return Math.round(rad/step)*step;
+}
+function lerp(a,b,t){return a+(b-a)*t;}
 
-  const diamEl = document.getElementById('diam');
-  const gridEl = document.getElementById('grid');
-  const snapEl = document.getElementById('snap');
-  const colorEl= document.getElementById('color');
-
-  // --- сцена ---
-  let W=0,H=0, DPR = Math.max(1, Math.min(3, window.devicePixelRatio||1));
-  function resize() {
-    const r = canvas.getBoundingClientRect();
-    W = r.width; H = r.height;
-    canvas.width = Math.round(W*DPR);
-    canvas.height= Math.round(H*DPR);
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-    draw();
+// ========= drawing
+function drawBG(){
+  ctx.save();
+  ctx.clearRect(0,0,W,H);
+  ctx.imageSmoothingEnabled = true;
+  if(state.bg){
+    const p = toScreen(0,0), s=state.scale;
+    ctx.drawImage(state.bg, p.x, p.y, state.bgW*s, state.bgH*s);
+  } else {
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0,0,W,H);
   }
-  new ResizeObserver(resize).observe(document.getElementById('app'));
+  ctx.restore();
+}
 
-  // фон-фото
-  let img = null;     // Image
-  let imgW=0, imgH=0;
+function drawGrid(){
+  octx.clearRect(0,0,W,H);
+  if(state.grid<=0) return;
+  const step = state.grid; // в мм
+  const px = step / state.mmPerPx * state.scale;
+  if(px<10) return; // слишком мелко
+  octx.save();
+  octx.globalAlpha = 0.25;
+  octx.strokeStyle = '#7aa0ff';
+  octx.lineWidth = 1;
+  // сетку рисуем в экранных координатах, но сдвиг учитываем pan
+  const offsetX = (state.panX % px + px) % px;
+  const offsetY = (state.panY % px + px) % px;
+  for(let x=offsetX; x<W; x+=px){ octx.beginPath(); octx.moveTo(x,0); octx.lineTo(x,H); octx.stroke(); }
+  for(let y=offsetY; y<H; y+=px){ octx.beginPath(); octx.moveTo(0,y); octx.lineTo(W,y); octx.stroke(); }
+  // оси
+  octx.globalAlpha=0.5; octx.strokeStyle='#ff6666';
+  const zero = toScreen(0,0);
+  octx.beginPath(); octx.moveTo(0,zero.y); octx.lineTo(W,zero.y); octx.stroke();
+  octx.beginPath(); octx.moveTo(zero.x,0); octx.lineTo(zero.x,H); octx.stroke();
+  octx.restore();
+}
 
-  // трансформация «всей сцены» (фото+трубы+сетка)
-  const view = {x:0,y:0, scale:1};
-  function resetView() {
-    view.scale = Math.min(W/imgW || 1, H/imgH || 1);
-    view.x = (W - imgW*view.scale)/2;
-    view.y = (H - imgH*view.scale)/2;
-  }
+function roundedJoin(a,b,c,rPx){
+  // дуга между AB и BC с радиусом rPx (в экранных пикселях)
+  // вычитаем точки касания и рисуем дугу
+  const A = toScreen(a.x,a.y), B = toScreen(b.x,b.y), C = toScreen(c.x,c.y);
+  const v1 = Math.atan2(A.y-B.y, A.x-B.x);
+  const v2 = Math.atan2(C.y-B.y, C.x-B.x);
+  const angDiff = ((v2 - v1 + Math.PI*3)%(Math.PI*2))-Math.PI;
+  const dir = Math.sign(angDiff)||1;
+  const t = Math.min(dist(A,B), dist(B,C)) * .3; // ограничим
+  // точка начала и конца дуги вдоль отрезков
+  const s1 = { x: B.x + Math.cos(v1)*(rPx), y: B.y + Math.sin(v1)*(rPx) };
+  const s2 = { x: B.x + Math.cos(v2)*(rPx), y: B.y + Math.sin(v2)*(rPx) };
+  // центр дуги найдём как пересечение нормалей (прибл.)
+  const n1 = v1 - dir*Math.PI/2, n2 = v2 + dir*Math.PI/2;
+  // прямая через s1 вдоль n1 и через s2 вдоль n2
+  const den = Math.sin(n1)*Math.cos(n2) - Math.cos(n1)*Math.sin(n2);
+  let cx = s2.x*(Math.sin(n1)) - s1.x*(Math.sin(n2));
+  let cy = s2.y*(Math.cos(n1)) - s1.y*(Math.cos(n2));
+  cx/=den; cy/=den;
+  // рисуем
+  ctx.beginPath();
+  ctx.moveTo(s1.x, s1.y);
+  const start = Math.atan2(s1.y-cy, s1.x-cx);
+  const end   = Math.atan2(s2.y-cy, s2.x-cx);
+  ctx.arc(cx,cy, rPx, start, end, dir<0);
+  ctx.stroke();
+}
 
-  // геометрия «труб» — набор сегментов
-  /** сегмент = {pts:[[x,y],[x2,y2],...], color, d} */
-  const pipes = [];
-  let current = null;
-  let modeLine = true;
+function drawPipes(){
+  ctx.save();
+  ctx.lineCap='round'; ctx.lineJoin='round';
 
-  // helpers
-  const toWorld = (sx,sy)=>[(sx-view.x)/view.scale,(sy-view.y)/view.scale];
-  const toScreen= (wx,wy)=>[wx*view.scale+view.x, wy*view.scale+view.y];
-
-  function snapDir(ax,ay,bx,by){
-    if(!snapEl.checked) return [bx,by];
-    const dx=bx-ax, dy=by-ay;
-    const ang = Math.atan2(dy,dx);
-    const step = Math.PI/4; // 45°
-    const snapAng = Math.round(ang/step)*step;
-    const len = Math.hypot(dx,dy);
-    return [ax+Math.cos(snapAng)*len, ay+Math.sin(snapAng)*len];
-  }
-
-  // рисование
-  function drawGrid() {
-    const g = +gridEl.value;
-    if (!g) return;
-    ctx.save();
-    ctx.beginPath();
-    const step = g;
-    const w = img ? imgW : W/view.scale;
-    const h = img ? imgH : H/view.scale;
-
-    ctx.strokeStyle='rgba(255,255,255,.12)';
-    ctx.lineWidth = 1;
-
-    // вертикали
-    for(let x=0;x<=w;x+=step){
-      const [sx1,sy1]=toScreen(x,0);
-      const [sx2,sy2]=toScreen(x,h);
-      ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2);
+  for(const p of state.pipes){
+    const rWorld = p.d/2/state.mmPerPx;          // радиус в мировых пикселях
+    const r = rWorld * state.scale;              // радиус в экранных пикселях
+    // «тело» трубы (толстая линия)
+    ctx.strokeStyle = '#4c6fff';
+    ctx.lineWidth = Math.max(2, r*1.8);
+    for(let i=0;i<p.points.length-1;i++){
+      const a = toScreen(p.points[i].x,p.points[i].y);
+      const b = toScreen(p.points[i+1].x,p.points[i+1].y);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
     }
-    // горизонтали
-    for(let y=0;y<=h;y+=step){
-      const [sx1,sy1]=toScreen(0,y);
-      const [sx2,sy2]=toScreen(w,y);
-      ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawPipes() {
-    for (const seg of pipes) {
-      paintSegment(seg);
-    }
-    if (current) paintSegment(current);
-  }
-
-  function paintSegment(seg){
-    if (seg.pts.length<2) return;
-    ctx.save();
-    ctx.lineJoin='round';
-    ctx.lineCap='round';
-    ctx.strokeStyle = seg.color || colorEl.value;
-    ctx.lineWidth = (seg.d || (+diamEl.value)) * view.scale / 10; // визуальная толщина
-
-    // рисуем ломаную с округлениями (имитация «отводов»)
-    ctx.beginPath();
-    seg.pts.forEach((p,i)=>{
-      const [sx,sy]=toScreen(p[0],p[1]);
-      if(i===0) ctx.moveTo(sx,sy);
-      else ctx.lineTo(sx,sy);
-    });
-    ctx.stroke();
-
-    // концевые «полукруги»
-    const r = ctx.lineWidth/2;
-    for (const ends of [seg.pts[0], seg.pts[seg.pts.length-1]]){
-      const [sx,sy]=toScreen(ends[0],ends[1]);
-      ctx.beginPath();
-      ctx.arc(sx,sy,r,0,Math.PI*2);
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  function draw() {
-    ctx.clearRect(0,0,W,H);
-    // фон
-    if (img) {
-      ctx.save();
-      ctx.setTransform(view.scale*DPR,0,0,view.scale*DPR,(view.x)*DPR,(view.y)*DPR);
-      ctx.drawImage(img,0,0,imgW,imgH);
-      ctx.restore();
-    } else {
-      // приятный фон, если фото нет
-      ctx.fillStyle='#151515'; ctx.fillRect(0,0,W,H);
-    }
-    drawGrid();
-    drawPipes();
-  }
-
-  // загрузка фото
-  file.onchange = (e)=>{
-    const f = e.target.files[0];
-    if(!f) return;
-    const url = URL.createObjectURL(f);
-    const im = new Image();
-    im.onload = ()=>{
-      img = im; imgW = im.width; imgH = im.height;
-      resetView();
-      st('фото загружено');
-      draw();
-      URL.revokeObjectURL(url);
-    };
-    im.src = url;
-  };
-
-  // Центрировать
-  document.getElementById('center').onclick = ()=>{
-    if (img) { resetView(); draw(); }
-  };
-
-  // Режим «Линия»
-  document.getElementById('modeLine').onclick = ()=>{
-    modeLine = true; st('режим: линия');
-  };
-  // Undo
-  document.getElementById('undo').onclick = ()=>{
-    if (current && current.pts.length>1){ current.pts.pop(); }
-    else current = null, pipes.pop();
-    draw();
-  };
-
-  // жесты (пан/зум/рисование)
-  let touches = new Map();
-  let lastScale = 1, lastCenter=null;
-
-  function getTouches() {
-    return [...touches.values()];
-  }
-  function centroid(ts) {
-    const n=ts.length; let x=0,y=0; ts.forEach(t=>{x+=t.x;y+=t.y}); return {x:x/n,y:y/n};
-    }
-  function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
-
-  function onPointerDown(x,y,id,isTouch){
-    touches.set(id,{x,y});
-    if (touches.size===1 && modeLine) {
-      // старт новой трубы или продолжение
-      const [wx,wy]=toWorld(x,y);
-      if (!current) current = {pts:[[wx,wy]], color: colorEl.value, d:+diamEl.value};
-      else current.pts.push([wx,wy]);
-      draw();
-    }
-    if (touches.size===2) {
-      const ts = getTouches();
-      lastScale = dist(ts[0],ts[1]);
-      lastCenter= centroid(ts);
-    }
-  }
-  function onPointerMove(x,y,id){
-    if (!touches.has(id)) return;
-    touches.set(id,{x,y});
-    const ts = getTouches();
-
-    if (ts.length===1 && modeLine && current) {
-      // перемещаем последнюю точку
-      const [ax,ay] = current.pts[current.pts.length-2] || current.pts[0];
-      let [wx,wy]=toWorld(x,y);
-      if (current.pts.length>=2){
-        [wx,wy]=snapDir(ax,ay,wx,wy);
+    // «блики» для псевдо-объёма
+    if(state.iso){
+      ctx.strokeStyle = 'rgba(255,255,255,.55)';
+      ctx.lineWidth = Math.max(1, r*0.35);
+      for(let i=0;i<p.points.length-1;i++){
+        const a = toScreen(p.points[i].x,p.points[i].y);
+        const b = toScreen(p.points[i+1].x,p.points[i+1].y);
+        // смещаем линию вверх на r*0.4 (нормаль)
+        const ang = Math.atan2(b.y-a.y,b.x-a.x) - Math.PI/2;
+        const off = {x:Math.cos(ang)*r*0.45, y:Math.sin(ang)*r*0.45};
+        ctx.beginPath(); ctx.moveTo(a.x+off.x,a.y+off.y); ctx.lineTo(b.x+off.x,b.y+off.y); ctx.stroke();
       }
-      current.pts[current.pts.length-1]=[wx,wy];
-      draw();
     }
-    if (ts.length===2) {
-      const c = centroid(ts);
-      const ds = dist(ts[0],ts[1]);
-      // зум вокруг центра жеста
-      const k = ds / lastScale;
-      if (isFinite(k) && k>0) {
-        const before = toWorld(c.x,c.y);
-        view.scale = Math.max(0.2, Math.min(8, view.scale*k));
-        const after  = toWorld(c.x,c.y);
-        view.x += (c.x - (after[0]*view.scale)) - (c.x - (before[0]*view.scale));
-        view.y += (c.y - (after[1]*view.scale)) - (c.y - (before[1]*view.scale));
+    // отводы в местах изломов
+    ctx.strokeStyle = '#4c6fff';
+    ctx.lineWidth = Math.max(2, r*1.8);
+    for(let i=1;i<p.points.length-1;i++){
+      roundedJoin(p.points[i-1], p.points[i], p.points[i+1], r*1.2);
+    }
+    // торцы
+    for(const pt of [p.points[0], p.points[p.points.length-1]]){
+      const s = toScreen(pt.x,pt.y);
+      ctx.beginPath(); ctx.fillStyle='#4c6fff'; ctx.arc(s.x,s.y, r*0.95, 0, Math.PI*2); ctx.fill();
+      if(state.iso){ ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.55)'; ctx.arc(s.x-r*0.25,s.y-r*0.25, r*0.5, 0, Math.PI*2); ctx.fill(); }
+    }
+  }
+  ctx.restore();
+}
+
+function drawFittings(){
+  ctx.save();
+  for(const f of state.fittings){
+    const s = toScreen(f.x,f.y);
+    ctx.translate(s.x,s.y);
+    ctx.rotate(f.rot||0);
+    if(f.type==='tee'){
+      ctx.fillStyle='#ffd166';
+      ctx.fillRect(-10,-6,20,12); // корпус
+      ctx.fillRect(-6,-20,12,14); // «ножка»
+    }else if(f.type==='valve'){
+      ctx.fillStyle='#ff6b6b';
+      ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.fillRect(-2,-14,4,28);
+    }
+    ctx.setTransform(1,0,0,1,0,0);
+  }
+  ctx.restore();
+}
+
+function render(){
+  drawBG();
+  drawGrid();
+  drawPipes();
+  drawFittings();
+  requestAnimationFrame(()=>{});
+}
+render();
+
+// ========= input (пан/зум/клик)
+let dragging=false, last={x:0,y:0};
+let pinch=false, lastDist=0;
+
+function setHint(t){ $('hint').textContent = 'Статус: '+t; }
+
+wrap.addEventListener('pointerdown', e=>{
+  wrap.setPointerCapture(e.pointerId);
+  dragging=true; last.x=e.clientX; last.y=e.clientY;
+  if(state.mode==='line'){
+    const w = toWorld(e.clientX,e.clientY);
+    if(state.tempPts.length===0){
+      state.tempPts=[w];
+    }else{
+      // направляем со снапом
+      const a = state.tempPts[state.tempPts.length-1];
+      let ang = angle(a,w); ang = snapAngle(ang);
+      const len = dist(a,w);
+      const p = { x: a.x + Math.cos(ang)*len, y: a.y + Math.sin(ang)*len };
+      state.tempPts.push(p);
+      // если двойной тап по одной точке — завершить сегмент
+      if(state.tempPts.length>=2 && dist(state.tempPts[state.tempPts.length-1], state.tempPts[state.tempPts.length-2])<3/state.scale){
+        // пропустить слишком короткое
       }
-      // пан
-      view.x += (c.x - lastCenter.x);
-      view.y += (c.y - lastCenter.y);
-      lastCenter = c; lastScale = ds;
-      draw();
+    }
+  }else if(state.mode==='tee' || state.mode==='valve'){
+    const w = toWorld(e.clientX,e.clientY);
+    state.fittings.push({ type: state.mode==='tee'?'tee':'valve', x:w.x,y:w.y, rot:0});
+    render(); setHint(`${state.mode==='tee'?'Тройник':'Кран'} поставлен`);
+  }else if(state.mode==='calib'){
+    const w = toWorld(e.clientX,e.clientY);
+    state.tempPts.push(w);
+    if(state.tempPts.length===2){
+      const real = prompt('Введи реальную длину между точками (мм):', '1000');
+      const px = dist(state.tempPts[0], state.tempPts[1]); // в мировых пикселях
+      const mmPerPx = Number(real)/px;
+      if(mmPerPx>0){ state.mmPerPx=mmPerPx; state.calibrated=true; setHint(`Калибровано: ${mmPerPx.toFixed(3)} мм/px`); }
+      state.tempPts=[];
+    }else{
+      setHint('Калибровка: выбери вторую точку');
     }
   }
-  function onPointerUp(id){
-    touches.delete(id);
-    if (current && current.pts.length===1) current=null; // одиночный тап — не сохраняем
-    draw();
+  render();
+});
+
+wrap.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dx = e.clientX-last.x, dy=e.clientY-last.y;
+  last.x=e.clientX; last.y=e.clientY;
+  if(e.buttons===2 || (e.pointerType==='touch' && state.mode!=='line')){ // две пальца/вторичная — пан
+    state.panX += dx; state.panY += dy;
+  }else if(state.mode!=='line'){ // режимы не рисуют — пан
+    state.panX += dx; state.panY += dy;
   }
+  render();
+});
 
-  // мышь
-  let mid=1;
-  canvas.addEventListener('mousedown',e=>onPointerDown(e.clientX,e.clientY,mid=false?0:++mid,false));
-  window.addEventListener('mousemove',e=>onPointerMove(e.clientX,e.clientY,mid));
-  window.addEventListener('mouseup',  ()=>onPointerUp(mid));
+wrap.addEventListener('pointerup', e=>{
+  dragging=false; wrap.releasePointerCapture(e.pointerId);
+  if(state.mode==='line' && state.tempPts.length>=2){
+    // если отпустили — фиксируем текущий сегмент
+    const pts = state.tempPts.slice(-2);
+    // слипание в одну трубу
+    let current = state.pipes[state.pipes.length-1];
+    if(!current || current._closed){ current={points:[], d: state.dmm}; state.pipes.push(current); }
+    if(current.points.length===0) current.points.push(pts[0]);
+    current.points.push(pts[1]);
+    current.d = state.dmm;
+    setHint('Сегмент готов. Для следующего нажми «Линия». | Готов');
+  }
+});
 
-  // сенсор
-  canvas.addEventListener('touchstart',e=>{
-    for(const t of e.changedTouches) onPointerDown(t.clientX,t.clientY,t.identifier,true);
-    e.preventDefault();
-  },{passive:false});
-  canvas.addEventListener('touchmove',e=>{
-    for(const t of e.changedTouches) onPointerMove(t.clientX,t.clientY,t.identifier);
-    e.preventDefault();
-  },{passive:false});
-  canvas.addEventListener('touchend',e=>{
-    for(const t of e.changedTouches) onPointerUp(t.identifier);
-    e.preventDefault();
-  },{passive:false});
-  canvas.addEventListener('touchcancel',e=>{
-    for(const t of e.changedTouches) touches.delete(t.identifier);
-    e.preventDefault();
-  },{passive:false});
+wrap.addEventListener('wheel', e=>{
+  const k = Math.exp(-e.deltaY*0.0015);
+  // масштабируем относительно курсора
+  const wx = (e.clientX - state.panX)/state.scale;
+  const wy = (e.clientY - state.panY)/state.scale;
+  state.scale *= k;
+  state.panX = e.clientX - wx*state.scale;
+  state.panY = e.clientY - wy*state.scale;
+  render();
+});
 
-  // колесо — зум около курсора
-  canvas.addEventListener('wheel',e=>{
-    const k = Math.exp(-e.deltaY/300);
-    const cx = e.clientX, cy = e.clientY;
-    const before = toWorld(cx,cy);
-    view.scale = Math.max(0.2, Math.min(8, view.scale*k));
-    const after  = toWorld(cx,cy);
-    view.x += (cx - (after[0]*view.scale)) - (cx - (before[0]*view.scale));
-    view.y += (cy - (after[1]*view.scale)) - (cy - (before[1]*view.scale));
-    draw();
-    e.preventDefault();
-  }, {passive:false});
+// ========= UI
+$('photoBtn').onclick = ()=> $('file').click();
+$('file').onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const img = new Image(); img.onload=()=>{
+    state.bg=img; state.bgW=img.width; state.bgH=img.height;
+    // впишем в экран
+    const s = Math.min(W/img.width, H/img.height)*0.95;
+    state.scale = s; state.panX = (W - img.width*s)/2; state.panY=(H - img.height*s)/2;
+    render(); setHint('Фото загружено. Нажми 📏 для калибровки.');
+  }; img.src = URL.createObjectURL(f);
+};
 
-  // первичный рендер
-  resize();
-  st('готов. Загрузите фото и рисуйте');
-})();
+$('calibBtn').onclick = ()=>{ state.mode='calib'; setActive(this,'calibBtn'); setHint('Калибровка: выбери 2 точки и введи длину.'); };
+$('lineBtn').onclick  = ()=>{ state.mode='line'; setActive(this,'lineBtn'); setHint('Режим: линия. Кликни по точкам.'); };
+$('teeBtn').onclick   = ()=>{ state.mode='tee'; setActive(this,'teeBtn'); setHint('Режим: тройник. Тап по месту.'); };
+$('valveBtn').onclick = ()=>{ state.mode='valve'; setActive(this,'valveBtn'); setHint('Режим: кран. Тап по месту.'); };
+$('undoBtn').onclick  = ()=>{
+  if(state.pipes.length){ 
+    const p = state.pipes[state.pipes.length-1];
+    p.points.pop(); if(p.points.length<2) state.pipes.pop();
+  } else if(state.fittings.length){ state.fittings.pop(); }
+  render();
+};
+$('centerBtn').onclick= ()=>{
+  if(state.bg){
+    const s = Math.min(W/state.bgW, H/state.bgH)*0.95;
+    state.scale=s; state.panX=(W-state.bgW*s)/2; state.panY=(H-state.bgH*s)/2;
+  }else{ state.scale=1; state.panX=state.panY=0; }
+  render();
+};
+$('saveBtn').onclick = ()=>{
+  const data = { pipes:state.pipes, fittings:state.fittings, dmm:state.dmm, grid:state.grid, iso:state.iso, snap:state.snap, mmPerPx:state.mmPerPx };
+  const blob = new Blob([JSON.stringify(data)],{type:'application/json'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='trace.json'; a.click();
+};
+$('loadBtn').onclick = ()=> $('jsonFile').click();
+$('jsonFile').onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  f.text().then(t=>{
+    const d = JSON.parse(t);
+    Object.assign(state, { pipes:d.pipes||[], fittings:d.fittings||[], dmm:d.dmm||40, grid:d.grid??40, iso:!!d.iso, snap:!!d.snap, mmPerPx:d.mmPerPx||1, calibrated:!!d.mmPerPx });
+    render(); setHint('Проект загружен.');
+  });
+};
+
+$('diam').oninput  = e=>{ state.dmm = +e.target.value; render(); };
+$('grid').oninput  = e=>{ state.grid = +e.target.value; render(); };
+$('iso').onchange  = e=>{ state.iso  =  e.target.checked; render(); };
+$('snap').onchange = e=>{ state.snap =  e.target.checked; };
+
+function setActive(_, id){
+  ['lineBtn','teeBtn','valveBtn','calibBtn'].forEach(b=>$ (b).classList.remove('active'));
+  $(id).classList.add('active');
+}
+
+// ресайз
+addEventListener('resize', ()=>{
+  W=innerWidth; H=innerHeight; canvas.width=overlay.width=W; canvas.height=overlay.height=H; render();
+});
+
+// старт
+render();
 </script>
 </body>
 </html>
