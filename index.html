@@ -1,178 +1,184 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Pipe Draw — TAP-TAP</title>
 <style>
-  :root { --uiH: 48px; }
-  html,body{margin:0;height:100%;background:#f0f0f3;font-family:system-ui,Arial}
-  /* Верхняя панель */
-  #ui{
-    position:fixed; inset:0 0 auto 0; height:var(--uiH);
-    display:flex; justify-content:center; align-items:center; gap:8px;
-    z-index:10; background:transparent;
+  :root{
+    --page:#eef1f5;
+    --ui:#fff;
+    --bd:#dadde6;
+    --frame:#cfd3dc;
+    --fg:#0f1115;
+    --accent:#2b73ff;
+    --btn-bg:#f7f8fb;
+    --btn-on:#2b73ff;
   }
-  button{
-    background:#6a5acd; color:#fff; border:0; border-radius:12px;
-    padding:8px 14px; font-size:14px; white-space:nowrap;
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{
+    margin:0;height:100%;overflow:hidden;background:var(--page);color:var(--fg);
+    font-family:system-ui,-apple-system,Segoe UI,Inter,Roboto,Arial;
+    user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+    overscroll-behavior:none;
   }
-  button:active{opacity:.88}
-  /* Холст */
-  #wrap{
-    position:fixed; inset:var(--uiH) 0 0 0;
-    display:flex; justify-content:center; align-items:center; padding:8px;
+  .top{
+    position:fixed;left:0;right:0;top:0;z-index:10;
+    display:flex;gap:8px;justify-content:center;align-items:center;
+    padding:10px;background:var(--ui);border-bottom:1px solid var(--bd)
   }
-  canvas{
-    width:95vw; height:calc(95vh - var(--uiH));
-    border:1px solid #d8d8e0; background:#fff; border-radius:8px;
-    touch-action:none; /* запрет жестов браузера над холстом */
+  .btn{
+    padding:10px 14px;border:1px solid var(--bd);
+    border-radius:10px;background:var(--btn-bg);
+    font-weight:600;color:#333;cursor:pointer
   }
-  /* Панель настроек */
-  #panel{
-    position:fixed; right:10px; top:calc(var(--uiH) + 10px);
-    background:#fff; border:1px solid #e6e6ee; border-radius:12px;
-    box-shadow:0 8px 18px rgba(0,0,0,.06); padding:10px 12px; z-index:20;
-    display:none; min-width:230px;
-  }
-  #panel h3{margin:0 0 8px; font-size:14px}
-  #panel label{display:block; font-size:13px; margin:8px 0 4px}
-  #status{
-    position:fixed; left:10px; bottom:10px; z-index:30;
-    background:rgba(0,0,0,.72); color:#fff; padding:6px 10px;
-    border-radius:10px; font-size:13px
-  }
+  .btn.on{background:var(--btn-on);color:#fff;border-color:var(--btn-on)}
+  input[type=file]{display:none}
+
+  .stageWrap{position:fixed;left:0;right:0;bottom:0;top:56px;
+    display:flex;justify-content:center;align-items:center}
+  .stage{width:95vw;height:95vh;background:#fff;
+    border:1px solid var(--frame);overflow:hidden;touch-action:none}
+  canvas{display:block;width:100%;height:100%}
+
+  .sheet{position:fixed;left:0;right:0;bottom:-240px;z-index:20;background:#fff;
+    border-top:1px solid var(--bd);box-shadow:0 -10px 30px rgba(0,0,0,.12);
+    transition:transform .25s ease;transform:translateY(0);padding:14px}
+  .sheet.open{transform:translateY(-240px)}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 0}
+  .row label{min-width:140px}
+  .val{font-variant-numeric:tabular-nums;font-weight:700}
+
+  .status{position:fixed;left:10px;bottom:10px;z-index:9;
+    background:rgba(0,0,0,.65);color:#fff;padding:8px 12px;
+    border-radius:10px;font-size:13px}
 </style>
 </head>
 <body>
-  <div id="ui">
-    <button id="lineBtn">Линия</button>
-    <button id="undoBtn">Назад</button>
-    <button id="centerBtn">Центр</button>
-    <button id="saveBtn">Сохранить</button>
-    <button id="settingsBtn">Настройки</button>
+  <div class="top">
+    <button class="btn" id="lineBtn">Линия</button>
+    <button class="btn" id="undoBtn">Назад</button>
+    <label class="btn" for="photoInput">Фото</label>
+    <input id="photoInput" type="file" accept="image/*"/>
+    <button class="btn" id="centerBtn">Центр</button>
+    <button class="btn" id="saveBtn">Сохранить</button>
+    <button class="btn" id="gearBtn">⚙ Настройки</button>
   </div>
 
-  <div id="wrap">
-    <canvas id="cv"></canvas>
+  <div class="stageWrap">
+    <div class="stage"><canvas id="cv"></canvas></div>
   </div>
 
-  <div id="panel">
-    <h3>Параметры</h3>
-    <label>Толщина трубы</label>
-    <input id="wRange" type="range" min="2" max="40" value="10">
-    <label style="margin-top:10px">Фото (фон)</label>
-    <input id="bgInput" type="file" accept="image/*">
+  <div class="sheet" id="sheet">
+    <div class="row">
+      <label for="pipeRange">Толщина трубы</label>
+      <input id="pipeRange" type="range" min="8" max="120" step="1">
+      <span class="val" id="pipeVal">40</span>
+    </div>
   </div>
 
-  <div id="status">Режим: ожидание</div>
+  <div class="status" id="status">Готов. «Линия» → TAP A → TAP B. Пинч=зум, пан=одним пальцем.</div>
 
 <script>
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d', { alpha:false });
+(()=>{
+  const cv=document.getElementById('cv'); const ctx=cv.getContext('2d',{alpha:false});
+  const status=document.getElementById('status');
+  const lineBtn=document.getElementById('lineBtn');
+  const undoBtn=document.getElementById('undoBtn');
+  const centerBtn=document.getElementById('centerBtn');
+  const saveBtn=document.getElementById('saveBtn');
+  const photoInput=document.getElementById('photoInput');
+  const gearBtn=document.getElementById('gearBtn');
+  const sheet=document.getElementById('sheet');
+  const pipeRange=document.getElementById('pipeRange');
+  const pipeVal=document.getElementById('pipeVal');
 
-function fitCanvas(){
-  const r = window.devicePixelRatio || 1;
-  const w = Math.round(cv.clientWidth * r);
-  const h = Math.round(cv.clientHeight * r);
-  cv.width = w; cv.height = h;
-  ctx.setTransform(r,0,0,r,0,0);
-  draw();
-}
-addEventListener('resize', fitCanvas);
-fitCanvas();
+  const view={x:0,y:0,scale:1,min:0.4,max:8};
+  const segs=[]; let bg=null;
+  let pipeDia=40; pipeRange.value=pipeDia; pipeVal.textContent=pipeDia;
 
-let pipeW = 10;
-let bgImg = null;
-const pipes = [];   // {x1,y1,x2,y2}
-let mode = 'idle';  // 'idle' | 'line'
-let p1 = null;      // первая точка
-let preview = null; // временная линия
-
-const statusEl = document.getElementById('status');
-const setStatus = t => statusEl.textContent = t;
-
-document.getElementById('wRange').oninput = e => { pipeW = +e.target.value; draw(); };
-document.getElementById('bgInput').onchange = e => {
-  const f = e.target.files[0]; if(!f) return;
-  const img = new Image();
-  img.onload = ()=>{ bgImg = img; draw(); };
-  img.src = URL.createObjectURL(f);
-};
-
-document.getElementById('lineBtn').onclick = ()=>{
-  mode = 'line'; p1 = null; preview = null;
-  setStatus('Режим: линия. Тапни первую точку');
-};
-document.getElementById('undoBtn').onclick = ()=>{
-  pipes.pop(); preview=null; draw(); setStatus('Отменено');
-};
-document.getElementById('centerBtn').onclick = ()=>{ draw(); setStatus('Центр'); };
-document.getElementById('saveBtn').onclick = ()=>{
-  const a = document.createElement('a');
-  a.download = 'pipes.png'; a.href = cv.toDataURL('image/png'); a.click();
-  setStatus('PNG сохранён');
-};
-const panel = document.getElementById('panel');
-document.getElementById('settingsBtn').onclick = ()=>{
-  panel.style.display = (panel.style.display === 'block') ? 'none' : 'block';
-};
-
-function draw(){
-  // фон
-  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-  if(bgImg){ ctx.drawImage(bgImg, 0,0, cv.width, cv.height); }
-
-  // трубы
-  ctx.strokeStyle = '#2970ff';
-  ctx.lineWidth = pipeW;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for(const s of pipes){
-    ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
+  function fit(){
+    const dpr=Math.max(1,window.devicePixelRatio||1);
+    cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    draw();
   }
-  if(preview){
-    ctx.beginPath(); ctx.moveTo(preview.x1,preview.y1); ctx.lineTo(preview.x2,preview.y2); ctx.stroke();
+  new ResizeObserver(fit).observe(cv);
+
+  const w2s=p=>({x:p.x*view.scale+view.x,y:p.y*view.scale+view.y});
+  const s2w=p=>({x:(p.x-view.x)/view.scale,y:(p.y-view.y)/view.scale});
+
+  const state={mode:'idle',first:null};
+  function setMode(m){state.mode=m;if(m==='idle')state.first=null;}
+
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
+
+    ctx.save(); ctx.translate(view.x,view.y); ctx.scale(view.scale,view.scale);
+
+    if(bg){ const iw=bg.naturalWidth, ih=bg.naturalHeight; ctx.drawImage(bg,-iw/2,-ih/2,iw,ih); }
+
+    const W=Math.max(2,pipeDia)/1.8;
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.strokeStyle='rgba(0,0,0,.18)'; ctx.lineWidth=W+3/view.scale;
+    for(const s of segs){ctx.beginPath();ctx.moveTo(s.a.x+1/view.scale,s.a.y+1/view.scale);ctx.lineTo(s.b.x+1/view.scale,s.b.y+1/view.scale);ctx.stroke();}
+    ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent')||'#2b73ff'; ctx.lineWidth=W;
+    for(const s of segs){ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();}
+
+    if(state.first){
+      ctx.fillStyle='#ff3b30'; ctx.beginPath(); ctx.arc(state.first.x,state.first.y,5/view.scale,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
   }
-}
 
-// — касания / мышь — (Pointer события)
-cv.style.touchAction = 'none';  // без системных жестов на холсте
-cv.addEventListener('pointerdown', onDown);
-cv.addEventListener('pointermove', onMove);
-cv.addEventListener('pointerup', onUp);
-cv.addEventListener('pointercancel', ()=>{ preview=null; });
-
-function localXY(e){
-  const r = cv.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
-}
-
-function onDown(e){
-  if(mode!=='line') return;
-  const {x,y} = localXY(e);
-  if(!p1){
-    p1 = {x,y};
-    preview = {x1:x,y1:y,x2:x,y2:y};
-    setStatus('Первая точка. Тапни вторую.');
-  }else{
-    pipes.push({x1:p1.x,y1:p1.y,x2:x,y2:y});
-    p1=null; preview=null; draw();
-    setStatus('Линия готова. Для новой — «Линия».');
+  const pts=new Map(); let pan=false,panPrev=null; let pinch=null;
+  function local(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+  function zoomAt(f,cx,cy){
+    const ns=Math.max(view.min,Math.min(view.max,view.scale*f));
+    const before=s2w({x:cx,y:cy}); view.scale=ns; const after=w2s(before);
+    view.x+=(cx-after.x); view.y+=(cy-after.y);
   }
-}
 
-function onMove(e){
-  if(!p1) return;
-  const {x,y} = localXY(e);
-  preview = {x1:p1.x,y1:p1.y,x2:x,y2:y};
-  draw();
-}
+  cv.addEventListener('pointerdown', e=>{
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId,local(e));
+    if(pts.size===2){const a=[...pts.values()];pinch={d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y),c:{x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2}};return;}
+    if(state.mode==='idle'){pan=true;panPrev=local(e);return;}
+  },{passive:false});
 
-function onUp(){ /* ничего */ }
+  cv.addEventListener('pointermove', e=>{
+    if(!pts.has(e.pointerId))return;
+    e.preventDefault(); pts.set(e.pointerId,local(e));
+    if(pinch&&pts.size===2){const a=[...pts.values()];const d=Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y);
+      const f=d/(pinch.d||d);zoomAt(f,pinch.c.x,pinch.c.y);pinch.d=d;draw();return;}
+    if(pan&&panPrev){const cur=local(e);view.x+=(cur.x-panPrev.x);view.y+=(cur.y-panPrev.y);panPrev=cur;draw();return;}
+  },{passive:false});
 
-// Полностью отключаем double-tap zoom/даблклик
-document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});
+  cv.addEventListener('pointerup', e=>{
+    if(!pts.has(e.pointerId))return;
+    e.preventDefault(); pts.delete(e.pointerId);
+    if(pinch&&pts.size<2)pinch=null; if(pan&&pts.size===0){pan=false;panPrev=null;}
+    if(state.mode==='waitA'){state.first=s2w(local(e));setMode('waitB');setStatus('Точка A. Теперь TAP точку B.');draw();return;}
+    if(state.mode==='waitB'&&state.first){const end=s2w(local(e));segs.push({a:{...state.first},b:end});
+      setMode('idle');lineBtn.classList.remove('on');setStatus('Линия готова. Для новой — «Линия».');draw();return;}
+  },{passive:false});
+
+  cv.addEventListener('pointercancel', e=>{pts.delete(e.pointerId);pan=false;panPrev=null;pinch=null;});
+
+  function setStatus(t){status.textContent=t;}
+  lineBtn.onclick=()=>{if(state.mode==='idle'){setMode('waitA');lineBtn.classList.add('on');setStatus('Режим: Линия. TAP точку A.');}else{setMode('idle');lineBtn.classList.remove('on');setStatus('Готов.');}draw();};
+  undoBtn.onclick=()=>{if(state.mode!=='idle'&&state.first){setMode('waitA');setStatus('Старт снят');draw();return;}
+    if(segs.length){segs.pop();draw();setStatus('Отменено');}};
+  centerBtn.onclick=()=>{view.scale=1;view.x=cv.clientWidth/2;view.y=cv.clientHeight/2;draw();setStatus('Центр.');};
+  saveBtn.onclick=()=>{const url=cv.toDataURL('image/png');const a=document.createElement('a');a.href=url;a.download='trace.png';a.click();};
+  photoInput.onchange=e=>{const f=e.target.files?.[0];if(!f)return;const img=new Image();img.onload=()=>{bg=img;draw();setStatus('Фото добавлено.');};img.src=URL.createObjectURL(f);};
+  gearBtn.onclick=()=>{sheet.classList.toggle('open');};
+  pipeRange.oninput=()=>{pipeDia=parseInt(pipeRange.value,10)||40;pipeVal.textContent=pipeDia;draw();};
+
+  function start(){view.x=cv.clientWidth/2;view.y=cv.clientHeight/2;draw();}
+  start();
+})();
 </script>
 </body>
 </html>
