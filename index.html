@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Pro Trace — стабильное рисование (one-pointer lock)</title>
+<title>Pro Trace — iPhone fix (primary + debounce + swallow click)</title>
 <style>
   :root{--bg:#0f1115;--fg:#eef2f7;--ui:#1c1f26;--bd:#2e3340;--acc:#6aa6ff}
   *{-webkit-tap-highlight-color:transparent}
@@ -24,7 +24,6 @@
   #hud{position:fixed;right:10px;bottom:10px;z-index:11;background:rgba(24,26,33,.9);border:1px solid var(--bd);border-radius:10px;
     padding:8px 10px;display:none;align-items:center;gap:8px;flex-wrap:wrap}
   #hud .val{min-width:90px}
-  .mini{padding:6px 8px;border-radius:8px;border:1px solid var(--bd);background:var(--ui);color:var(--fg)}
   #file{display:none}
 </style>
 </head>
@@ -65,45 +64,43 @@
 
 <script>
 (()=>{
-// ===== State (жёсткая машина состояний)
+// ===== State
 const S = {
-  // сцена (трубы)
+  // сцена
   scale:1, ox:0, oy:0, minS:.2, maxS:6,
-  // фото (независимый трансформ в фото-режиме)
+  // фото
   img:null, iw:0, ih:0, bgx:40, bgy:40, bgs:1,
   // параметры
   pipe:40, grid:40, snapDraw:true, editSnap:false, joinTol:14,
-  // геометрия
+  // сегменты
   segs:[],
-  // FSM: 'idle' | 'awaitFirst' | 'awaitSecond' | 'edit'
-  state:'idle',
-  first:null, preview:null,
+  // FSM
+  state:'idle', first:null, preview:null,
   nodes:[], dragNode:null,
   // ввод
   pointers:new Map(), activeId:null, pinch:null,
   tap:{x:0,y:0,t:0,moved:false,id:null},
-  photoMode:false
+  photoMode:false,
+  // анти-дубли
+  cooldownUntil:0
 };
 
-// ===== DOM
-const cv = document.getElementById('cv'); const ctx=cv.getContext('2d');
-const btnLine=document.getElementById('btnLine');
-const btnUndo=document.getElementById('btnUndo');
-const btnPhoto=document.getElementById('btnPhoto');
-const btnPhotoMode=document.getElementById('btnPhotoMode');
-const btnPhotoCenter=document.getElementById('btnPhotoCenter');
-const btnCenter=document.getElementById('btnCenter');
-const btnSave=document.getElementById('btnSave');
-const gear=document.getElementById('gear');
-const panel=document.getElementById('panel');
-const fileInp=document.getElementById('file');
+// ===== DOM refs
+const cv=document.getElementById('cv'); const ctx=cv.getContext('2d');
+const btnLine=document.getElementById('btnLine'); const btnUndo=document.getElementById('btnUndo');
+const btnPhoto=document.getElementById('btnPhoto'); const btnPhotoMode=document.getElementById('btnPhotoMode');
+const btnPhotoCenter=document.getElementById('btnPhotoCenter'); const btnCenter=document.getElementById('btnCenter'); const btnSave=document.getElementById('btnSave');
+const gear=document.getElementById('gear'); const panel=document.getElementById('panel'); const fileInp=document.getElementById('file');
 const diamInp=document.getElementById('diam'); const dVal=document.getElementById('dVal');
 const gridInp=document.getElementById('grid'); const gVal=document.getElementById('gVal');
-const snapDraw=document.getElementById('snapDraw');
-const editSnap=document.getElementById('editSnap');
+const snapDraw=document.getElementById('snapDraw'); const editSnap=document.getElementById('editSnap');
 const joinTol=document.getElementById('joinTol'); const jVal=document.getElementById('jVal');
 const hud=document.getElementById('hud'); const hudAngle=document.getElementById('hudAngle'); const hudLen=document.getElementById('hudLen');
 const statusEl=document.getElementById('status'); const setStatus=t=>statusEl.textContent='Статус: '+t;
+
+// глушим синтетические клики/contextmenu
+cv.addEventListener('click', e=>e.preventDefault(), {passive:false});
+cv.addEventListener('contextmenu', e=>e.preventDefault(), {passive:false});
 
 // ===== Sizes
 function resize(){
@@ -165,13 +162,10 @@ function drawGrid(){
 function drawPipes(){
   const W=Math.max(2,S.pipe*S.scale*0.45);
   ctx.lineCap='butt'; ctx.lineJoin='round'; ctx.miterLimit=6;
-  // тень
   ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=W+4;
   for(const s of S.segs){ const a=toScreen(s.a.x,s.a.y), b=toScreen(s.b.x,s.b.y); ctx.beginPath(); ctx.moveTo(a.x+1.5,a.y+1.5); ctx.lineTo(b.x+1.5,b.y+1.5); ctx.stroke(); }
-  // основная
   ctx.strokeStyle='#4da3ff'; ctx.lineWidth=W;
   for(const s of S.segs){ const a=toScreen(s.a.x,s.a.y), b=toScreen(s.b.x,s.b.y); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
-  // предпросмотр
   if(S.state==='awaitSecond' && S.first && S.preview){
     const a=toScreen(S.first.x,S.first.y), b=toScreen(S.preview.x,S.preview.y);
     ctx.strokeStyle='#7fc1ff'; ctx.lineWidth=W; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
@@ -205,85 +199,84 @@ function pinchMove(){ if(!S.pinch) return; const c=pointersCentroid(), d=pointer
 }
 function pinchEnd(){ S.pinch=null; }
 
-// ===== Pointer-only input (жёсткая блокировка по activeId)
-const TAP_MOVE=12, TAP_TIME=350, LONG_MS=450;
+// ===== Pointer-only input + primary + debounce
+const TAP_MOVE=12, TAP_TIME=350, LONG_MS=450, COOLDOWN=220;
 function updatePointer(e){ S.pointers.set(e.pointerId,{id:e.pointerId,x:e.clientX,y:e.clientY}); }
 function removePointer(e){ S.pointers.delete(e.pointerId); }
 
 cv.addEventListener('pointerdown', e=>{
-  // игнор, если уже активный другой палец управляет жестом
-  if(S.activeId!==null && S.activeId!==e.pointerId) { updatePointer(e); return; }
+  if(!e.isPrimary) return; // ТОЛЬКО основной указатель
+  if(performance.now()<S.cooldownUntil) return; // дебаунс
 
   cv.setPointerCapture(e.pointerId);
   updatePointer(e);
 
-  // если второй палец — пинч
-  if(S.pointers.size===2){ pinchBegin(); S.activeId=null; if(S.dragNode){S.dragNode=null;} if(S.state==='awaitSecond'){/*предпросмотр останется*/} return; }
+  // второй палец → пинч
+  if(S.pointers.size===2){ pinchBegin(); S.activeId=null; if(S.dragNode){S.dragNode=null;} return; }
 
-  // фиксируем активный pointer для этого цикла
   S.activeId=e.pointerId;
   S.tap={x:e.clientX,y:e.clientY,t:performance.now(),moved:false,id:e.pointerId};
 
-  // long-press для правки — ТОЛЬКО когда мы НЕ рисуем
+  // long-press только в idle
   if(S.state==='idle'){
     const n=pickNodeAt(e.clientX,e.clientY);
     if(n){
-      S.longPress=setTimeout(()=>{ if(S.pointers.size>1) return; S.dragNode={seg:n.seg,end:n.end}; S.state='edit'; setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); draw(); }, LONG_MS);
+      S.longPress=setTimeout(()=>{ if(S.pointers.size>1) return;
+        S.dragNode={seg:n.seg,end:n.end}; S.state='edit'; setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); draw(); }, LONG_MS);
     }
   }
 },{passive:false});
 
 cv.addEventListener('pointermove', e=>{
+  if(!e.isPrimary) return;
   const prev=S.pointers.get(e.pointerId);
   updatePointer(e);
 
-  // любой сдвиг > TAP_MOVE сбрасывает «тап»
+  // сброс «тапа»
   if(S.tap.id===e.pointerId && Math.hypot(e.clientX-S.tap.x,e.clientY-S.tap.y)>TAP_MOVE){
     S.tap.moved=true; if(S.longPress){clearTimeout(S.longPress); S.longPress=null;}
   }
 
-  // два пальца — пинч
+  // пинч
   if(S.pointers.size===2){ pinchMove(); return; }
 
-  // фото-режим: один палец двигает фото (только когда не рисуем и не редактируем)
+  // фото-режим перетаскивание
   if(S.photoMode && S.state==='idle' && !S.dragNode && prev){
     S.bgx += (e.clientX-prev.x); S.bgy += (e.clientY-prev.y); draw(); return;
   }
 
-  // правка торца
+  // правка
   if(S.state==='edit' && S.dragNode && e.pointerId===S.activeId){
     const L=S.segs[S.dragNode.seg]; if(!L) return;
     let p=toWorld(e.clientX,e.clientY);
     const other=(S.dragNode.end==='a')?L.b:L.a;
-    if(S.editSnap) p=snap45(other,p); // иначе свободно
+    if(S.editSnap) p=snap45(other,p);
     L[S.dragNode.end]=p; rebuildNodes(); draw(); return;
   }
 
-  // предпросмотр второй точки
+  // предпросмотр
   if(S.state==='awaitSecond' && e.pointerId===S.activeId && S.first){
     let p=toWorld(e.clientX,e.clientY); if(S.snapDraw) p=snap45(S.first,p); S.preview=p; draw();
   }
 },{passive:false});
 
 cv.addEventListener('pointerup', e=>{
-  // если это не наш активный pointer — просто убрать из набора
-  if(S.activeId!==e.pointerId && S.pointers.has(e.pointerId)){ removePointer(e); if(S.pointers.size<2 && S.pinch) pinchEnd(); return; }
+  if(!e.isPrimary){ removePointer(e); return; }
 
   // завершение пинча
   if(S.pointers.size<2 && S.pinch) pinchEnd();
 
-  // убрать long-press
   if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
 
   // завершение правки
   if(S.state==='edit' && S.dragNode && e.pointerId===S.activeId){
-    S.dragNode=null; S.state='idle'; setStatus('Готов'); draw(); S.activeId=null; removePointer(e); return;
+    S.dragNode=null; S.state='idle'; setStatus('Готов'); draw();
+    S.activeId=null; removePointer(e); return;
   }
 
-  // это тап?
   const isTap=(S.tap.id===e.pointerId)&&!S.tap.moved&&(performance.now()-S.tap.t<=TAP_TIME);
 
-  if(isTap){
+  if(isTap && performance.now()>=S.cooldownUntil){
     if(S.state==='awaitFirst'){
       S.first=toWorld(e.clientX,e.clientY); S.preview=null; S.state='awaitSecond'; setStatus('1-я точка: ткни вторую'); draw();
     }else if(S.state==='awaitSecond' && S.first){
@@ -292,10 +285,10 @@ cv.addEventListener('pointerup', e=>{
       S.segs.push({a:{...S.first}, b:{x:newEnd.x,y:newEnd.y}});
       S.first=null; S.preview=null; S.state='idle'; btnLine.classList.remove('active');
       rebuildNodes(); setStatus('Линия готова. Для новой — снова «Линия».'); draw();
+      S.cooldownUntil = performance.now()+COOLDOWN; // дебаунс
     }
   }
 
-  // сброс активного указателя
   S.activeId=null; removePointer(e);
 },{passive:false});
 
@@ -305,7 +298,7 @@ cv.addEventListener('pointercancel', e=>{
   S.activeId=null; removePointer(e); if(S.pinch) pinchEnd();
 });
 
-// ===== Buttons & panel
+// ===== Buttons
 btnLine.onclick=()=>{ S.state = (S.state==='idle') ? 'awaitFirst' : 'idle'; S.first=null; S.preview=null; btnLine.classList.toggle('active', S.state!=='idle');
   setStatus(S.state!=='idle'?'Режим ЛИНИЯ: ткни 1-ю точку':'Готов'); draw(); };
 btnUndo.onclick=()=>{ if(S.state==='awaitSecond'&&S.first){ S.state='awaitFirst'; S.first=null; S.preview=null; setStatus('Старт снят'); draw(); return; }
@@ -339,7 +332,7 @@ joinTol.oninput=()=>{ S.joinTol=+joinTol.value; jVal.textContent=S.joinTol; };
 
 // start
 resize();
-setStatus('Готов: «Линия» → 1-й тап → 2-й тап. Жёсткая блокировка жеста — без повторов.');
+setStatus('Готов: iPhone-фикс (primary + debounce + click-swallow). Рисуй: «Линия» → 1-й тап → 2-й тап.');
 })();
 </script>
 </body>
