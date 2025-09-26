@@ -3,439 +3,118 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Pro Trace — Холст с рамкой, единый зум, фикс продолжения</title>
+<title>Холст 95% по центру</title>
 <style>
   :root{
-    --page:#eef1f5;   /* фон вокруг холста */
-    --stage:#ffffff;  /* холст */
-    --frame:#cfd3dc;  /* рамка */
-    --ink:#2f8cff;    /* труба */
-    --inkGhost:#7db6ff;
-    --shadow: rgba(0,0,0,.18);
-    --ui:#f2f3f7;
-    --bd:#d9dbe3;
-    --fg:#0f1115;
-    --accent:#2979ff;
+    --bg:#eef1f5;      /* фон страницы */
+    --ui:#ffffff;      /* фон панели */
+    --bd:#d9dbe3;      /* бордеры */
+    --frame:#cfd3dc;   /* рамка холста */
+    --fg:#0f1115;      /* текст */
   }
-  *{-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;background:var(--page);color:var(--fg);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;overflow:hidden}
-  #cv{position:fixed;inset:0;touch-action:none}
-  .bar{position:fixed;left:10px;top:10px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
-  .btn{background:var(--ui);border:1px solid var(--bd);color:var(--fg);padding:10px 14px;border-radius:12px;font-weight:700}
-  .btn.active{outline:2px solid var(--accent)}
-  .zoom{position:fixed;right:10px;top:10px;display:flex;gap:8px;z-index:10}
-  .zbtn{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:10px 14px;font-weight:800}
-  #status{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,.65);color:#fff;padding:8px 12px;border-radius:10px;font-size:14px;z-index:11}
-  #file{display:none}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Inter,Roboto,Arial}
+  /* верхняя панель */
+  .top{
+    position:fixed; inset:0 0 auto 0;
+    display:flex; gap:8px; justify-content:center; align-items:center;
+    padding:10px; background:var(--ui); border-bottom:1px solid var(--bd); z-index:10;
+  }
+  .btn{
+    background:#f7f8fb; border:1px solid var(--bd); border-radius:12px;
+    padding:10px 14px; font-weight:600;
+  }
+
+  /* холст — рисуем на <canvas>, но позиционируем оболочку .stage */
+  .stage{
+    position:fixed; /* расчёт реального положения — через JS, чтобы учесть высоту панели */
+    background:#fff; border:1px solid var(--frame);
+    box-shadow:0 0 0 1px #fff inset;     /* тонкая «аккуратная» кромка */
+    overflow:hidden;                      /* ничего не вылезает */
+  }
+  canvas{display:block; width:100%; height:100%;}
+  /* статус внизу — опционально */
+  .status{
+    position:fixed; left:12px; bottom:12px; z-index:9;
+    background:rgba(0,0,0,.65); color:#fff; padding:8px 12px; border-radius:10px; font-size:13px;
+  }
 </style>
 </head>
 <body>
-  <canvas id="cv"></canvas>
-
-  <div class="bar">
-    <button id="btnLine"  class="btn">Линия</button>
-    <button id="btnUndo"  class="btn">Назад</button>
-    <button id="btnPhoto" class="btn">Фото</button>
-    <button id="btnCenter" class="btn">Центр</button>
-    <button id="btnSave"  class="btn">Сохранить</button>
-  </div>
-  <div class="zoom">
-    <button id="btnMinus" class="zbtn">−</button>
-    <button id="btnPlus"  class="zbtn">+</button>
+  <div class="top" id="topbar">
+    <button class="btn">Линия</button>
+    <button class="btn">Назад</button>
+    <button class="btn">Фото</button>
+    <button class="btn">Центр</button>
+    <button class="btn">Сохранить</button>
   </div>
 
-  <input id="file" type="file" accept="image/*"/>
-  <div id="status">«Линия» → 1-й тап (красная точка) → 2-й тап (видно предпросмотр и готовую линию). Зум/пан — только внутри холста.</div>
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="status" id="status">Холст: 95% экрана, по центру; панель не перекрывает.</div>
 
 <script>
-(()=>{
-// -------------------- Состояние: отдельный ХОЛСТ в рамке --------------------
-const S={
-  stage:{x:12,y:68,w:0,h:0,b:1.25},    // положение и рамка холста
-  scale:1, minS:.25, maxS:10, tx:0, ty:0, // трансформа холста (пан/зум)
-  // фон-фото (в МИРОВЫХ координатах холста)
-  img:null, iw:0, ih:0, bgX:0, bgY:0, bgS:1,
-  // чертёж
-  pipe:40, segs:[],
-  // рисование
-  mode:'idle', first:null, preview:null,
-  // ввод
-  pointers:new Map(), pinch:null, panning:false, panPrev:null,
-  // узлы
-  nodes:[],
-  // визуальный маркер «липкого» торца
-  lockEP:null,
-};
+(()=> {
+  const stage = document.getElementById('stage');
+  const topbar = document.getElementById('topbar');
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d', {alpha:false});
 
-const END_PX = 28;   // радиус липкого торца (px экрана)
-const JOIN_PX= 16;   // попадание по трубе (Т-стык), px экрана
-const MIN_SEG_PX = 18; // не даём рисовать микрочерточки
+  function layout() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const bar = topbar.getBoundingClientRect(); // реальная высота панели
 
-// -------------------- DOM --------------------
-const cv = document.getElementById('cv'); const ctx = cv.getContext('2d',{alpha:false});
-const btnLine = gid('btnLine'), btnUndo=gid('btnUndo'), btnPhoto=gid('btnPhoto');
-const btnCenter=gid('btnCenter'), btnSave=gid('btnSave');
-const btnPlus=gid('btnPlus'), btnMinus=gid('btnMinus');
-const fileInp=gid('file'); const statusEl=gid('status');
-function gid(id){return document.getElementById(id)}
-const setStatus = t => statusEl.textContent = 'Статус: '+t;
+    // размеры холста — 95% от экрана (а не от остатка), как просили
+    const w = Math.round(vw * 0.95);
+    const h = Math.round(vh * 0.95);
 
-// -------------------- Размеры и ХОЛСТ --------------------
-function computeStage(){
-  const margin=12, top=64; // отступы; место под панель
-  S.stage.x = margin;
-  S.stage.y = top;
-  S.stage.w = innerWidth - margin*2;
-  S.stage.h = innerHeight - top - margin;
-  // центр трансформа только один раз (первый запуск)
-  if (S.tx === 0 && S.ty === 0){ S.tx = S.stage.w/2; S.ty = S.stage.h/2; }
-}
-function resize(){
-  const dpr=Math.max(1,devicePixelRatio||1);
-  cv.width=Math.round(innerWidth*dpr);
-  cv.height=Math.round(innerHeight*dpr);
-  cv.style.width = innerWidth+'px';
-  cv.style.height= innerHeight+'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  computeStage();
-  draw();
-}
-addEventListener('resize', resize, {passive:true});
+    // центрируем по горизонтали (во всём экране)…
+    const x = Math.round((vw - w) / 2);
 
-// -------------------- Координаты (учёт рамки холста) --------------------
-function toWorld(sx,sy){ // экран → мир холста
-  return {x:(sx - S.stage.x - S.tx)/S.scale, y:(sy - S.stage.y - S.ty)/S.scale};
-}
-function toScreen(wx,wy){ // мир холста → экран
-  return {x:S.stage.x + wx*S.scale + S.tx, y:S.stage.y + wy*S.scale + S.ty};
-}
-function inStage(sx,sy){
-  return sx>=S.stage.x && sx<=S.stage.x+S.stage.w && sy>=S.stage.y && sy<=S.stage.y+S.stage.h;
-}
+    // …и по вертикали в «рабочей области» ниже панели
+    const freeTop = bar.bottom;
+    const freeH = vh - freeTop;
+    const y = Math.round(freeTop + (freeH - h)/2);
 
-// -------------------- Геометрия --------------------
-const dot=(a,b)=>a.x*b.x+a.y*b.y;
-const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y});
-const add=(a,b)=>({x:a.x+b.x,y:a.y+b.y});
-const mul=(v,k)=>({x:v.x*k,y:v.y*k});
-const len=v=>Math.hypot(v.x,v.y);
-const clamp01=t=>Math.max(0,Math.min(1,t));
-function projectPointOnSeg(P,A,B){
-  const v=sub(B,A), L2=dot(v,v)||1;
-  let t=dot(sub(P,A),v)/L2; t=clamp01(t);
-  const Q=add(A,mul(v,t));
-  return {Q,t,dist:len(sub(P,Q))};
-}
-function segIntersection(a1,a2,b1,b2){
-  const r=sub(a2,a1), s=sub(b2,b1);
-  const rxs=r.x*s.y - r.y*s.x;
-  if (Math.abs(rxs)<1e-12) return null;
-  const t=((b1.x-a1.x)*s.y-(b1.y-a1.y)*s.x)/rxs;
-  const u=((b1.x-a1.x)*r.y-(b1.y-a1.y)*r.x)/rxs;
-  if (t>=0&&t<=1&&u>=0&&u<=1) return {p:add(a1,mul(r,t)), ta:t, tb:u};
-  return null;
-}
+    // применяем
+    stage.style.left = x + 'px';
+    stage.style.top  = y + 'px';
+    stage.style.width  = w + 'px';
+    stage.style.height = h + 'px';
 
-// -------------------- Узлы / привязка --------------------
-function rebuildNodes(){
-  S.nodes.length=0;
-  S.segs.forEach((s,i)=>{ S.nodes.push({x:s.a.x,y:s.a.y,seg:i,end:'a'}); S.nodes.push({x:s.b.x,y:s.b.y,seg:i,end:'b'}); });
-}
-function pickEndpointAtScreen(sx,sy){
-  let best=null, bestD2=1e9;
-  for (const n of S.nodes){
-    const p=toScreen(n.x,n.y);
-    const dx=sx-p.x, dy=sy-p.y; const d2=dx*dx+dy*dy;
-    if (d2 < END_PX*END_PX && d2 < bestD2){ bestD2=d2; best=n; }
-  }
-  return best;
-}
-function pickPointOnPipe(sx,sy){
-  let best=null, bestD=1e9;
-  for (let i=0;i<S.segs.length;i++){
-    const s=S.segs[i];
-    const A=toScreen(s.a.x,s.a.y), B=toScreen(s.b.x,s.b.y);
-    const vx=B.x-A.x, vy=B.y-A.y, L2=vx*vx+vy*vy; if (!L2) continue;
-    let t=((sx-A.x)*vx+(sy-A.y)*vy)/L2; t=Math.max(0,Math.min(1,t));
-    const px=A.x+vx*t, py=A.y+vy*t, d=Math.hypot(px-sx,py-sy);
-    if (d <= JOIN_PX && d < bestD){ bestD=d; best={segIndex:i, point:toWorld(px,py)}; }
-  }
-  return best;
-}
-function endWithJunction(start,end){
-  const tolW = JOIN_PX / S.scale;
-  let bestSnap=null, bestCross=null;
-  for (const s of S.segs){
-    for (const P of [s.a,s.b]){
-      const pr=projectPointOnSeg(P,start,end);
-      if (pr.dist<=tolW){
-        const distAlong = pr.t * len(sub(end,start));
-        if (!bestSnap || distAlong < bestSnap.dist) bestSnap={p:P,dist:distAlong};
-      }
-    }
-  }
-  for (let i=0;i<S.segs.length;i++){
-    const s=S.segs[i]; const inter=segIntersection(start,end,s.a,s.b);
-    if (inter && inter.tb>1e-4 && inter.tb<1-1e-4){
-      const distAlong = inter.ta * len(sub(end,start));
-      if (!bestCross || distAlong < bestCross.dist) bestCross={p:inter.p, segIndex:i, dist:distAlong};
-    }
-  }
-  if (bestCross && (!bestSnap || bestCross.dist<bestSnap.dist)) return {end:bestCross.p, split:bestCross};
-  if (bestSnap) return {end:{x:bestSnap.p.x,y:bestSnap.p.y}, split:null};
-  return {end, split:null};
-}
-function splitSegment(idx,p){
-  const s=S.segs[idx]; if(!s) return;
-  if (len(sub(p,s.a))<1e-6 || len(sub(p,s.b))<1e-6) return;
-  const A={x:s.a.x,y:s.a.y}, B={x:s.b.x,y:s.b.y};
-  S.segs[idx]={a:A,b:{x:p.x,y:p.y}};
-  S.segs.splice(idx+1,0,{a:{x:p.x,y:p.y}, b:B});
-}
+    // настраиваем canvas (учитываю DPR для четкой сетки)
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    cv.width  = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
 
-// -------------------- Рендер --------------------
-function drawStage(){
-  // фон страницы
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--page') || '#eef1f5';
-  ctx.fillRect(0,0,cv.width,cv.height);
-
-  // сам холст
-  ctx.fillStyle = 'var(--stage)';  // белый холст
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(S.stage.x, S.stage.y, S.stage.w, S.stage.h);
-
-  // рамка холста
-  ctx.strokeStyle = '#cfd3dc';
-  ctx.lineWidth = S.stage.b;
-  ctx.strokeRect(S.stage.x+0.5, S.stage.y+0.5, S.stage.w-1, S.stage.h-1);
-}
-
-function drawWorld(){
-  // клип внутрь холста
-  ctx.save();
-  ctx.beginPath(); ctx.rect(S.stage.x, S.stage.y, S.stage.w, S.stage.h); ctx.clip();
-
-  // мировая матрица холста
-  ctx.setTransform(S.scale,0,0,S.scale, S.stage.x+S.tx, S.stage.y+S.ty);
-
-  // фото
-  if (S.img) ctx.drawImage(S.img, S.bgX, S.bgY, S.iw*S.bgS, S.ih*S.bgS);
-
-  // трубы
-  const W=Math.max(2, S.pipe*S.scale*0.45);
-  ctx.lineCap='butt'; ctx.lineJoin='round'; ctx.miterLimit=6;
-
-  // тень
-  ctx.strokeStyle = 'rgba(0,0,0,.18)';
-  ctx.lineWidth = W+3;
-  for (const s of S.segs){ ctx.beginPath(); ctx.moveTo(s.a.x+1/S.scale, s.a.y+1/S.scale); ctx.lineTo(s.b.x+1/S.scale, s.b.y+1/S.scale); ctx.stroke(); }
-
-  // основная
-  ctx.strokeStyle = '#2f8cff';
-  ctx.lineWidth = W;
-  for (const s of S.segs){ ctx.beginPath(); ctx.moveTo(s.a.x, s.a.y); ctx.lineTo(s.b.x, s.b.y); ctx.stroke(); }
-
-  // предпросмотр текущего отрезка
-  if (S.mode==='awaitSecond' && S.first && S.preview){
-    ctx.strokeStyle='#7db6ff';
-    ctx.lineWidth=W;
-    ctx.beginPath(); ctx.moveTo(S.first.x, S.first.y); ctx.lineTo(S.preview.x, S.preview.y); ctx.stroke();
+    drawGrid(w,h);
   }
 
-  // маркеры
-  if (S.first){
-    ctx.fillStyle='#ff3b30';
-    ctx.beginPath(); ctx.arc(S.first.x, S.first.y, 5/S.scale, 0, Math.PI*2); ctx.fill();
-  }
-  if (S.lockEP){
-    ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.arc(S.lockEP.x, S.lockEP.y, 6/S.scale, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#2f8cff';
-    ctx.lineWidth=2/S.scale;
-    ctx.beginPath(); ctx.arc(S.lockEP.x, S.lockEP.y, 8/S.scale, 0, Math.PI*2); ctx.stroke();
-  }
+  function drawGrid(w,h){
+    // фон холста
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0,0,w,h);
 
-  ctx.restore();
-}
+    // лёгкая «техническая» сетка
+    const big = 40; // шаг крупной
+    const small = 8; // шаг мелкой
 
-function draw(){
-  ctx.setTransform(1,0,0,1,0,0);
-  drawStage();
-  drawWorld();
-}
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0,0,0,.05)';
+    for(let x=0;x<=w;x+=small){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+    for(let y=0;y<=h;y+=small){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
 
-// -------------------- Зум/пан только холста --------------------
-function zoomAtScreen(f, sx, sy){
-  const ns=Math.max(S.minS, Math.min(S.maxS, S.scale*f));
-  const wx=(sx - S.stage.x - S.tx)/S.scale;
-  const wy=(sy - S.stage.y - S.ty)/S.scale;
-  S.scale=ns;
-  S.tx = sx - S.stage.x - wx*ns;
-  S.ty = sy - S.stage.y - wy*ns;
-}
-function zoomAtCenter(f){
-  zoomAtScreen(f, S.stage.x + S.stage.w/2, S.stage.y + S.stage.h/2);
-  draw();
-}
-
-// -------------------- Ввод (Pointer Events) --------------------
-const allow = e => (e.pointerType==='touch'||e.pointerType==='pen'||e.pointerType==='unknown');
-function updPtr(e){ S.pointers.set(e.pointerId,{id:e.pointerId,x:e.clientX,y:e.clientY}); }
-function delPtr(e){ S.pointers.delete(e.pointerId); }
-function centroid(){ const a=[...S.pointers.values()]; if(a.length<2) return null; return {x:(a[0].x+a[1].x)/2, y:(a[0].y+a[1].y)/2}; }
-function distance(){ const a=[...S.pointers.values()]; if(a.length<2) return 0; return Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y); }
-function pinchBegin(){ const c=centroid(), d=distance(); if(!c||!d) return; S.pinch={cx:c.x,cy:c.y,d,sc:S.scale}; }
-function pinchMove(){ if(!S.pinch) return; const c=centroid(), d=distance(); if(!c||!d) return; zoomAtScreen(d/S.pinch.d, c.x, c.y); draw(); }
-function pinchEnd(){ S.pinch=null; }
-
-cv.addEventListener('pointerdown', e=>{
-  if(!allow(e)) return;
-  updPtr(e); cv.setPointerCapture(e.pointerId);
-
-  // работаем только внутри холста
-  if(!inStage(e.clientX,e.clientY)) return;
-
-  if (S.pointers.size===2){ pinchBegin(); return; }
-
-  // если не рисуем — пани холст
-  if (S.mode==='idle'){
-    S.panning = true;
-    S.panPrev = {x:e.clientX, y:e.clientY};
-    return;
+    ctx.strokeStyle = 'rgba(0,0,0,.12)';
+    for(let x=0;x<=w;x+=big){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+    for(let y=0;y<=h;y+=big){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
   }
 
-  // === Рисование ===
-  if (S.mode==='awaitFirst'){
-    // сначала — «липкий» захват торца
-    const ep = pickEndpointAtScreen(e.clientX,e.clientY);
-    if (ep){
-      S.first = {x:ep.x, y:ep.y};
-      S.lockEP = {x:ep.x, y:ep.y};
-      S.preview = null;
-      draw();
-      return;
-    }
-    // иначе — Т-стык по трубе
-    const ps = pickPointOnPipe(e.clientX,e.clientY);
-    if (ps){
-      S.first = {x:ps.point.x, y:ps.point.y};
-      splitSegment(ps.segIndex, ps.point);
-      rebuildNodes();
-      S.lockEP = null;
-      draw();
-      return;
-    }
-    // свободная точка
-    S.first = toWorld(e.clientX, e.clientY);
-    S.lockEP = null;
-    draw();
-    return;
-  }
-
-  if (S.mode==='awaitSecond' && S.first){
-    // показываем предпросмотр сразу на касание
-    S.preview = toWorld(e.clientX, e.clientY);
-    draw();
-  }
-},{passive:false});
-
-cv.addEventListener('pointermove', e=>{
-  if(!allow(e)) return;
-  const prev=S.pointers.get(e.pointerId); updPtr(e);
-
-  if (S.pointers.size===2){ pinchMove(); return; }
-
-  if (S.panning && prev){
-    S.tx += (e.clientX - prev.x);
-    S.ty += (e.clientY - prev.y);
-    draw(); return;
-  }
-
-  if (S.mode==='awaitSecond' && S.first && inStage(e.clientX,e.clientY)){
-    S.preview = toWorld(e.clientX,e.clientY);
-    draw(); return;
-  }
-},{passive:false});
-
-cv.addEventListener('pointerup', e=>{
-  if(!allow(e)){ delPtr(e); return; }
-  if (S.pointers.size<2 && S.pinch) pinchEnd();
-
-  if (S.panning){ S.panning=false; S.panPrev=null; delPtr(e); return; }
-  if (!inStage(e.clientX,e.clientY)){ delPtr(e); return; }
-
-  // завершаем сегмент
-  if (S.mode==='awaitSecond' && S.first){
-    let end = toWorld(e.clientX,e.clientY);
-
-    // проверка на «очень короткий» (в пикселях экрана)
-    const a=toScreen(S.first.x,S.first.y), b=toScreen(end.x,end.y);
-    if (Math.hypot(b.x-a.x, b.y-a.y) < MIN_SEG_PX){
-      setStatus('Слишком коротко — ткни подальше');
-      delPtr(e); return;
-    }
-
-    const {end:newEnd, split} = endWithJunction(S.first, end);
-    if (split) splitSegment(split.segIndex, split.p);
-
-    S.segs.push({a:{...S.first}, b:{x:newEnd.x, y:newEnd.y}});
-    S.first=null; S.preview=null; S.lockEP=null;
-    S.mode='idle'; btnLine.classList.remove('active');
-    rebuildNodes(); draw();
-    setStatus('Линия готова. Чтобы нарисовать следующую — снова нажми «Линия».');
-  }
-
-  delPtr(e);
-},{passive:false});
-
-cv.addEventListener('pointercancel', e=>{
-  S.panning=false; S.panPrev=null; delPtr(e); if(S.pinch) pinchEnd();
-});
-
-// -------------------- Кнопки --------------------
-btnLine.onclick=()=>{
-  S.mode = (S.mode==='idle') ? 'awaitFirst' : 'idle';
-  S.first=null; S.preview=null; S.lockEP=null;
-  btnLine.classList.toggle('active', S.mode!=='idle');
-  setStatus(S.mode!=='idle' ? 'Режим ЛИНИЯ: ткни 1-ю точку внутри холста (торцы липкие)' : 'Готов');
-  draw();
-};
-btnUndo.onclick=()=>{
-  if (S.mode==='awaitSecond' && S.first){
-    S.mode='awaitFirst'; S.first=null; S.preview=null; S.lockEP=null;
-    setStatus('Старт снят'); draw(); return;
-  }
-  S.segs.pop(); rebuildNodes(); draw(); setStatus('Отменено');
-};
-btnPlus.onclick = ()=> zoomAtCenter(1.2);
-btnMinus.onclick = ()=> zoomAtCenter(1/1.2);
-btnCenter.onclick=()=>{ S.scale=1; S.tx=S.stage.w/2; S.ty=S.stage.h/2; draw(); setStatus('Холст по центру'); };
-btnSave.onclick = ()=>{
-  const off=document.createElement('canvas'); off.width=cv.width; off.height=cv.height;
-  const o=off.getContext('2d'); o.drawImage(cv,0,0);
-  const a=document.createElement('a'); a.href=off.toDataURL('image/png'); a.download='trace.png'; a.click();
-};
-btnPhoto.onclick = ()=> fileInp.click();
-fileInp.onchange = e=>{
-  const f=e.target.files[0]; if(!f) return;
-  const img=new Image(); img.onload=()=>{
-    S.img=img; S.iw=img.naturalWidth; S.ih=img.naturalHeight;
-    // Вписываем фото в видимую область мира (внутри холста)
-    const worldW = S.stage.w / S.scale, worldH = S.stage.h / S.scale;
-    const k = Math.min(worldW/S.iw, worldH/S.ih) * 0.95;
-    S.bgS = k;
-    S.bgX = - (S.iw*S.bgS)/2;
-    S.bgY = - (S.ih*S.bgS)/2;
-    draw(); setStatus('Фото добавлено. Зум/пан меняют ТОЛЬКО холст.');
-  };
-  img.src=URL.createObjectURL(f);
-};
-
-// -------------------- Старт --------------------
-resize();
-rebuildNodes();
-setStatus('Готов: холст в рамке. Зум/пан — внутри холста. «Линия» → 1-я → 2-я.');
+  window.addEventListener('resize', layout, {passive:true});
+  layout();
 })();
 </script>
 </body>
