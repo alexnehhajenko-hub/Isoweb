@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Pro Trace — стык-в-стык + Т-стыки + фото-режим</title>
+<title>Pro Trace — фикс бага двойных тапов</title>
 <style>
   :root{--bg:#0f1115;--fg:#eef2f7;--ui:#1c1f26;--bd:#2e3340;--acc:#6aa6ff}
   *{-webkit-tap-highlight-color:transparent}
@@ -81,7 +81,10 @@ const S = {
   nodes:[], dragNode:null, longPress:null,
   // режимы ввода
   photoMode:false, // отдельное перемещение/зум только фото
-  pinch:null, tap:{x:0,y:0,t:0,moved:false}
+  // указатели (Pointer Events)
+  pointers:new Map(), pinch:null,
+  // распознавание тапов
+  tap:{x:0,y:0,t:0,moved:false,id:null}
 };
 
 // ===== DOM
@@ -123,21 +126,12 @@ addEventListener('resize', resize, {passive:true});
 const toWorld  = (x,y)=>({ x:(x - S.ox)/S.scale, y:(y - S.oy)/S.scale });
 const toScreen = (x,y)=>({ x:x*S.scale + S.ox,   y:y*S.scale + S.oy   });
 
-// ===== Фото: экран→коорд фона (для независимого зума/пан фото)
-const toBgScreen = (wx,wy)=>({ x: wx*S.bgs + S.bgx, y: wy*S.bgs + S.bgy });
-
-// ===== Вспомогательные
+// ===== Математика
 function vecInfo(a,b){
   const dx=b.x-a.x, dy=b.y-a.y;
   const L=Math.hypot(dx,dy);
   let deg=(Math.atan2(dy,dx)*180/Math.PI+360)%360; if(deg>180) deg=360-deg;
   return {L,deg};
-}
-function snap45(base,p){
-  if(!S.snapDraw || !base) return p;
-  const dx=p.x-base.x, dy=p.y-base.y, L=Math.hypot(dx,dy);
-  const step=Math.PI/4, s=Math.round(Math.atan2(dy,dx)/step)*step;
-  return {x: base.x + Math.cos(s)*L, y: base.y + Math.sin(s)*L};
 }
 function dot(a,b){return a.x*b.x+a.y*b.y;}
 function sub(a,b){return {x:a.x-b.x,y:a.y-b.y};}
@@ -146,20 +140,26 @@ function scale(v,k){return {x:v.x*k,y:v.y*k};}
 function len(v){return Math.hypot(v.x,v.y);}
 function clamp01(t){return Math.max(0,Math.min(1,t));}
 
-// проекция точки на отрезок (мировые)
+// магнит 0/45/90 при рисовании
+function snap45(base,p){
+  if(!S.snapDraw || !base) return p;
+  const dx=p.x-base.x, dy=p.y-base.y, L=Math.hypot(dx,dy);
+  const step=Math.PI/4, s=Math.round(Math.atan2(dy,dx)/step)*step;
+  return {x: base.x + Math.cos(s)*L, y: base.y + Math.sin(s)*L};
+}
+
+// проекция и пересечения
 function projectPointOnSeg(P,A,B){
   const v=sub(B,A); const L2=dot(v,v)||1;
   let t=dot(sub(P,A),v)/L2; t=clamp01(t);
   const Q=add(A,scale(v,t));
   return {Q,t,dist:len(sub(P,Q))};
 }
-
-// пересечение двух отрезков (мировые), возвращает {p,ta,tb} или null
 function segIntersection(a1,a2,b1,b2){
   const r=sub(a2,a1), s=sub(b2,b1);
   const rxs = r.x*s.y - r.y*s.x;
   const qpxr = (b1.x-a1.x)*r.y - (b1.y-a1.y)*r.x;
-  if(Math.abs(rxs)<1e-12 && Math.abs(qpxr)<1e-12) return null; // коллинеарно (игнор)
+  if(Math.abs(rxs)<1e-12 && Math.abs(qpxr)<1e-12) return null; // коллинеарно
   if(Math.abs(rxs)<1e-12) return null; // параллельно
   const t = ((b1.x-a1.x)*s.y - (b1.y-a1.y)*s.x)/rxs;
   const u = ((b1.x-a1.x)*r.y - (b1.y-a1.y)*r.x)/rxs;
@@ -169,11 +169,10 @@ function segIntersection(a1,a2,b1,b2){
   return null;
 }
 
-// ===== Стыковка: корректировка конца и разрез сегмента при Т-стыке
+// стыковка
 function prepareEndWithJunction(start,end){
-  // 1) ищем ближайшее попадание: к концу существующего сегмента (endpoint snap)
   let bestSnap = null;
-  const tolWorld = S.joinTol / S.scale; // в мировых единицах
+  const tolWorld = S.joinTol / S.scale;
   for(const s of S.segs){
     for(const P of [s.a,s.b]){
       const proj = projectPointOnSeg(P, start, end);
@@ -185,14 +184,11 @@ function prepareEndWithJunction(start,end){
       }
     }
   }
-
-  // 2) ищем реальное пересечение с серединой любого сегмента → Т-стык
   let bestCross = null;
   for(let i=0;i<S.segs.length;i++){
     const s = S.segs[i];
     const inter = segIntersection(start,end,s.a,s.b);
     if(inter){
-      // игнорируем попадание точно в его концы — это покроет endpoint
       if(inter.tb>1e-4 && inter.tb<1-1e-4){
         const distFromStart = inter.ta * len(sub(end,start));
         if(!bestCross || distFromStart < bestCross.dist){
@@ -201,29 +197,18 @@ function prepareEndWithJunction(start,end){
       }
     }
   }
-
-  // приоритет — ближайшее событие от старта
   const candidate = (!bestCross || (bestSnap && bestSnap.dist<bestCross.dist)) ? bestSnap : bestCross;
   if(!candidate) return {end, split:null};
-
-  if(candidate.type==='endpoint'){
-    return { end: {x:candidate.p.x,y:candidate.p.y}, split:null };
-  }
-  if(candidate.type==='tee'){
-    return { end: candidate.p, split: { segIndex:candidate.segIndex, point:candidate.p } };
-  }
+  if(candidate.type==='endpoint') return { end: {x:candidate.p.x,y:candidate.p.y}, split:null };
+  if(candidate.type==='tee') return { end: candidate.p, split: { segIndex:candidate.segIndex, point:candidate.p } };
   return {end, split:null};
 }
-
-// разрез существующего сегмента на две части в точке point
 function splitSegment(segIndex, point){
   const s = S.segs[segIndex]; if(!s) return;
-  // если точка почти на одном из концов — не режем
   const nearA = len(sub(point,s.a))<1e-6;
   const nearB = len(sub(point,s.b))<1e-6;
   if(nearA || nearB) return;
   const A={x:s.a.x,y:s.a.y}, B={x:s.b.x,y:s.b.y};
-  // заменить текущий на A-point, и добавить point-B
   S.segs[segIndex] = {a:A, b:{x:point.x,y:point.y}};
   S.segs.splice(segIndex+1, 0, {a:{x:point.x,y:point.y}, b:B});
 }
@@ -231,11 +216,9 @@ function splitSegment(segIndex, point){
 // ===== Рендер
 function drawBG(){
   if(!S.img) return;
-  // фон рисуем по своим параметрам bgx,bgy,bgs (НЕ по transform сцены)
   ctx.drawImage(S.img, S.bgx, S.bgy, S.iw*S.bgs, S.ih*S.bgs);
 }
 function drawGrid(){
-  // сетка и трубы — в трансформации сцены
   const step = S.grid*S.scale; if(step<8) return;
   ctx.save();
   ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1;
@@ -246,23 +229,20 @@ function drawGrid(){
 }
 function drawPipes(){
   const W = Math.max(2, S.pipe*S.scale*0.45);
-  ctx.lineCap='butt'; // чтобы “в стык” выглядело чисто
+  ctx.lineCap='butt';
   ctx.lineJoin='round';
   ctx.miterLimit=6;
 
-  // тень
   ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=W+4;
   for(const s of S.segs){
     const a=toScreen(s.a.x,s.a.y), b=toScreen(s.b.x,s.b.y);
     ctx.beginPath(); ctx.moveTo(a.x+1.5,a.y+1.5); ctx.lineTo(b.x+1.5,b.y+1.5); ctx.stroke();
   }
-  // основная
   ctx.strokeStyle='#4da3ff'; ctx.lineWidth=W;
   for(const s of S.segs){
     const a=toScreen(s.a.x,s.a.y), b=toScreen(s.b.x,s.b.y);
     ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
   }
-  // предпросмотр
   if(S.drawing && S.first && S.preview){
     const a=toScreen(S.first.x,S.first.y), b=toScreen(S.preview.x,S.preview.y);
     ctx.strokeStyle='#7fc1ff'; ctx.lineWidth=W; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
@@ -277,9 +257,7 @@ function updateHUD(a,b){
 }
 function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
-  drawBG(); // фон без общей трансформации
-  // применяем трансформацию сцены (только логически: сетка и трубы рисуются в экранных коорд)
-  drawGrid(); drawPipes();
+  drawBG(); drawGrid(); drawPipes();
   if(S.drawing && S.first && S.preview) updateHUD(S.first,S.preview);
   else if(S.dragNode){ const L=S.segs[S.dragNode.seg]; updateHUD(L.a,L.b); }
   else hud.style.display='none';
@@ -304,65 +282,110 @@ function pickNodeAt(clientX,clientY){
   return best;
 }
 
-// ===== Пинч-зум
-function pinchBegin(a,b){
+// ===== Пинч на Pointer Events
+function pointersCentroid(){
+  const arr=[...S.pointers.values()]; if(arr.length<2) return null;
+  let x=0,y=0; for(const p of arr){x+=p.x;y+=p.y;} return {x:x/arr.length,y:y/arr.length};
+}
+function pointersDistance(){
+  const arr=[...S.pointers.values()]; if(arr.length<2) return 0;
+  const a=arr[0], b=arr[1]; return Math.hypot(b.x-a.x,b.y-a.y);
+}
+function pinchBegin(){
+  const c=pointersCentroid(); const d=pointersDistance(); if(!c||!d) return;
   if(S.photoMode){
-    S.pinch = { type:'bg', d:Math.hypot(b.x-a.x,b.y-a.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2, sc:S.bgs, ox:S.bgx, oy:S.bgy };
+    S.pinch = { type:'bg', d, cx:c.x, cy:c.y, sc:S.bgs, ox:S.bgx, oy:S.bgy };
   }else{
-    S.pinch = { type:'scene', d:Math.hypot(b.x-a.x,b.y-a.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2, sc:S.scale, ox:S.ox, oy:S.oy };
+    S.pinch = { type:'scene', d, cx:c.x, cy:c.y, sc:S.scale, ox:S.ox, oy:S.oy };
   }
 }
-function pinchMove(a,b){
+function pinchMove(){
   if(!S.pinch) return;
-  const d=Math.hypot(b.x-a.x,b.y-a.y);
-  let s = Math.max(0.2, Math.min(6, S.pinch.sc*(d/S.pinch.d)));
+  const c=pointersCentroid(); const d=pointersDistance(); if(!c||!d) return;
+  let s=Math.max(0.2, Math.min(6, S.pinch.sc*(d/S.pinch.d)));
   if(S.pinch.type==='bg'){
-    // зум вокруг центра пинча
-    const wx = (S.pinch.cx - S.pinch.ox)/S.pinch.sc;
-    const wy = (S.pinch.cy - S.pinch.oy)/S.pinch.sc;
-    S.bgs = s; S.bgx = S.pinch.cx - wx*s; S.bgy = S.pinch.cy - wy*s;
+    const wx=(S.pinch.cx-S.pinch.ox)/S.pinch.sc;
+    const wy=(S.pinch.cy-S.pinch.oy)/S.pinch.sc;
+    S.bgs=s; S.bgx=S.pinch.cx - wx*s; S.bgy=S.pinch.cy - wy*s;
   }else{
-    const wx = (S.pinch.cx - S.pinch.ox)/S.pinch.sc;
-    const wy = (S.pinch.cy - S.pinch.oy)/S.pinch.sc;
-    S.scale = s; S.ox = S.pinch.cx - wx*s; S.oy = S.pinch.cy - wy*s;
+    const wx=(S.pinch.cx-S.pinch.ox)/S.pinch.sc;
+    const wy=(S.pinch.cy-S.pinch.oy)/S.pinch.sc;
+    S.scale=s; S.ox=S.pinch.cx - wx*s; S.oy=S.pinch.cy - wy*s;
   }
   draw();
 }
 function pinchEnd(){ S.pinch=null; }
 
-// ===== Ввод
+// ===== Ввод на Pointer Events (без touch*)
 const TAP_MOVE=12, TAP_TIME=350, LONG_MS=450;
-let touchMap=new Map();
+
+// helper: запись указателя
+function updatePointer(e){
+  S.pointers.set(e.pointerId, {id:e.pointerId, x:e.clientX, y:e.clientY, type:e.pointerType});
+}
+function removePointer(e){
+  S.pointers.delete(e.pointerId);
+}
 
 cv.addEventListener('pointerdown', e=>{
   cv.setPointerCapture(e.pointerId);
-  S.tap={x:e.clientX,y:e.clientY,t:performance.now(),moved:false};
+  updatePointer(e);
 
+  // Мульти-тач → старт пинча, не запускаем тап/лонг-пресс
+  if(S.pointers.size===2){ pinchBegin(); return; }
+
+  // Запоминаем возможный тап (только 1 активный палец)
+  S.tap={x:e.clientX,y:e.clientY,t:performance.now(),moved:false,id:e.pointerId};
+
+  // Готовим long-press для правки торца
   const n=pickNodeAt(e.clientX,e.clientY);
   if(n){
-    S.longPress=setTimeout(()=>{ S.dragNode={seg:n.seg,end:n.end}; setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)'); }, LONG_MS);
+    S.longPress=setTimeout(()=>{
+      // если за это время появился второй палец — игнор
+      if(S.pointers.size>1) return;
+      S.dragNode={seg:n.seg,end:n.end};
+      setStatus(S.editSnap?'Правка (с привязкой)':'Правка (свободно)');
+      draw();
+    }, LONG_MS);
   }else{
     S.longPress=setTimeout(()=>{}, LONG_MS);
   }
 },{passive:false});
 
 cv.addEventListener('pointermove', e=>{
-  if(Math.hypot(e.clientX-S.tap.x, e.clientY-S.tap.y)>TAP_MOVE){
-    S.tap.moved=true; if(S.longPress){clearTimeout(S.longPress); S.longPress=null;}
+  // обновляем указатель
+  const prev=S.pointers.get(e.pointerId);
+  updatePointer(e);
+
+  // если появился второй палец — чистим long-press и делаем пинч
+  if(S.pointers.size===2){
+    if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
+    pinchMove(); return;
   }
 
-  if(S.photoMode && !S.dragNode && S.drawing===false){
-    // перетаскиваем ТОЛЬКО фото
-    S.bgx += e.movementX; S.bgy += e.movementY; draw(); return;
+  // контроль «тапа»
+  if(S.tap.id===e.pointerId && Math.hypot(e.clientX-S.tap.x,e.clientY-S.tap.y)>TAP_MOVE){
+    S.tap.moved=true;
+    if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
   }
 
+  // Фото-режим: один палец двигает фото
+  if(S.photoMode && !S.dragNode && !S.drawing){
+    if(prev){ S.bgx += (e.clientX - prev.x); S.bgy += (e.clientY - prev.y); draw(); }
+    return;
+  }
+
+  // Правка торца
   if(S.dragNode){
     const L=S.segs[S.dragNode.seg]; if(!L) return;
     let p=toWorld(e.clientX,e.clientY);
     const other=(S.dragNode.end==='a')?L.b:L.a;
-    if(S.editSnap) p=snap45(other,p); // иначе свободно
-    L[S.dragNode.end]=p; rebuildNodes(); draw();
-  }else if(S.drawing && S.first){
+    if(S.editSnap) p=snap45(other,p); // выключено — свободно
+    L[S.dragNode.end]=p; rebuildNodes(); draw(); return;
+  }
+
+  // Предпросмотр второй точки
+  if(S.drawing && S.first){
     let p=toWorld(e.clientX,e.clientY);
     if(S.snapDraw) p=snap45(S.first,p);
     S.preview=p; draw();
@@ -370,19 +393,32 @@ cv.addEventListener('pointermove', e=>{
 },{passive:false});
 
 cv.addEventListener('pointerup', e=>{
-  if(S.longPress){clearTimeout(S.longPress); S.longPress=null;}
+  // удаляем указатель
+  removePointer(e);
+
+  // завершение пинча?
+  if(S.pointers.size<2 && S.pinch){ pinchEnd(); }
+
+  // убрать long-press
+  if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
+
+  // если шла правка — завершить
   if(S.dragNode){ S.dragNode=null; setStatus('Готов'); draw(); return; }
 
-  const isTap=!S.tap.moved && (performance.now()-S.tap.t<=TAP_TIME);
+  // это «тап»?
+  const isTap = (S.tap.id===e.pointerId) && !S.tap.moved && (performance.now()-S.tap.t<=TAP_TIME);
   if(!isTap) return;
 
+  // в фото-режиме тапов на рисование нет
+  if(S.photoMode) return;
+
+  // режим рисования: строго «кнопка Линия» → 1-й тап → 2-й тап
   if(S.drawing){
     const w=toWorld(e.clientX,e.clientY);
     if(!S.first){
       S.first=w; S.preview=null; setStatus('1-я точка: ткни вторую');
     }else{
       let end = S.snapDraw ? snap45(S.first,w) : w;
-      // подготовим стыковку: endpoint/tee
       const {end:newEnd, split} = prepareEndWithJunction(S.first,end);
       if(split) splitSegment(split.segIndex, split.point);
       S.segs.push({a:{...S.first}, b:{x:newEnd.x,y:newEnd.y}});
@@ -392,27 +428,13 @@ cv.addEventListener('pointerup', e=>{
   }
 },{passive:false});
 
-// touch: пинч двумя пальцами
-cv.addEventListener('touchstart', e=>{
-  for(const t of e.changedTouches) touchMap.set(t.identifier,{x:t.clientX,y:t.clientY});
-  if(touchMap.size===2){ const [a,b]=[...touchMap.values()]; pinchBegin(a,b); }
-},{passive:false});
-cv.addEventListener('touchmove', e=>{
-  for(const t of e.changedTouches) touchMap.set(t.identifier,{x:t.clientX,y:t.clientY});
-  if(touchMap.size===2){ const [a,b]=[...touchMap.values()]; pinchMove(a,b); e.preventDefault(); return; }
-  if(S.drawing && S.first && e.touches.length===1){
-    const t=e.touches[0]; let p=toWorld(t.clientX,t.clientY); if(S.snapDraw) p=snap45(S.first,p); S.preview=p; draw();
-  }
-},{passive:false});
-cv.addEventListener('touchend', e=>{
-  for(const t of e.changedTouches) touchMap.delete(t.identifier);
-  if(touchMap.size<2) pinchEnd();
-},{passive:false});
-cv.addEventListener('touchcancel', e=>{
-  for(const t of e.changedTouches) touchMap.delete(t.identifier); pinchEnd();
-},{passive:false});
+cv.addEventListener('pointercancel', e=>{
+  removePointer(e);
+  if(S.longPress){ clearTimeout(S.longPress); S.longPress=null; }
+  if(S.pinch) pinchEnd();
+});
 
-// ===== Кнопки
+// ===== Кнопки и панель
 btnLine.onclick=()=>{ S.drawing=!S.drawing; S.first=null; S.preview=null; btnLine.classList.toggle('active',S.drawing);
   setStatus(S.drawing?'Режим ЛИНИЯ: ткни 1-ю точку':'Готов'); draw(); };
 btnUndo.onclick=()=>{ if(S.first){S.first=null; S.preview=null; setStatus('Старт снят'); draw(); return;}
@@ -420,7 +442,6 @@ btnUndo.onclick=()=>{ if(S.first){S.first=null; S.preview=null; setStatus('Ст�
 
 btnCenter.onclick=()=>{ S.scale=1; S.ox=innerWidth/2; S.oy=innerHeight/2; draw(); setStatus('Сцена по центру'); };
 btnPhotoCenter.onclick=()=>{ if(!S.img){setStatus('Фото не загружено');return;}
-  // вписать фото в экран (по своим осям)
   const k=Math.min(innerWidth/S.iw, innerHeight/S.ih)*0.95;
   S.bgs=k; S.bgx=(innerWidth - S.iw*k)/2; S.bgy=(innerHeight - S.ih*k)/2; draw(); setStatus('Фото по центру'); };
 btnSave.onclick=()=>{ const off=document.createElement('canvas'); off.width=cv.width; off.height=cv.height; const o=off.getContext('2d'); o.drawImage(cv,0,0); const a=document.createElement('a'); a.href=off.toDataURL('image/png'); a.download='trace.png'; a.click(); };
@@ -453,8 +474,7 @@ editSnap.onchange=()=>{ S.editSnap=editSnap.checked; };
 joinTol.oninput=()=>{ S.joinTol=+joinTol.value; jVal.textContent=S.joinTol; };
 
 // старт
-resize();
-setStatus('Готов: Линия → 1-й тап → 2-й тап; стыки встык, Т-стыки автоматически. Фото-режим — для перемещения/зума фото.');
+resize(); setStatus('Готов: исправлен баг двойных тапов. Рисуй: «Линия» → 1-й тап → 2-й тап.');
 })();
 </script>
 </body>
