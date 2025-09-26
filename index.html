@@ -3,9 +3,18 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Pipe Draw — TAP-TAP без драга</title>
+<title>Pipe Draw — TAP-TAP</title>
 <style>
-  :root{--page:#eef1f5;--ui:#fff;--bd:#dadde6;--frame:#cfd3dc;--fg:#0f1115;--accent:#2b73ff}
+  :root{
+    --page:#eef1f5;
+    --ui:#fff;
+    --bd:#dadde6;
+    --frame:#cfd3dc;
+    --fg:#0f1115;
+    --accent:#2b73ff;
+    --btn-bg:#f7f8fb;
+    --btn-on:#2b73ff;
+  }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{
     margin:0;height:100%;overflow:hidden;background:var(--page);color:var(--fg);
@@ -13,24 +22,36 @@
     user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
     overscroll-behavior:none;
   }
-  .top{position:fixed;left:0;right:0;top:0;z-index:10;display:flex;gap:8px;justify-content:center;align-items:center;
-       padding:10px;background:var(--ui);border-bottom:1px solid var(--bd)}
-  .btn{padding:10px 14px;border:1px solid var(--bd);border-radius:12px;background:#f7f8fb;font-weight:600}
-  .btn.on{background:#eaf1ff;border-color:#9cb8ff}
+  .top{
+    position:fixed;left:0;right:0;top:0;z-index:10;
+    display:flex;gap:8px;justify-content:center;align-items:center;
+    padding:10px;background:var(--ui);border-bottom:1px solid var(--bd)
+  }
+  .btn{
+    padding:10px 14px;border:1px solid var(--bd);
+    border-radius:10px;background:var(--btn-bg);
+    font-weight:600;color:#333;cursor:pointer
+  }
+  .btn.on{background:var(--btn-on);color:#fff;border-color:var(--btn-on)}
   input[type=file]{display:none}
 
-  .stageWrap{position:fixed;left:0;right:0;bottom:0;top:56px;display:flex;justify-content:center;align-items:center}
-  .stage{width:95vw;height:95vh;background:#fff;border:1px solid var(--frame);overflow:hidden;touch-action:none}
+  .stageWrap{position:fixed;left:0;right:0;bottom:0;top:56px;
+    display:flex;justify-content:center;align-items:center}
+  .stage{width:95vw;height:95vh;background:#fff;
+    border:1px solid var(--frame);overflow:hidden;touch-action:none}
   canvas{display:block;width:100%;height:100%}
 
-  .sheet{position:fixed;left:0;right:0;bottom:-240px;z-index:20;background:#fff;border-top:1px solid var(--bd);
-         box-shadow:0 -10px 30px rgba(0,0,0,.12);transition:transform .25s ease;transform:translateY(0);padding:14px}
+  .sheet{position:fixed;left:0;right:0;bottom:-240px;z-index:20;background:#fff;
+    border-top:1px solid var(--bd);box-shadow:0 -10px 30px rgba(0,0,0,.12);
+    transition:transform .25s ease;transform:translateY(0);padding:14px}
   .sheet.open{transform:translateY(-240px)}
   .row{display:flex;align-items:center;gap:10px;padding:8px 0}
   .row label{min-width:140px}
   .val{font-variant-numeric:tabular-nums;font-weight:700}
 
-  .status{position:fixed;left:10px;bottom:10px;z-index:9;background:rgba(0,0,0,.65);color:#fff;padding:8px 12px;border-radius:10px;font-size:13px}
+  .status{position:fixed;left:10px;bottom:10px;z-index:9;
+    background:rgba(0,0,0,.65);color:#fff;padding:8px 12px;
+    border-radius:10px;font-size:13px}
 </style>
 </head>
 <body>
@@ -56,11 +77,10 @@
     </div>
   </div>
 
-  <div class="status" id="status">Режим: Готов. «Линия» → TAP A → TAP B. Пинч=зум, пан=одним пальцем (вне режима «Линия»).</div>
+  <div class="status" id="status">Готов. «Линия» → TAP A → TAP B. Пинч=зум, пан=одним пальцем.</div>
 
 <script>
 (()=>{
-  // ===== DOM
   const cv=document.getElementById('cv'); const ctx=cv.getContext('2d',{alpha:false});
   const status=document.getElementById('status');
   const lineBtn=document.getElementById('lineBtn');
@@ -73,12 +93,10 @@
   const pipeRange=document.getElementById('pipeRange');
   const pipeVal=document.getElementById('pipeVal');
 
-  // ===== Сцена
   const view={x:0,y:0,scale:1,min:0.4,max:8};
   const segs=[]; let bg=null;
   let pipeDia=40; pipeRange.value=pipeDia; pipeVal.textContent=pipeDia;
 
-  // ===== Canvas DPI
   function fit(){
     const dpr=Math.max(1,window.devicePixelRatio||1);
     cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
@@ -87,149 +105,78 @@
   }
   new ResizeObserver(fit).observe(cv);
 
-  // ===== Координаты
   const w2s=p=>({x:p.x*view.scale+view.x,y:p.y*view.scale+view.y});
   const s2w=p=>({x:(p.x-view.x)/view.scale,y:(p.y-view.y)/view.scale});
 
-  // ===== Состояние рисования (TAP-TAP)
-  const state={mode:'idle', first:null}; // idle | waitA | waitB
-  function setMode(m){ state.mode=m; if(m==='idle') state.first=null; }
+  const state={mode:'idle',first:null};
+  function setMode(m){state.mode=m;if(m==='idle')state.first=null;}
 
-  // ===== Отрисовка
   function draw(){
     ctx.clearRect(0,0,cv.width,cv.height);
-    // фон холста
     ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
 
-    // мир
-    ctx.save();
-    ctx.translate(view.x,view.y); ctx.scale(view.scale,view.scale);
+    ctx.save(); ctx.translate(view.x,view.y); ctx.scale(view.scale,view.scale);
 
-    // фото
     if(bg){ const iw=bg.naturalWidth, ih=bg.naturalHeight; ctx.drawImage(bg,-iw/2,-ih/2,iw,ih); }
 
-    // трубы
     const W=Math.max(2,pipeDia)/1.8;
     ctx.lineCap='round'; ctx.lineJoin='round';
-    // тень
     ctx.strokeStyle='rgba(0,0,0,.18)'; ctx.lineWidth=W+3/view.scale;
-    for(const s of segs){ ctx.beginPath(); ctx.moveTo(s.a.x+1/view.scale,s.a.y+1/view.scale); ctx.lineTo(s.b.x+1/view.scale,s.b.y+1/view.scale); ctx.stroke(); }
-    // тело
-    ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent')||'#2b73ff';
-    ctx.lineWidth=W;
-    for(const s of segs){ ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke(); }
+    for(const s of segs){ctx.beginPath();ctx.moveTo(s.a.x+1/view.scale,s.a.y+1/view.scale);ctx.lineTo(s.b.x+1/view.scale,s.b.y+1/view.scale);ctx.stroke();}
+    ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent')||'#2b73ff'; ctx.lineWidth=W;
+    for(const s of segs){ctx.beginPath();ctx.moveTo(s.a.x,s.a.y);ctx.lineTo(s.b.x,s.b.y);ctx.stroke();}
 
-    // первая точка (если есть)
     if(state.first){
       ctx.fillStyle='#ff3b30'; ctx.beginPath(); ctx.arc(state.first.x,state.first.y,5/view.scale,0,Math.PI*2); ctx.fill();
     }
-
     ctx.restore();
   }
 
-  // ===== Pointer Events только (без touch*) — стабильность на iOS
-  const pts=new Map();
-  let pan=false, panPrev=null;
-  let pinch=null;
-
-  function local(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; }
-  function zoomAt(f, cx, cy){
+  const pts=new Map(); let pan=false,panPrev=null; let pinch=null;
+  function local(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+  function zoomAt(f,cx,cy){
     const ns=Math.max(view.min,Math.min(view.max,view.scale*f));
     const before=s2w({x:cx,y:cy}); view.scale=ns; const after=w2s(before);
-    view.x += (cx - after.x); view.y += (cy - after.y);
+    view.x+=(cx-after.x); view.y+=(cy-after.y);
   }
 
   cv.addEventListener('pointerdown', e=>{
-    // гасим прокрутки/синие выделения
-    e.preventDefault();
-    cv.setPointerCapture(e.pointerId);
-    pts.set(e.pointerId, local(e));
-
-    // два пальца — старт pinch
-    if(pts.size===2){
-      const a=[...pts.values()];
-      pinch={d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y), c:{x:(a[0].x+a[1].x)/2, y:(a[0].y+a[1].y)/2}};
-      return;
-    }
-
-    // если не рисуем — готовим панорамирование одним пальцем
-    if(state.mode==='idle'){ pan=true; panPrev=local(e); return; }
-  }, {passive:false});
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId,local(e));
+    if(pts.size===2){const a=[...pts.values()];pinch={d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y),c:{x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2}};return;}
+    if(state.mode==='idle'){pan=true;panPrev=local(e);return;}
+  },{passive:false});
 
   cv.addEventListener('pointermove', e=>{
-    if(!pts.has(e.pointerId)) return;
-    e.preventDefault();
-    pts.set(e.pointerId, local(e));
-
-    // pinch
-    if(pinch && pts.size===2){
-      const a=[...pts.values()];
-      const d=Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y);
-      const f = d / (pinch.d||d); zoomAt(f, pinch.c.x, pinch.c.y); pinch.d=d; draw(); return;
-    }
-    // пан
-    if(pan && panPrev){
-      const cur=local(e);
-      view.x += (cur.x - panPrev.x);
-      view.y += (cur.y - panPrev.y);
-      panPrev=cur; draw(); return;
-    }
-
-    // ВАЖНО: при рисовании НИЧЕГО не тянем — только TAP-TAP на pointerup
-  }, {passive:false});
+    if(!pts.has(e.pointerId))return;
+    e.preventDefault(); pts.set(e.pointerId,local(e));
+    if(pinch&&pts.size===2){const a=[...pts.values()];const d=Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y);
+      const f=d/(pinch.d||d);zoomAt(f,pinch.c.x,pinch.c.y);pinch.d=d;draw();return;}
+    if(pan&&panPrev){const cur=local(e);view.x+=(cur.x-panPrev.x);view.y+=(cur.y-panPrev.y);panPrev=cur;draw();return;}
+  },{passive:false});
 
   cv.addEventListener('pointerup', e=>{
-    if(!pts.has(e.pointerId)) return;
-    e.preventDefault();
-    pts.delete(e.pointerId);
+    if(!pts.has(e.pointerId))return;
+    e.preventDefault(); pts.delete(e.pointerId);
+    if(pinch&&pts.size<2)pinch=null; if(pan&&pts.size===0){pan=false;panPrev=null;}
+    if(state.mode==='waitA'){state.first=s2w(local(e));setMode('waitB');setStatus('Точка A. Теперь TAP точку B.');draw();return;}
+    if(state.mode==='waitB'&&state.first){const end=s2w(local(e));segs.push({a:{...state.first},b:end});
+      setMode('idle');lineBtn.classList.remove('on');setStatus('Линия готова. Для новой — «Линия».');draw();return;}
+  },{passive:false});
 
-    if(pinch && pts.size<2) pinch=null;
-    if(pan && pts.size===0){ pan=false; panPrev=null; }
+  cv.addEventListener('pointercancel', e=>{pts.delete(e.pointerId);pan=false;panPrev=null;pinch=null;});
 
-    // === TAP-TAP логика ===
-    // один UP = один TAP
-    if(state.mode==='waitA'){
-      state.first = s2w(local(e));
-      setMode('waitB');
-      setStatus('Точка A поставлена. Ещё TAP — точка B.');
-      draw();
-      return;
-    }
-    if(state.mode==='waitB' && state.first){
-      const end = s2w(local(e));
-      segs.push({a:{...state.first}, b:end});
-      setMode('idle'); lineBtn.classList.remove('on');
-      setStatus('Линия готова. Для новой — «Линия».');
-      draw();
-      return;
-    }
-  }, {passive:false});
+  function setStatus(t){status.textContent=t;}
+  lineBtn.onclick=()=>{if(state.mode==='idle'){setMode('waitA');lineBtn.classList.add('on');setStatus('Режим: Линия. TAP точку A.');}else{setMode('idle');lineBtn.classList.remove('on');setStatus('Готов.');}draw();};
+  undoBtn.onclick=()=>{if(state.mode!=='idle'&&state.first){setMode('waitA');setStatus('Старт снят');draw();return;}
+    if(segs.length){segs.pop();draw();setStatus('Отменено');}};
+  centerBtn.onclick=()=>{view.scale=1;view.x=cv.clientWidth/2;view.y=cv.clientHeight/2;draw();setStatus('Центр.');};
+  saveBtn.onclick=()=>{const url=cv.toDataURL('image/png');const a=document.createElement('a');a.href=url;a.download='trace.png';a.click();};
+  photoInput.onchange=e=>{const f=e.target.files?.[0];if(!f)return;const img=new Image();img.onload=()=>{bg=img;draw();setStatus('Фото добавлено.');};img.src=URL.createObjectURL(f);};
+  gearBtn.onclick=()=>{sheet.classList.toggle('open');};
+  pipeRange.oninput=()=>{pipeDia=parseInt(pipeRange.value,10)||40;pipeVal.textContent=pipeDia;draw();};
 
-  cv.addEventListener('pointercancel', e=>{
-    pts.delete(e.pointerId); pan=false; panPrev=null; pinch=null;
-  });
-
-  // ===== UI
-  function setStatus(t){ status.textContent=t; }
-  lineBtn.onclick=()=>{
-    if(state.mode==='idle'){ setMode('waitA'); lineBtn.classList.add('on'); setStatus('Режим: Линия. TAP — точка A.'); }
-    else { setMode('idle'); lineBtn.classList.remove('on'); setStatus('Режим: Готов.'); }
-    draw();
-  };
-  undoBtn.onclick=()=>{ if(state.mode!=='idle' && state.first){ setMode('waitA'); setStatus('Старт снят'); draw(); return; }
-    if(segs.length){ segs.pop(); draw(); setStatus('Отменено'); } };
-  centerBtn.onclick=()=>{ view.scale=1; view.x=cv.clientWidth/2; view.y=cv.clientHeight/2; draw(); setStatus('Центр.'); };
-  saveBtn.onclick=()=>{ const url=cv.toDataURL('image/png'); const a=document.createElement('a'); a.href=url; a.download='trace.png'; a.click(); };
-  photoInput.onchange=e=>{
-    const f=e.target.files?.[0]; if(!f) return;
-    const img=new Image(); img.onload=()=>{ bg=img; draw(); setStatus('Фото добавлено.'); };
-    img.src=URL.createObjectURL(f);
-  };
-  gearBtn.onclick=()=>{ sheet.classList.toggle('open'); };
-  pipeRange.oninput=()=>{ pipeDia=parseInt(pipeRange.value,10)||40; pipeVal.textContent=pipeDia; draw(); };
-
-  // старт
-  function start(){ view.x=cv.clientWidth/2; view.y=cv.clientHeight/2; draw(); }
+  function start(){view.x=cv.clientWidth/2;view.y=cv.clientHeight/2;draw();}
   start();
 })();
 </script>
