@@ -3,37 +3,37 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Холст 95% по центру</title>
+<title>Pipe Draw — фикс. панель, зумит только холст</title>
 <style>
   :root{
-    --bg:#eef1f5;      /* фон страницы */
-    --ui:#ffffff;      /* фон панели */
-    --bd:#d9dbe3;      /* бордеры */
-    --frame:#cfd3dc;   /* рамка холста */
-    --fg:#0f1115;      /* текст */
+    --bg:#eef1f5; --ui:#ffffff; --bd:#dadde6; --frame:#cfd3dc; --fg:#0f1115;
   }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Inter,Roboto,Arial}
-  /* верхняя панель */
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{height:100%; margin:0; background:var(--bg); color:var(--fg); font-family:system-ui, -apple-system, Segoe UI, Inter, Roboto, Arial}
+  /* ====== фиксированная верхняя панель (никогда не двигается) ====== */
   .top{
-    position:fixed; inset:0 0 auto 0;
+    position:fixed; inset:0 0 auto 0; z-index:10;
     display:flex; gap:8px; justify-content:center; align-items:center;
-    padding:10px; background:var(--ui); border-bottom:1px solid var(--bd); z-index:10;
+    padding:10px; background:var(--ui); border-bottom:1px solid var(--bd);
   }
-  .btn{
-    background:#f7f8fb; border:1px solid var(--bd); border-radius:12px;
-    padding:10px 14px; font-weight:600;
-  }
+  .btn{background:#f7f8fb; border:1px solid var(--bd); border-radius:12px; padding:10px 14px; font-weight:600}
+  .btn.on{background:#e7efff; border-color:#9ab6ff}
+  input[type="file"]{display:none}
 
-  /* холст — рисуем на <canvas>, но позиционируем оболочку .stage */
-  .stage{
-    position:fixed; /* расчёт реального положения — через JS, чтобы учесть высоту панели */
-    background:#fff; border:1px solid var(--frame);
-    box-shadow:0 0 0 1px #fff inset;     /* тонкая «аккуратная» кромка */
-    overflow:hidden;                      /* ничего не вылезает */
+  /* ====== область холста (зум/пан только тут) ====== */
+  .stageWrap{
+    position:fixed; /* рассчитываем ниже — чтобы не наехать на панель */
+    inset:auto 0 0 0;
+    display:flex; justify-content:center; align-items:center;
+    background:transparent;
   }
-  canvas{display:block; width:100%; height:100%;}
-  /* статус внизу — опционально */
+  .stage{
+    width:95vw; height:95vh;
+    background:#fff; border:1px solid var(--frame); overflow:hidden;
+    touch-action:none; /* берём жесты на себя */
+  }
+  canvas{display:block; width:100%; height:100%}
+
   .status{
     position:fixed; left:12px; bottom:12px; z-index:9;
     background:rgba(0,0,0,.65); color:#fff; padding:8px 12px; border-radius:10px; font-size:13px;
@@ -42,79 +42,248 @@
 </head>
 <body>
   <div class="top" id="topbar">
-    <button class="btn">Линия</button>
-    <button class="btn">Назад</button>
-    <button class="btn">Фото</button>
-    <button class="btn">Центр</button>
-    <button class="btn">Сохранить</button>
+    <button class="btn" id="lineBtn">Линия</button>
+    <button class="btn" id="undoBtn">Назад</button>
+    <label class="btn" for="photoInput">Фото</label>
+    <input id="photoInput" type="file" accept="image/*" />
+    <button class="btn" id="centerBtn">Центр</button>
+    <button class="btn" id="saveBtn">Сохранить</button>
   </div>
 
-  <div class="stage" id="stage">
-    <canvas id="cv"></canvas>
+  <!-- контейнер холста; панель фикс, а эта часть двигается/зумится внутренне -->
+  <div class="stageWrap" id="stageWrap">
+    <div class="stage" id="stage">
+      <canvas id="cv"></canvas>
+    </div>
   </div>
 
-  <div class="status" id="status">Холст: 95% экрана, по центру; панель не перекрывает.</div>
+  <div class="status" id="status">Готов.</div>
 
 <script>
 (()=> {
-  const stage = document.getElementById('stage');
-  const topbar = document.getElementById('topbar');
-  const cv = document.getElementById('cv');
-  const ctx = cv.getContext('2d', {alpha:false});
+  const topbar=document.getElementById('topbar');
+  const stageWrap=document.getElementById('stageWrap');
+  const stage=document.getElementById('stage');
+  const cv=document.getElementById('cv');
+  const ctx=cv.getContext('2d', {alpha:false});
+  const statusEl=document.getElementById('status');
 
-  function layout() {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const bar = topbar.getBoundingClientRect(); // реальная высота панели
+  // интерфейс
+  const lineBtn=document.getElementById('lineBtn');
+  const undoBtn=document.getElementById('undoBtn');
+  const centerBtn=document.getElementById('centerBtn');
+  const saveBtn=document.getElementById('saveBtn');
+  const photoInput=document.getElementById('photoInput');
 
-    // размеры холста — 95% от экрана (а не от остатка), как просили
-    const w = Math.round(vw * 0.95);
-    const h = Math.round(vh * 0.95);
+  // трансформация холста (зум/пан) – применяется ко всему: фону и линиям
+  let view={scale:1, x:0, y:0};
+  let minScale=0.5, maxScale=6;
 
-    // центрируем по горизонтали (во всём экране)…
-    const x = Math.round((vw - w) / 2);
+  // данные рисования
+  let drawing=false;
+  let startPt=null;               // первая точка сегмента (в координатах сцены)
+  const pipes=[];                 // массив сегментов [{a:{x,y}, b:{x,y}, d:diam}]
+  let diam=40;                    // визуальный диаметр (px)
+  let bgImg=null;                 // фон-фото (Image)
+  let gridAlpha=0.12;
 
-    // …и по вертикали в «рабочей области» ниже панели
-    const freeTop = bar.bottom;
-    const freeH = vh - freeTop;
-    const y = Math.round(freeTop + (freeH - h)/2);
+  // DPR-четкость
+  function resizeCanvas(){
+    const vw=window.innerWidth, vh=window.innerHeight;
+    const bar=topbar.getBoundingClientRect();
+    // панель фикс; подвинем обёртку так, чтобы холст центрировался под панелью
+    stageWrap.style.top = bar.bottom + 'px';
 
-    // применяем
-    stage.style.left = x + 'px';
-    stage.style.top  = y + 'px';
-    stage.style.width  = w + 'px';
-    stage.style.height = h + 'px';
+    const w=Math.round(window.innerWidth*0.95);
+    const h=Math.round(window.innerHeight*0.95);
+    stage.style.width=w+'px'; stage.style.height=h+'px';
 
-    // настраиваем canvas (учитываю DPR для четкой сетки)
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    cv.width  = Math.round(w * dpr);
-    cv.height = Math.round(h * dpr);
+    const dpr=Math.max(1, window.devicePixelRatio||1);
+    cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+    cv.style.width=w+'px'; cv.style.height=h+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    redraw();
+  }
 
+  function worldToScreen(p){
+    return { x: (p.x*view.scale + view.x), y: (p.y*view.scale + view.y) };
+  }
+  function screenToWorld(p){
+    return { x: (p.x - view.x)/view.scale, y: (p.y - view.y)/view.scale };
+  }
+
+  function drawGrid(w,h,step=40,sub=8){
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h);
+    ctx.save();
+    ctx.translate(view.x, view.y);
+    ctx.scale(view.scale, view.scale);
+
+    // мелкая
+    ctx.strokeStyle='rgba(0,0,0,.05)'; ctx.lineWidth=1/view.scale;
+    for(let x=-2000; x<=2000; x+=sub){ ctx.beginPath(); ctx.moveTo(x,-2000); ctx.lineTo(x,2000); ctx.stroke(); }
+    for(let y=-2000; y<=2000; y+=sub){ ctx.beginPath(); ctx.moveTo(-2000,y); ctx.lineTo(2000,y); ctx.stroke(); }
+    // крупная
+    ctx.strokeStyle='rgba(0,0,0,'+gridAlpha+')';
+    for(let x=-2000; x<=2000; x+=step){ ctx.beginPath(); ctx.moveTo(x,-2000); ctx.lineTo(x,2000); ctx.stroke(); }
+    for(let y=-2000; y<=2000; y+=step){ ctx.beginPath(); ctx.moveTo(-2000,y); ctx.lineTo(2000,y); ctx.stroke(); }
+
+    // фон-фото
+    if(bgImg){
+      // рисуем фото с теми же трансформами => зум/пан вместе с линиями
+      const iw=bgImg.naturalWidth, ih=bgImg.naturalHeight;
+      // положим фото в центр сцены
+      ctx.drawImage(bgImg, -iw/2, -ih/2, iw, ih);
+    }
+
+    // трубы
+    for(const seg of pipes){
+      ctx.lineCap='round';
+      ctx.lineJoin='round';
+      ctx.strokeStyle='#2b73ff';
+      ctx.lineWidth = Math.max(2, diam)/1.8;
+      ctx.beginPath();
+      ctx.moveTo(seg.a.x, seg.a.y);
+      ctx.lineTo(seg.b.x, seg.b.y);
+      ctx.stroke();
+
+      // торцы как «срезы»
+      const r = Math.max(2, diam)/3.2;
+      const ang = Math.atan2(seg.b.y-seg.a.y, seg.b.x-seg.a.x);
+      // торец A
+      ctx.save();
+      ctx.translate(seg.a.x, seg.a.y);
+      ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.fillStyle='#184cce';
+      ctx.arc(0,0,r,Math.PI*0.5,Math.PI*1.5);
+      ctx.fill();
+      ctx.restore();
+      // торец B
+      ctx.save();
+      ctx.translate(seg.b.x, seg.b.y);
+      ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.fillStyle='#184cce';
+      ctx.arc(0,0,r,-Math.PI*0.5,Math.PI*0.5);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  function redraw(){
+    const w=stage.clientWidth, h=stage.clientHeight;
     drawGrid(w,h);
   }
 
-  function drawGrid(w,h){
-    // фон холста
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0,0,w,h);
+  // ===== жесты: панорамирование/зум только холста =====
+  let dragging=false, last={x:0,y:0};
+  let pinch=false, startDist=0, startScale=1, startCenter={x:0,y:0}, startView={x:0,y:0};
 
-    // лёгкая «техническая» сетка
-    const big = 40; // шаг крупной
-    const small = 8; // шаг мелкой
-
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(0,0,0,.05)';
-    for(let x=0;x<=w;x+=small){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
-    for(let y=0;y<=h;y+=small){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
-
-    ctx.strokeStyle = 'rgba(0,0,0,.12)';
-    for(let x=0;x<=w;x+=big){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
-    for(let y=0;y<=h;y+=big){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+  function getTouches(e){
+    const rect=cv.getBoundingClientRect();
+    const arr=[];
+    for(const t of e.touches){ arr.push({ x:t.clientX-rect.left, y:t.clientY-rect.top }); }
+    return arr;
   }
 
-  window.addEventListener('resize', layout, {passive:true});
-  layout();
+  stage.addEventListener('pointerdown', (e)=>{
+    stage.setPointerCapture(e.pointerId);
+  });
+
+  stage.addEventListener('touchstart', (e)=>{
+    if(e.touches.length===2){
+      pinch=true;
+      const [p1,p2]=getTouches(e);
+      startDist=Math.hypot(p2.x-p1.x, p2.y-p1.y);
+      startScale=view.scale;
+      startCenter={ x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2 };
+      startView={x:view.x, y:view.y};
+    } else if(e.touches.length===1 && !drawing){
+      dragging=true;
+      const [p]=getTouches(e);
+      last=p;
+    }
+  }, {passive:false});
+
+  stage.addEventListener('touchmove', (e)=>{
+    if(pinch && e.touches.length===2){
+      e.preventDefault();
+      const [p1,p2]=getTouches(e);
+      const dist=Math.hypot(p2.x-p1.x, p2.y-p1.y);
+      let s = (dist/startDist)*startScale;
+      s = Math.max(minScale, Math.min(maxScale, s));
+
+      // зум относительно центра жеста
+      const worldBefore = screenToWorld(startCenter);
+      view.scale = s;
+      // подвинем так, чтобы мировая точка осталась под пальцами
+      const screenAfter = worldToScreen(worldBefore);
+      view.x += (startCenter.x - screenAfter.x);
+      view.y += (startCenter.y - screenAfter.y);
+      redraw();
+    } else if(dragging && e.touches.length===1){
+      e.preventDefault();
+      const [p]=getTouches(e);
+      view.x += (p.x - last.x);
+      view.y += (p.y - last.y);
+      last=p;
+      redraw();
+    }
+  }, {passive:false});
+
+  stage.addEventListener('touchend', ()=>{
+    if(pinch && event.touches.length<2) pinch=false;
+    if(dragging && event.touches.length===0) dragging=false;
+  });
+
+  // ===== рисование сегмента (3 шага) =====
+  function setStatus(t){ statusEl.textContent=t; }
+  function startLineMode(on){
+    drawing = on;
+    lineBtn.classList.toggle('on', on);
+    startPt = null;
+    setStatus(on ? 'Режим: линия. Тап — точка A.' : 'Готов.');
+  }
+
+  stage.addEventListener('click', (e)=>{
+    if(!drawing) return;
+    const rect=cv.getBoundingClientRect();
+    const sp = { x: e.clientX-rect.left, y: e.clientY-rect.top };
+    const wp = screenToWorld(sp);
+
+    if(!startPt){
+      startPt = wp;
+      setStatus('Точка A поставлена. Тап — точка B.');
+    } else {
+      const seg = { a:startPt, b:wp, d:diam };
+      pipes.push(seg);
+      startPt = null;
+      setStatus('Линия готова. Нажми «Линия» для новой.');
+      redraw();
+    }
+  });
+
+  lineBtn.addEventListener('click', ()=> startLineMode(!drawing));
+  undoBtn.addEventListener('click', ()=>{
+    if(pipes.length) { pipes.pop(); redraw(); setStatus('Отменено.'); }
+  });
+  centerBtn.addEventListener('click', ()=>{
+    view={scale:1, x:0, y:0}; redraw(); setStatus('Центр.');
+  });
+  saveBtn.addEventListener('click', ()=>{
+    const url=cv.toDataURL('image/png');
+    const a=document.createElement('a'); a.href=url; a.download='trace.png'; a.click();
+  });
+  photoInput.addEventListener('change', (e)=>{
+    const f=e.target.files?.[0]; if(!f) return;
+    const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); setStatus('Фото добавлено.'); };
+    img.src=URL.createObjectURL(f);
+  });
+
+  window.addEventListener('resize', resizeCanvas, {passive:true});
+  resizeCanvas();
 })();
 </script>
 </body>
