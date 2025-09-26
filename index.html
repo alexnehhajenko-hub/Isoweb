@@ -1,69 +1,49 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+  />
   <title>Трассировка труб</title>
   <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-      overflow: hidden;
-      font-family: sans-serif;
-      background: #f0f0f0;
+    :root { --uiH: 44px; }
+    html,body{margin:0;height:100%;background:#f0f0f0;font-family:system-ui,Arial}
+    /* верхняя панель */
+    #ui{
+      position:fixed; inset:0 0 auto 0; height:var(--uiH);
+      display:flex; justify-content:center; gap:8px; align-items:center;
+      z-index:10; background:transparent; pointer-events:auto;
     }
-    #ui {
-      position: fixed;
-      top: 5px;
-      left: 0;
-      width: 100%;
-      display: flex;
-      justify-content: center;
-      gap: 6px;
-      z-index: 10;
-      flex-wrap: wrap;
+    button{
+      background:#6a5acd; color:#fff; border:0; border-radius:10px;
+      padding:6px 12px; font-size:14px; white-space:nowrap;
     }
-    button {
-      background: #6a5acd; /* фиолетовые */
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 6px 12px;
-      font-size: 14px;
+    button:active{opacity:.85}
+    /* контейнер холста */
+    #wrap{
+      position:fixed; inset:var(--uiH) 0 0 0; /* ниже панели */
+      display:flex; justify-content:center; align-items:center;
+      padding:6px;
     }
-    button:active {
-      opacity: 0.8;
+    canvas{
+      width:95vw; height:calc(95vh - var(--uiH));
+      border:1px solid #cfcfcf; background:#fff; border-radius:6px;
+      touch-action:none; /* отключаем жесты браузера на холсте */
     }
-    #canvas-container {
-      position: absolute;
-      top: 50px;
-      left: 0;
-      width: 100%;
-      height: calc(100% - 50px);
-      display: flex;
-      justify-content: center;
-      align-items: center;
+    /* панель настроек */
+    #panel{
+      position:fixed; right:10px; top:calc(var(--uiH) + 10px);
+      background:#fff; border:1px solid #ddd; border-radius:10px;
+      box-shadow:0 6px 16px rgba(0,0,0,.08); padding:10px 12px; z-index:15;
+      display:none; min-width:220px;
     }
-    canvas {
-      border: 1px solid #ccc;
-      touch-action: none;
-    }
-    #settingsPanel {
-      position: fixed;
-      right: 10px;
-      top: 60px;
-      background: white;
-      border: 1px solid #ccc;
-      padding: 10px;
-      border-radius: 8px;
-      display: none;
-      z-index: 20;
-    }
-    #settingsPanel label {
-      display: block;
-      margin: 8px 0 4px;
-      font-size: 14px;
+    #panel label{font-size:13px; color:#333; display:block; margin:8px 0 4px}
+    #status{
+      position:fixed; left:10px; bottom:10px; z-index:20;
+      background:rgba(0,0,0,.7); color:#fff; padding:6px 10px;
+      border-radius:10px; font-size:13px
     }
   </style>
 </head>
@@ -76,113 +56,144 @@
     <button id="settingsBtn">Настройки</button>
   </div>
 
-  <div id="canvas-container">
-    <canvas id="canvas"></canvas>
+  <div id="wrap">
+    <canvas id="cv"></canvas>
   </div>
 
-  <div id="settingsPanel">
+  <div id="panel">
     <label>Толщина трубы</label>
-    <input type="range" id="pipeWidth" min="2" max="40" value="8">
-    <br>
-    <label>Фото</label>
-    <input type="file" id="bgInput" accept="image/*">
+    <input id="wRange" type="range" min="2" max="40" value="10">
+    <label style="margin-top:10px">Фото (фон)</label>
+    <input id="bgInput" type="file" accept="image/*">
   </div>
 
-  <script>
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const container = document.getElementById('canvas-container');
-    const settingsPanel = document.getElementById('settingsPanel');
-    const pipeWidthInput = document.getElementById('pipeWidth');
-    const bgInput = document.getElementById('bgInput');
+  <div id="status">Режим: ожидание</div>
 
-    let width = container.clientWidth * 0.95;
-    let height = container.clientHeight * 0.95;
-    canvas.width = width;
-    canvas.height = height;
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d', { alpha: false });
 
-    let drawing = false;
-    let startX, startY;
-    let pipes = [];
-    let bgImage = null;
-    let pipeWidth = parseInt(pipeWidthInput.value);
+function fitCanvas(){
+  // соответствие CSS-размеров реальным пикселям
+  const r = window.devicePixelRatio || 1;
+  const cssW = cv.clientWidth, cssH = cv.clientHeight;
+  cv.width = Math.round(cssW * r);
+  cv.height = Math.round(cssH * r);
+  ctx.setTransform(r,0,0,r,0,0);
+}
+fitCanvas(); addEventListener('resize', fitCanvas);
 
-    // рисование труб
-    function redraw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (bgImage) ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = "blue";
-      ctx.lineWidth = pipeWidth;
+const pipes = [];
+let pipeW = +document.getElementById('wRange').value;
+let bgImg = null;
 
-      pipes.forEach(p => {
-        ctx.beginPath();
-        ctx.moveTo(p.x1, p.y1);
-        ctx.lineTo(p.x2, p.y2);
-        ctx.stroke();
-      });
-    }
+function draw(){
+  // фон
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0,0,cv.width,cv.height);
+  // картинка
+  if(bgImg){
+    ctx.drawImage(bgImg, 0,0, cv.width, cv.height);
+  }
+  // трубы
+  ctx.strokeStyle = '#2970ff';
+  ctx.lineWidth = pipeW;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for(const p of pipes){
+    ctx.beginPath(); ctx.moveTo(p.x1,p.y1); ctx.lineTo(p.x2,p.y2); ctx.stroke();
+  }
+  // предпросмотр текущей линии
+  if(tempLine){
+    ctx.beginPath(); ctx.moveTo(tempLine.x1,tempLine.y1); ctx.lineTo(tempLine.x2,tempLine.y2);
+    ctx.stroke();
+  }
+}
+draw();
 
-    canvas.addEventListener("mousedown", e => {
-      drawing = true;
-      const rect = canvas.getBoundingClientRect();
-      startX = e.clientX - rect.left;
-      startY = e.clientY - rect.top;
-    });
+/* --- режим рисования в 3 шага --- */
+let mode = 'idle'; // idle | line
+let firstPoint = null; // {x,y}
+let tempLine = null;
 
-    canvas.addEventListener("mouseup", e => {
-      if (!drawing) return;
-      drawing = false;
-      const rect = canvas.getBoundingClientRect();
-      const endX = e.clientX - rect.left;
-      const endY = e.clientY - rect.top;
-      pipes.push({x1: startX, y1: startY, x2: endX, y2: endY});
-      redraw();
-    });
+const statusEl = document.getElementById('status');
+function setStatus(t){ statusEl.textContent = t; }
 
-    // кнопки
-    document.getElementById("undoBtn").onclick = () => {
-      pipes.pop();
-      redraw();
-    };
-    document.getElementById("centerBtn").onclick = () => {
-      redraw();
-    };
-    document.getElementById("saveBtn").onclick = () => {
-      const link = document.createElement("a");
-      link.download = "pipes.png";
-      link.href = canvas.toDataURL();
-      link.click();
-    };
-    document.getElementById("settingsBtn").onclick = () => {
-      settingsPanel.style.display = settingsPanel.style.display === "none" ? "block" : "none";
-    };
+document.getElementById('lineBtn').onclick = ()=>{
+  mode = 'line'; firstPoint = null; tempLine = null;
+  setStatus('Режим: линия. Тапни первую точку');
+};
 
-    // толщина трубы
-    pipeWidthInput.addEventListener("input", () => {
-      pipeWidth = parseInt(pipeWidthInput.value);
-      redraw();
-    });
+document.getElementById('undoBtn').onclick = ()=>{
+  pipes.pop(); tempLine=null; draw();
+  setStatus('Отменено. Трубы: ' + pipes.length);
+};
 
-    // фон
-    bgInput.addEventListener("change", e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const img = new Image();
-      img.onload = () => {
-        bgImage = img;
-        redraw();
-      };
-      img.src = URL.createObjectURL(file);
-    });
+document.getElementById('centerBtn').onclick = ()=>{
+  // пока просто перерисовка (к центрированию вернёмся, когда добавим панорамирование)
+  draw(); setStatus('Центр');
+};
 
-    // запрет двойного тапа для зума
-    document.addEventListener('dblclick', e => {
-      e.preventDefault();
-    }, { passive: false });
+document.getElementById('saveBtn').onclick = ()=>{
+  const a = document.createElement('a');
+  a.download = 'pipes.png'; a.href = cv.toDataURL('image/png'); a.click();
+  setStatus('Сохранено PNG');
+};
 
-    redraw();
-  </script>
+const panel = document.getElementById('panel');
+document.getElementById('settingsBtn').onclick = ()=>{
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+};
+
+document.getElementById('wRange').oninput = (e)=>{
+  pipeW = +e.target.value; draw();
+};
+
+document.getElementById('bgInput').onchange = (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const img = new Image(); img.onload = ()=>{ bgImg = img; draw(); };
+  img.src = URL.createObjectURL(f);
+};
+
+/* --- мобильные pointer-события --- */
+cv.style.touchAction = 'none'; // отключаем скролл/зум браузера поверх холста
+cv.addEventListener('pointerdown', pointerTap);
+cv.addEventListener('pointermove', pointerMove);
+cv.addEventListener('pointerup', pointerUp);
+cv.addEventListener('pointercancel', ()=>{ tempLine=null; });
+
+function canvasXY(e){
+  const r = cv.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function pointerTap(e){
+  if(mode !== 'line') return;
+  const {x,y} = canvasXY(e);
+  if(!firstPoint){
+    firstPoint = {x,y};
+    tempLine = {x1:x, y1:y, x2:x, y2:y};
+    setStatus('Первая точка есть. Тапни вторую.');
+  }else{
+    pipes.push({x1:firstPoint.x, y1:firstPoint.y, x2:x, y2:y});
+    firstPoint = null; tempLine = null;
+    setStatus('Линия готова. Для новой — «Линия».');
+    draw();
+  }
+}
+
+function pointerMove(e){
+  if(firstPoint){
+    const {x,y} = canvasXY(e);
+    tempLine = {x1:firstPoint.x, y1:firstPoint.y, x2:x, y2:y};
+    draw();
+  }
+}
+
+function pointerUp(){ /* без действий */ }
+
+/* — полностью убираем double-tap zoom — */
+document.addEventListener('dblclick', (e)=>e.preventDefault(), {passive:false});
+</script>
 </body>
 </html>
