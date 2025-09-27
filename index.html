@@ -30,6 +30,11 @@
   }
   .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
   .editbar .mini:active{transform:translateY(1px)}
+
+  /* --- ДОБАВЛЕНО: защита от double-tap zoom на кнопках --- */
+  .toolbar, .btn, .zbtn { touch-action: manipulation; }
+  * { -webkit-tap-highlight-color: transparent; }
+  /* (на iOS авто-зум бывает при font-size<16px, у нас 16px по умолчанию — всё ок) */
 </style>
 </head>
 <body>
@@ -474,6 +479,20 @@ function zoomAt(sx,sy,zoom){
   // если в правке — держим панель
   showEditBar(mode==='edit');
 }
+
+/* --- ДОБАВЛЕНО: отключаем double-tap zoom на ПАНЕЛИ КНОПОК --- */
+const toolbar = document.querySelector('.toolbar');
+let lastTouchEnd = 0;
+toolbar.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300) {
+    e.preventDefault(); // блокируем зум при двойном тапе по кнопкам
+  }
+  lastTouchEnd = now;
+}, { passive: false });
+toolbar.addEventListener('dblclick', (e) => {
+  e.preventDefault();
+}, { passive: false });
 
 // init
 new ResizeObserver(()=>{ fit(); }).observe(stage);
