@@ -117,9 +117,11 @@ let editing = null;     // {i, end:'a'|'b'}
 let longPressTimer = null;
 let movedForLong = false;
 
-// TAP детектор, чтобы в pickB можно было двигать, а точка ставилась только тапом
+// TAP детектор
 let tapStart = null;    // {x,y,t}
 let tapMoved = false;
+// чтобы клик после тача не ставил точку второй раз
+let lastTouchTapTime = 0;
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
@@ -163,7 +165,7 @@ function redraw(){
   drawGrid();
   for(const s of pipes) drawPipe(s);
 
-  // первая точка — заметный маркер
+  // первая точка
   if(mode==='pickB' && tempA){
     ctx.save();
     const r1 = 7/scale, r2 = 12/scale;
@@ -174,7 +176,7 @@ function redraw(){
     ctx.restore();
   }
 
-  // превью-линия ко 2 точке
+  // превью ко 2-й точке
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
     ctx.setLineDash([10/scale, 10/scale]);
@@ -232,7 +234,7 @@ function drawPipe(s){
 function applySnap(w){
   snapTarget = null;
   if(!magnet.checked) return w;
-  const thresholdWorld = 18/scale; // ~18px
+  const thresholdWorld = 18/scale;
   let best=null, bestDist=Infinity;
   for(const seg of pipes){
     for(const p of [seg.a, seg.b]){
@@ -257,7 +259,11 @@ function setMode(newMode){
     : 'Линия: поставь точку 2'
   );
 }
-lineBtn.onclick = ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); };
+
+// клик + тач для кнопки «Линия» (надёжно на iOS)
+lineBtn.addEventListener('touchend', (e)=>{ e.preventDefault(); tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+lineBtn.addEventListener('click',     ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+
 panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pan'); };
 
 undoBtn.onclick = ()=>{ pipes.pop(); redraw(); setToast('Отменено'); };
@@ -298,7 +304,7 @@ stage.addEventListener('touchstart', (ev)=>{
   if(ev.touches.length===1){
     const t=ev.touches[0];
 
-    // long-press для правки концов — только в режиме перемещения
+    // long-press только в режиме перемещения
     if(mode==='pan'){
       const rect = cv.getBoundingClientRect();
       const w = screenToWorld(t.clientX - rect.left, t.clientY - rect.top);
@@ -314,7 +320,7 @@ stage.addEventListener('touchstart', (ev)=>{
       clearTimeout(longPressTimer);
     }
 
-    // тапы для рисования: фиксируем возможный тап
+    // фиксация потенциального тапа
     if(mode==='pickA' || mode==='pickB'){
       const rect = cv.getBoundingClientRect();
       tapStart = { x: t.clientX - rect.left, y: t.clientY - rect.top, t: Date.now() };
@@ -326,7 +332,6 @@ stage.addEventListener('touchstart', (ev)=>{
     }
   }
   else if(ev.touches.length===2){
-    // всегда разрешаем пинч-пэн (даже в pickB), точка не ставится
     fingerPanning = false;
     clearTimeout(longPressTimer);
     tapStart = null;
@@ -342,36 +347,30 @@ stage.addEventListener('touchmove', (ev)=>{
     const rect=cv.getBoundingClientRect();
     const sx=t.clientX-rect.left, sy=t.clientY-rect.top;
 
-    // если пользователь реально двигает палец — это не тап
     if(tapStart && !tapMoved){
       const dx=sx - tapStart.x, dy=sy - tapStart.y;
-      if(Math.hypot(dx,dy) > 12) tapMoved = true; // >12px — уже не тап
+      if(Math.hypot(dx,dy) > 12) tapMoved = true;
     }
 
-    // правка конца
     if(mode==='edit' && editing){
       const w = applySnap(screenToWorld(sx,sy));
       const seg = pipes[editing.i];
       if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
       redraw();
-    }
-    // панорамирование
-    else if(mode==='pan' && fingerPanning){
+    } else if(mode==='pan' && fingerPanning){
       const dx=t.clientX-prevFinger.x, dy=t.clientY-prevFinger.y;
       offX -= dx/scale; offY -= dy/scale;
       prevFinger={x:t.clientX,y:t.clientY};
       redraw();
-    }
-    // превью второй точки
-    else if(mode==='pickB' && tempA){
+    } else if(mode==='pickB' && tempA){
       hoverW = applySnap(screenToWorld(sx,sy));
       redraw();
     }
   }
   else if(ev.touches.length===2){
     clearTimeout(longPressTimer);
-    tapStart = null; // при двух пальцах — никакой постановки точки
-    pinchPan(ev.touches); // работает в любом режиме
+    tapStart = null;
+    pinchPan(ev.touches);
   }
 },{passive:false});
 
@@ -379,12 +378,12 @@ stage.addEventListener('touchend', (ev)=>{
   ev.preventDefault();
   clearTimeout(longPressTimer);
 
-  // обработка «тапа» для рисования — на touchend
   if(ev.touches.length===0 && tapStart){
     const now = Date.now();
     if(!tapMoved && (now - tapStart.t) < 300){
-      const fake = { x: tapStart.x, y: tapStart.y }; // используем сохранённые координаты
+      const fake = { x: tapStart.x, y: tapStart.y };
       onTap(fake);
+      lastTouchTapTime = now; // чтобы последующий click не сработал
     }
     tapStart = null; tapMoved = false;
   }
@@ -393,7 +392,7 @@ stage.addEventListener('touchend', (ev)=>{
   if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
 
-// ---------- Мышь ----------
+// ---------- Мышь + клик-резерв ----------
 let dragging=false, prev={x:0,y:0};
 stage.addEventListener('mousedown', e=>{
   const rect = cv.getBoundingClientRect();
@@ -431,6 +430,15 @@ stage.addEventListener('mousemove', e=>{
 stage.addEventListener('mouseup', ()=> dragging=false);
 stage.addEventListener('mouseleave', ()=> dragging=false);
 
+// РЕЗЕРВ: клик по сцене ставит точку (если не сразу после тача)
+stage.addEventListener('click', (e)=>{
+  if(!(mode==='pickA' || mode==='pickB')) return;
+  const now = Date.now();
+  if(now - lastTouchTapTime < 350) return; // уже поставили на touchend
+  const rect = cv.getBoundingClientRect();
+  onTap({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+});
+
 stage.addEventListener('wheel', e=>{
   const rect=cv.getBoundingClientRect();
   const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
@@ -441,13 +449,12 @@ stage.addEventListener('wheel', e=>{
 // ---------- Точки/линии (3 шага) ----------
 function onTap(p){
   const wpos = applySnap(screenToWorld(p.x, p.y));
-
   if(mode==='pickA'){
     tempA = wpos; hoverW=null; setMode('pickB'); redraw();
   }else if(mode==='pickB' && tempA){
     pipes.push({a:{...tempA}, b:wpos, d:pipeD});
     tempA=null; hoverW=null; snapTarget=null;
-    setMode('pan'); // после сегмента инструмент отключается
+    setMode('pan');
     setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
     redraw();
   }
