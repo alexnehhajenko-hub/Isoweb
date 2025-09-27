@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — магнит + превью + правка концов + редукции</title>
+<title>Трассировка труб — реалистичный масштаб</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -47,7 +47,6 @@
     <button id="settingsBtn" class="btn">Настройки</button>
   </div>
 
-  <!-- мини-панель для правки конца -->
   <div id="editBar" class="editbar">
     <button id="alignH" class="mini">H</button>
     <button id="alignV" class="mini">V</button>
@@ -105,24 +104,16 @@ let offX = 0, offY = 0;
 let gridStep = 40;
 let pipeD = 60;
 
-const pipes = []; // {a:{x,y}, b:{x,y}, d}
-const reducers = []; // редукции: {segIdx, end:'a'|'b', nodeRef, dFrom, dTo}
-let mode = 'pan'; // 'pan' | 'pickA' | 'pickB' | 'edit'
-let tempA = null;       // первая точка (world)
-let tempARef = null;    // ссылка на узел, если был снэп
-let hoverW = null;      // превью 2-й точки
-let snapTarget = null;  // ссылка на узел для текущего снэпа (из applySnap)
-let lastSnapRef = null; // внутренняя последняя ссылка из applySnap
+const pipes = [];      // {a:{x,y}, b:{x,y}, d}
+const reducers = [];   // {segIdx, end:'a'|'b', nodeRef, dFrom, dTo}
+let mode = 'pan';      // 'pan' | 'pickA' | 'pickB' | 'edit'
+let tempA = null, tempARef = null;
+let hoverW = null, snapTarget = null, lastSnapRef = null;
 
-// правка конца
 let editing = null;     // {i, end:'a'|'b'}
-let longPressTimer = null;
-let movedForLong = false;
+let longPressTimer = null, movedForLong = false;
 
-// TAP детектор
-let tapStart = null;    // {x,y,t}
-let tapMoved = false;
-let lastTouchTapTime = 0;
+let tapStart = null, tapMoved = false, lastTouchTapTime = 0;
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
@@ -137,80 +128,83 @@ function fit(){
   cv.height = Math.round(cssH * dpr);
   center();
 }
-function center(){
-  offX = 0; offY = 0; scale = 1;
-  redraw();
-  setToast(mode==='pan'?'Режим: перемещение':mode==='edit'?'Правка конца':'Режим: линия');
-}
+function center(){ offX = 0; offY = 0; scale = 1; redraw(); setToast(mode==='pan'?'Режим: перемещение':mode==='edit'?'Правка конца':'Режим: линия'); }
 
-// координаты
 function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2}; }
 function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY}; }
 
 function setToast(t){ toast.textContent = t; }
 function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
-// рендер
+// ---------- Рисование ----------
 function redraw(){
   ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
-  // очистка
+
+  // очистка холста
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
 
+  // фон-фото (масштабируется с миром — реалистично)
   if(bgImg){
     const w = bgImg.naturalWidth, h = bgImg.naturalHeight;
     ctx.drawImage(bgImg, -w/2, -h/2);
   }
+
   drawGrid();
   for(const s of pipes) drawPipe(s);
   for(const r of reducers) drawReducer(r);
 
-  // первая точка
+  // UI-маркер первой точки (фикс. толщины на экране — удобно)
   if(mode==='pickB' && tempA){
     ctx.save();
-    const r1 = 7/scale, r2 = 12/scale;
+    ctx.setTransform(1,0,0,1,0,0); // рисуем в экранных px
+    const p = worldToScreen(tempA.x,tempA.y);
     ctx.fillStyle = '#00d8ff';
-    ctx.beginPath(); ctx.arc(tempA.x,tempA.y,r1,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,216,255,.6)'; ctx.lineWidth = 2/scale;
-    ctx.beginPath(); ctx.arc(tempA.x,tempA.y,r2,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,7*dpr,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,216,255,.6)'; ctx.lineWidth = 2*dpr;
+    ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,12*dpr,0,Math.PI*2); ctx.stroke();
     ctx.restore();
   }
 
-  // превью ко 2-й точке
+  // превью линии (реалистичная толщина)
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
-    ctx.setLineDash([10/scale, 10/scale]);
-    ctx.lineWidth = Math.max(2, pipeD/4)/scale;
+    const w = Math.max(2, pipeD/4);
+    ctx.setLineDash([10,10]);      // мировые единицы → масштабируется
+    ctx.lineWidth = w;             // <<< главное изменение: без деления на scale
     ctx.strokeStyle = '#7cf';
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
   }
 
-  // подсветка привязки
+  // подсветка привязки (экранная толщина)
   if(snapTarget){
-    const r = 10/scale;
     ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    const p = worldToScreen(snapTarget.x,snapTarget.y);
     ctx.strokeStyle = '#ffd166';
-    ctx.lineWidth = 2/scale;
-    ctx.beginPath(); ctx.arc(snapTarget.x, snapTarget.y, r, 0, Math.PI*2); ctx.stroke();
+    ctx.lineWidth = 2*dpr;
+    ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,10*dpr,0,Math.PI*2); ctx.stroke();
     ctx.restore();
   }
 
-  // подсветка редактируемого конца
+  // подсветка редактируемого конца (экранная)
   if(mode==='edit' && editing){
     const seg = pipes[editing.i];
-    const p = editing.end==='a' ? seg.a : seg.b;
-    const r = 12/scale;
+    const pt = editing.end==='a' ? seg.a : seg.b;
     ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    const p = worldToScreen(pt.x,pt.y);
     ctx.strokeStyle = '#ffe08a';
-    ctx.lineWidth = 3/scale;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.stroke();
+    ctx.lineWidth = 3*dpr;
+    ctx.beginPath(); ctx.arc(p.x*dpr, p.y*dpr, 12*dpr, 0, Math.PI*2); ctx.stroke();
     ctx.restore();
   }
 }
 function drawGrid(){
   const step = gridStep, extent = 3000;
-  ctx.save(); ctx.lineWidth = 1/scale;
+  ctx.save();
+  ctx.lineWidth = 1/scale; // сетка остаётся читаемой на любом масштабе
   ctx.strokeStyle = 'rgba(255,255,255,.08)';
   ctx.beginPath();
   for(let x=-extent;x<=extent;x+=step){ ctx.moveTo(x,-extent); ctx.lineTo(x,extent); }
@@ -222,9 +216,14 @@ function drawGrid(){
 }
 function drawPipe(s){
   const w = Math.max(2, s.d/4);
-  ctx.save(); ctx.lineWidth=w/scale; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
+  ctx.save();
+  ctx.lineWidth = w;              // <<< реалистично: толщина масштабируется вместе с миром
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-  const r=(w/2)/scale; ctx.fillStyle='#4da1ff';
+
+  // кончики — тоже «реалистичные» (в мировых единицах)
+  const r = (w/2);
+  ctx.fillStyle='#4da1ff';
   for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill(); }
   ctx.restore();
 }
@@ -232,21 +231,16 @@ function drawPipe(s){
 // ---- Редукции (переход Ø1->Ø2) ----
 function drawReducer(R){
   const seg = pipes[R.segIdx]; if(!seg) return;
-  const A = seg[R.end];             // узел-стык (по ссылке)
-  const B = (R.end==='a') ? seg.b : seg.a;
+  const A = seg[R.end]; const B = (R.end==='a') ? seg.b : seg.a;
   const vx = B.x - A.x, vy = B.y - A.y;
-  const L = Math.hypot(vx,vy) || 1;
-  const nx = vx/L, ny = vy/L;   // направление вдоль сегмента
-  const tx = -ny, ty = nx;      // перпендикуляр
+  const L = Math.hypot(vx,vy) || 1, nx = vx/L, ny = vy/L, tx = -ny, ty = nx;
 
-  // «толщина» в world-координатах (у нас диаметр задан в px, толщина линии = w/scale)
   const w1px = Math.max(2, R.dFrom/4);
   const w2px = Math.max(2, R.dTo  /4);
-  const hw1 = (w1px/2)/scale;
-  const hw2 = (w2px/2)/scale;
+  const hw1 = (w1px/2);
+  const hw2 = (w2px/2);
 
-  // длина перехода в world
-  const len = Math.max(hw1, hw2) * 2.2;
+  const len = Math.max(hw1, hw2) * 2.2;   // длина редукции в мировых единицах
 
   const P0x = A.x,          P0y = A.y;
   const P1x = A.x + nx*len, P1y = A.y + ny*len;
@@ -257,7 +251,7 @@ function drawReducer(R){
   ctx.save();
   ctx.fillStyle = '#4da1ff';
   ctx.strokeStyle = '#2b6ecb';
-  ctx.lineWidth = 1/scale;
+  ctx.lineWidth = 1;            // <<< теперь масштабируется (в мир. ед.), не фикс-пиксельная
 
   ctx.beginPath();
   ctx.moveTo(P0x - v1x, P0y - v1y);
@@ -268,7 +262,6 @@ function drawReducer(R){
   ctx.fill();
   ctx.stroke();
 
-  // тонкая линийка на «шве»
   ctx.strokeStyle='rgba(0,0,0,.25)';
   ctx.beginPath(); ctx.moveTo(P0x, P0y); ctx.lineTo(P1x, P1y); ctx.stroke();
   ctx.restore();
@@ -276,26 +269,21 @@ function drawReducer(R){
 
 function maybeAddReducerAt(nodeRef, segIdx, end){
   if(!nodeRef) return;
-  // диаметр существующего узла (любой сегмент, где этот объект — endpoint)
   const dFrom = diameterAtNode(nodeRef);
   const dTo   = pipes[segIdx]?.d;
-  if(!dFrom || !dTo || Math.abs(dFrom - dTo) < 0.1) return; // одинаковый Ø — редукция не нужна
+  if(!dFrom || !dTo || Math.abs(dFrom - dTo) < 0.1) return;
   reducers.push({segIdx, end, nodeRef, dFrom, dTo});
 }
-
 function diameterAtNode(nodeRef){
-  for(const s of pipes){
-    if(s.a === nodeRef || s.b === nodeRef) return s.d;
-  }
+  for(const s of pipes){ if(s.a === nodeRef || s.b === nodeRef) return s.d; }
   return null;
 }
 
 // ---------- Магнит ----------
 function applySnap(w){
-  snapTarget = null;
-  lastSnapRef = null;
+  snapTarget = null; lastSnapRef = null;
   if(!magnet.checked) return w;
-  const thresholdWorld = 18/scale; // ~18px
+  const thresholdWorld = 18/scale;
   let best=null, bestDist=Infinity;
   for(const seg of pipes){
     for(const p of [seg.a, seg.b]){
@@ -324,9 +312,7 @@ lineBtn.addEventListener('touchend', e=>{ e.preventDefault(); tempA=null; tempAR
 lineBtn.addEventListener('click',     ()=>{ tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pickA'); });
 panBtn.onclick  = ()=>{ tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pan'); };
 
-undoBtn.onclick = ()=>{ pipes.pop(); // уберём и редукции, связанные с последним сегментом
-  for(let i=reducers.length-1;i>=0;i--){ if(reducers[i].segIdx>=pipes.length) reducers.splice(i,1); }
-  redraw(); setToast('Отменено'); };
+undoBtn.onclick = ()=>{ pipes.pop(); for(let i=reducers.length-1;i>=0;i--){ if(reducers[i].segIdx>=pipes.length) reducers.splice(i,1); } redraw(); setToast('Отменено'); };
 centerBtn.onclick = center;
 saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
 settingsBtn.onclick = ()=> dlg.showModal();
@@ -354,13 +340,12 @@ function zoomButton(dir){
   redraw();
 }
 
-// ---------- Жесты (тач) ----------
+// ---------- Жесты (тач/мышь) ----------
 let lastTouches=[];
 let fingerPanning=false, prevFinger={x:0,y:0};
 
 stage.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
-
   if(ev.touches.length===1){
     const t=ev.touches[0];
 
@@ -371,37 +356,23 @@ stage.addEventListener('touchstart', (ev)=>{
       const hit = hitEndpoint(w);
       movedForLong = false;
       clearTimeout(longPressTimer);
-      if(hit){
-        longPressTimer = setTimeout(()=>{
-          editing = hit; setMode('edit'); redraw();
-        }, 600);
-      }
-    } else {
-      clearTimeout(longPressTimer);
-    }
+      if(hit){ longPressTimer = setTimeout(()=>{ editing = hit; setMode('edit'); redraw(); }, 600); }
+    } else { clearTimeout(longPressTimer); }
 
-    // фиксация потенциального тапа
     if(mode==='pickA' || mode==='pickB'){
       const rect = cv.getBoundingClientRect();
       tapStart = { x: t.clientX - rect.left, y: t.clientY - rect.top, t: Date.now() };
       tapMoved = false;
     }
 
-    if(mode==='pan'){
-      fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
-    }
-  }
-  else if(ev.touches.length===2){
-    fingerPanning = false;
-    clearTimeout(longPressTimer);
-    tapStart = null;
-    lastTouches = copyTouches(ev.touches);
+    if(mode==='pan'){ fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY}; }
+  } else if(ev.touches.length===2){
+    fingerPanning=false; clearTimeout(longPressTimer); tapStart=null; lastTouches = copyTouches(ev.touches);
   }
 },{passive:false});
 
 stage.addEventListener('touchmove', (ev)=>{
   ev.preventDefault();
-
   if(ev.touches.length===1){
     const t=ev.touches[0];
     const rect=cv.getBoundingClientRect();
@@ -425,11 +396,8 @@ stage.addEventListener('touchmove', (ev)=>{
     } else if(mode==='pickB' && tempA){
       updateHoverFromPointer({clientX:t.clientX, clientY:t.clientY});
     }
-  }
-  else if(ev.touches.length===2){
-    clearTimeout(longPressTimer);
-    tapStart = null;
-    pinchPan(ev.touches); // работает даже в pickB
+  } else if(ev.touches.length===2){
+    clearTimeout(longPressTimer); tapStart=null; pinchPan(ev.touches);
   }
 },{passive:false});
 
@@ -437,12 +405,11 @@ stage.addEventListener('touchend', (ev)=>{
   ev.preventDefault();
   clearTimeout(longPressTimer);
 
-  // ставим точку на touchend, если это был тап
   if(ev.touches.length===0 && tapStart){
     const now = Date.now();
     if(!tapMoved && (now - tapStart.t) < 300){
       onTap({ x: tapStart.x, y: tapStart.y });
-      lastTouchTapTime = now; // чтобы click дальше не дублировал
+      lastTouchTapTime = now;
     }
     tapStart = null; tapMoved = false;
   }
@@ -451,16 +418,14 @@ stage.addEventListener('touchend', (ev)=>{
   if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
 
-// Мышь + резерв клика
+// Мышь
 let dragging=false, prev={x:0,y:0};
 stage.addEventListener('mousedown', e=>{
   const rect = cv.getBoundingClientRect();
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
   const w = screenToWorld(sx, sy);
   const hit = hitEndpoint(w);
-  if(hit && mode==='pan'){
-    editing = hit; setMode('edit'); redraw(); return;
-  }
+  if(hit && mode==='pan'){ editing = hit; setMode('edit'); redraw(); return; }
   if(mode!=='pan'){ onTap({x:sx,y:sy}); return; }
   dragging=true; prev={x:e.clientX,y:e.clientY};
 });
@@ -471,8 +436,7 @@ stage.addEventListener('mousemove', e=>{
     const w=applySnap(screenToWorld(sx,sy));
     const seg=pipes[editing.i];
     if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
-    redraw();
-    return;
+    redraw(); return;
   }
   if(mode==='pickB' && tempA){ updateHoverFromPointer(e); return; }
   if(!dragging) return;
@@ -498,31 +462,21 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-// ----- Логика 3-шаговой линии + редукции -----
+// ----- Линия и редукции -----
 function onTap(p){
-  // applySnap вернёт координаты и зафиксирует ссылку lastSnapRef, если прилипли
   const wpos = applySnap(screenToWorld(p.x, p.y));
   if(mode==='pickA'){
     tempA = wpos; tempARef = lastSnapRef; hoverW=null; setMode('pickB'); redraw();
   }else if(mode==='pickB' && tempA){
-    const seg = {a:{...tempA}, b:wpos, d:pipeD};
     const segIdx = pipes.length;
+    const seg = {a:{...tempA}, b:wpos, d:pipeD};
     pipes.push(seg);
-
-    // если первая точка была встык к старой трубе — редукция со стороны A
-    if(tempARef) maybeAddReducerAt(tempARef, segIdx, 'a');
-
-    // если вторая точка прилипла к старой трубе — редукция со стороны B
+    if(tempARef)   maybeAddReducerAt(tempARef, segIdx, 'a');
     if(lastSnapRef) maybeAddReducerAt(lastSnapRef, segIdx, 'b');
-
     tempA=null; tempARef=null; hoverW=null; snapTarget=null; lastSnapRef=null;
-    setMode('pan');
-    setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
-    redraw();
+    setMode('pan'); setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».'); redraw();
   }
 }
-
-// Поиск ближайшего конца трубы (для правки)
 function hitEndpoint(w){
   const thr = 14/scale;
   for(let i=0;i<pipes.length;i++){
@@ -532,8 +486,6 @@ function hitEndpoint(w){
   }
   return null;
 }
-
-// превью-точка при втором шаге
 function updateHoverFromPointer(pt){
   const rect=cv.getBoundingClientRect();
   const sx=('clientX' in pt?pt.clientX:pt.x)-rect.left;
@@ -542,7 +494,7 @@ function updateHoverFromPointer(pt){
   redraw();
 }
 
-// выравнивания во время правки
+// выравнивания
 alignH.onclick = ()=>{
   if(!(mode==='edit' && editing)) return;
   const seg = pipes[editing.i];
@@ -557,8 +509,7 @@ alignV.onclick = ()=>{
   const mov   = editing.end==='a'? seg.a : seg.b;
   mov.x = fixed.x; snapTarget=null; redraw();
 };
-editDone.onclick = ()=>{ cancelEdit(); setMode('pan'); redraw(); };
-function cancelEdit(){ editing=null; showEditBar(false); }
+editDone.onclick = ()=>{ editing=null; showEditBar(false); setMode('pan'); redraw(); };
 
 // пинч-зуум + сдвиг двумя пальцами
 function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
@@ -597,7 +548,6 @@ toolbar.addEventListener('touchend', (e) => {
 }, { passive: false });
 toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
-// init
 new ResizeObserver(()=>{ fit(); }).observe(stage);
 fit();
 })();
