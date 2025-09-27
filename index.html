@@ -31,10 +31,9 @@
   .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
   .editbar .mini:active{transform:translateY(1px)}
 
-  /* --- ДОБАВЛЕНО: защита от double-tap zoom на кнопках --- */
+  /* защита от double-tap zoom на кнопках */
   .toolbar, .btn, .zbtn { touch-action: manipulation; }
   * { -webkit-tap-highlight-color: transparent; }
-  /* (на iOS авто-зум бывает при font-size<16px, у нас 16px по умолчанию — всё ок) */
 </style>
 </head>
 <body>
@@ -117,6 +116,11 @@ let snapTarget = null;  // подсветка цели магнита
 let editing = null;     // {i, end:'a'|'b'}
 let longPressTimer = null;
 let movedForLong = false;
+
+// TAP детектор (чтобы в pickB панорамировать, а точку ставить только "тапом")
+let tapStart = null;    // {x,y,t}
+let tapMoved = false;
+let lastTouchTapTime = 0; // чтобы click не срабатывал следом
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
@@ -254,7 +258,8 @@ function setMode(newMode){
     : 'Линия: поставь точку 2'
   );
 }
-lineBtn.onclick = ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); };
+lineBtn.addEventListener('touchend', e=>{ e.preventDefault(); tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+lineBtn.addEventListener('click',     ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); });
 panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pan'); };
 
 undoBtn.onclick = ()=>{ pipes.pop(); redraw(); setToast('Отменено'); };
@@ -293,29 +298,37 @@ stage.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
   if(ev.touches.length===1){
     const t=ev.touches[0];
-    const rect = cv.getBoundingClientRect();
-    const sx = t.clientX - rect.left;
-    const sy = t.clientY - rect.top;
-    const w = screenToWorld(sx, sy);
 
-    // запуск long-press на конце трубы (если близко)
-    const hit = hitEndpoint(w);
-    movedForLong = false;
-    clearTimeout(longPressTimer);
-    if(hit){
-      longPressTimer = setTimeout(()=>{
-        editing = hit; setMode('edit'); redraw();
-      }, 600);
+    // long-press правки — только в режиме перемещения
+    if(mode==='pan'){
+      const rect = cv.getBoundingClientRect();
+      const w = screenToWorld(t.clientX - rect.left, t.clientY - rect.top);
+      const hit = hitEndpoint(w);
+      movedForLong = false;
+      clearTimeout(longPressTimer);
+      if(hit){
+        longPressTimer = setTimeout(()=>{
+          editing = hit; setMode('edit'); redraw();
+        }, 600);
+      }
+    } else {
+      clearTimeout(longPressTimer);
+    }
+
+    // записываем возможный тап для рисования (в pickA/pickB)
+    if(mode==='pickA' || mode==='pickB'){
+      const rect = cv.getBoundingClientRect();
+      tapStart = { x: t.clientX - rect.left, y: t.clientY - rect.top, t: Date.now() };
+      tapMoved = false;
     }
 
     if(mode==='pan'){
       fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
-    }else if(mode==='pickA' || mode==='pickB'){
-      onTap(t);
     }
   }else if(ev.touches.length===2){
     fingerPanning=false;
     clearTimeout(longPressTimer);
+    tapStart = null;
     lastTouches = copyTouches(ev.touches);
   }
 },{passive:false});
@@ -327,8 +340,11 @@ stage.addEventListener('touchmove', (ev)=>{
     const rect=cv.getBoundingClientRect();
     const sx=t.clientX-rect.left, sy=t.clientY-rect.top;
 
-    // если двинулись существенно — отменим long-press
-    if(!movedForLong) movedForLong = true, clearTimeout(longPressTimer);
+    // если ушли дальше порога — это уже не тап
+    if(tapStart && !tapMoved){
+      const dx=sx - tapStart.x, dy=sy - tapStart.y;
+      if(Math.hypot(dx,dy) > 12) tapMoved = true;
+    }
 
     if(mode==='edit' && editing){
       const w = applySnap(screenToWorld(sx,sy));
@@ -341,17 +357,29 @@ stage.addEventListener('touchmove', (ev)=>{
       prevFinger={x:t.clientX,y:t.clientY};
       redraw();
     }else if(mode==='pickB' && tempA){
-      updateHoverFromPointer(t);
+      updateHoverFromPointer({clientX:t.clientX, clientY:t.clientY});
     }
   }else if(ev.touches.length===2){
     clearTimeout(longPressTimer);
-    pinchPan(ev.touches);
+    tapStart = null;
+    pinchPan(ev.touches); // работает даже в pickB
   }
 },{passive:false});
 
 stage.addEventListener('touchend', (ev)=>{
   ev.preventDefault();
   clearTimeout(longPressTimer);
+
+  // ставим точку на touchend, если это был тап
+  if(ev.touches.length===0 && tapStart){
+    const now = Date.now();
+    if(!tapMoved && (now - tapStart.t) < 300){
+      onTap({ x: tapStart.x, y: tapStart.y });
+      lastTouchTapTime = now; // чтобы click дальше не дублировал
+    }
+    tapStart = null; tapMoved = false;
+  }
+
   if(ev.touches.length===0) { fingerPanning=false; }
   if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
@@ -363,10 +391,10 @@ stage.addEventListener('mousedown', e=>{
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
   const w = screenToWorld(sx, sy);
   const hit = hitEndpoint(w);
-  if(hit){
+  if(hit && mode==='pan'){
     editing = hit; setMode('edit'); redraw(); return;
   }
-  if(mode!=='pan'){ onTap(e); return; }
+  if(mode!=='pan'){ onTap({x:sx,y:sy}); return; }
   dragging=true; prev={x:e.clientX,y:e.clientY};
 });
 stage.addEventListener('mousemove', e=>{
@@ -388,6 +416,15 @@ stage.addEventListener('mousemove', e=>{
 stage.addEventListener('mouseup', ()=> dragging=false);
 stage.addEventListener('mouseleave', ()=> dragging=false);
 
+// Резерв: click по сцене ставит точку (если это не дубль после тача)
+stage.addEventListener('click', (e)=>{
+  if(!(mode==='pickA' || mode==='pickB')) return;
+  const now = Date.now();
+  if(now - lastTouchTapTime < 350) return;
+  const rect = cv.getBoundingClientRect();
+  onTap({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+});
+
 stage.addEventListener('wheel', e=>{
   const rect=cv.getBoundingClientRect();
   const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
@@ -397,17 +434,13 @@ stage.addEventListener('wheel', e=>{
 
 // Тапы для линии (3 шага)
 function onTap(p){
-  const rect = cv.getBoundingClientRect();
-  const sx = ('clientX' in p ? p.clientX : p.x) - rect.left;
-  const sy = ('clientY' in p ? p.clientY : p.y) - rect.top;
-  const wpos = applySnap(screenToWorld(sx, sy));
-
+  const wpos = applySnap(screenToWorld(p.x, p.y));
   if(mode==='pickA'){
     tempA = wpos; hoverW=null; setMode('pickB'); redraw();
   }else if(mode==='pickB' && tempA){
     pipes.push({a:{...tempA}, b:wpos, d:pipeD});
     tempA=null; hoverW=null; snapTarget=null;
-    setMode('pan'); // как и просил: после сегмента инструмент отключается
+    setMode('pan'); // после сегмента — обратно в перемещение
     setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
     redraw();
   }
@@ -480,19 +513,15 @@ function zoomAt(sx,sy,zoom){
   showEditBar(mode==='edit');
 }
 
-/* --- ДОБАВЛЕНО: отключаем double-tap zoom на ПАНЕЛИ КНОПОК --- */
+/* отключаем double-tap zoom на ПАНЕЛИ КНОПОК */
 const toolbar = document.querySelector('.toolbar');
-let lastTouchEnd = 0;
+let lastTouchEndToolbar = 0;
 toolbar.addEventListener('touchend', (e) => {
   const now = Date.now();
-  if (now - lastTouchEnd <= 300) {
-    e.preventDefault(); // блокируем зум при двойном тапе по кнопкам
-  }
-  lastTouchEnd = now;
+  if (now - lastTouchEndToolbar <= 300) e.preventDefault();
+  lastTouchEndToolbar = now;
 }, { passive: false });
-toolbar.addEventListener('dblclick', (e) => {
-  e.preventDefault();
-}, { passive: false });
+toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
 // init
 new ResizeObserver(()=>{ fit(); }).observe(stage);
