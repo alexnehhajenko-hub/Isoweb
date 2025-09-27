@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — реалистичный масштаб</title>
+<title>Трассировка труб — реалистичный масштаб v2</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -30,7 +30,6 @@
   .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
   .editbar .mini:active{transform:translateY(1px)}
 
-  /* защита от double-tap zoom на кнопках */
   .toolbar, .btn { touch-action: manipulation; }
   * { -webkit-tap-highlight-color: transparent; }
 </style>
@@ -72,7 +71,6 @@
 
 <script>
 (()=>{
-// ---------- DOM ----------
 const stage = document.getElementById('stage');
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
@@ -87,19 +85,17 @@ const zoomInBtn  = document.getElementById('zoomInBtn');
 const saveBtn = document.getElementById('saveBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 
-const dlg = document.getElementById('dlg');
 const diam = document.getElementById('diam'); const diamV = document.getElementById('diamV');
 const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
 const magnet = document.getElementById('magnet');
-const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
+const bg = document.getElementById('bg');
 
 const editBar = document.getElementById('editBar');
 const alignH = document.getElementById('alignH');
 const alignV = document.getElementById('alignV');
 const editDone = document.getElementById('editDone');
 
-// ---------- Сцена ----------
-let scale = 1, minScale=0.05, maxScale=6;
+let scale = 1, minScale=0.03, maxScale=8;      // ← чуть шире диапазон
 let offX = 0, offY = 0;
 let gridStep = 40;
 let pipeD = 60;
@@ -136,14 +132,26 @@ function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cs
 function setToast(t){ toast.textContent = t; }
 function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
+/* ===== адаптивная «реалистичная» толщина =====
+   считаем желаемую ТОЩИНУ НА ЭКРАНЕ (px), потом переводим в мировую.
+   при уменьшении scale толщина убывает быстрее (gamma>1), при сильном отдалении держим minScreen.
+*/
+const gamma = 1.45;           // насколько быстро худеет при отдалении (1.3–1.6 ок)
+const minScreen = 0.7;        // минимальная толщина на экране (px)
+const maxScreen = 16;         // на всякий случай сверху
+function pipeWidthWorld(d){   // d — диаметр мм → базовая ширина
+  const base = Math.max(2, d/4);               // базовая «реалистичная» ширина (в условных px)
+  let screenW = base * Math.pow(scale, gamma); // как будет выглядеть на экране
+  screenW = Math.max(minScreen, Math.min(maxScreen, screenW));
+  return screenW / scale;                      // перевели в мировые единицы для canvas
+}
+
 // ---------- Рисование ----------
 function redraw(){
   ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
 
-  // очистка холста
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
 
-  // фон-фото (масштабируется с миром — реалистично)
   if(bgImg){
     const w = bgImg.naturalWidth, h = bgImg.naturalHeight;
     ctx.drawImage(bgImg, -w/2, -h/2);
@@ -153,10 +161,9 @@ function redraw(){
   for(const s of pipes) drawPipe(s);
   for(const r of reducers) drawReducer(r);
 
-  // UI-маркер первой точки (фикс. толщины на экране — удобно)
   if(mode==='pickB' && tempA){
     ctx.save();
-    ctx.setTransform(1,0,0,1,0,0); // рисуем в экранных px
+    ctx.setTransform(1,0,0,1,0,0);
     const p = worldToScreen(tempA.x,tempA.y);
     ctx.fillStyle = '#00d8ff';
     ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,7*dpr,0,Math.PI*2); ctx.fill();
@@ -165,19 +172,16 @@ function redraw(){
     ctx.restore();
   }
 
-  // превью линии (реалистичная толщина)
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
-    const w = Math.max(2, pipeD/4);
-    ctx.setLineDash([10,10]);      // мировые единицы → масштабируется
-    ctx.lineWidth = w;             // <<< главное изменение: без деления на scale
+    ctx.setLineDash([10,10]);              
+    ctx.lineWidth = pipeWidthWorld(pipeD); // ← та же адаптивная модель
     ctx.strokeStyle = '#7cf';
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
   }
 
-  // подсветка привязки (экранная толщина)
   if(snapTarget){
     ctx.save();
     ctx.setTransform(1,0,0,1,0,0);
@@ -188,7 +192,6 @@ function redraw(){
     ctx.restore();
   }
 
-  // подсветка редактируемого конца (экранная)
   if(mode==='edit' && editing){
     const seg = pipes[editing.i];
     const pt = editing.end==='a' ? seg.a : seg.b;
@@ -204,7 +207,7 @@ function redraw(){
 function drawGrid(){
   const step = gridStep, extent = 3000;
   ctx.save();
-  ctx.lineWidth = 1/scale; // сетка остаётся читаемой на любом масштабе
+  ctx.lineWidth = 1/scale;
   ctx.strokeStyle = 'rgba(255,255,255,.08)';
   ctx.beginPath();
   for(let x=-extent;x<=extent;x+=step){ ctx.moveTo(x,-extent); ctx.lineTo(x,extent); }
@@ -215,16 +218,15 @@ function drawGrid(){
   ctx.restore();
 }
 function drawPipe(s){
-  const w = Math.max(2, s.d/4);
+  const wWorld = pipeWidthWorld(s.d);
   ctx.save();
-  ctx.lineWidth = w;              // <<< реалистично: толщина масштабируется вместе с миром
+  ctx.lineWidth = wWorld;
   ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
 
-  // кончики — тоже «реалистичные» (в мировых единицах)
-  const r = (w/2);
+  const rWorld = (wWorld*scale)/2/scale; // эквивалентно wWorld/2
   ctx.fillStyle='#4da1ff';
-  for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill(); }
+  for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,rWorld,0,Math.PI*2); ctx.fill(); }
   ctx.restore();
 }
 
@@ -235,12 +237,11 @@ function drawReducer(R){
   const vx = B.x - A.x, vy = B.y - A.y;
   const L = Math.hypot(vx,vy) || 1, nx = vx/L, ny = vy/L, tx = -ny, ty = nx;
 
-  const w1px = Math.max(2, R.dFrom/4);
-  const w2px = Math.max(2, R.dTo  /4);
-  const hw1 = (w1px/2);
-  const hw2 = (w2px/2);
+  const w1 = pipeWidthWorld(R.dFrom);
+  const w2 = pipeWidthWorld(R.dTo);
+  const hw1 = w1/2, hw2 = w2/2;
 
-  const len = Math.max(hw1, hw2) * 2.2;   // длина редукции в мировых единицах
+  const len = Math.max(hw1, hw2) * 2.2;
 
   const P0x = A.x,          P0y = A.y;
   const P1x = A.x + nx*len, P1y = A.y + ny*len;
@@ -251,7 +252,7 @@ function drawReducer(R){
   ctx.save();
   ctx.fillStyle = '#4da1ff';
   ctx.strokeStyle = '#2b6ecb';
-  ctx.lineWidth = 1;            // <<< теперь масштабируется (в мир. ед.), не фикс-пиксельная
+  ctx.lineWidth = Math.max(1/scale, 0.75/scale); // аккуратный контур
 
   ctx.beginPath();
   ctx.moveTo(P0x - v1x, P0y - v1y);
@@ -340,7 +341,7 @@ function zoomButton(dir){
   redraw();
 }
 
-// ---------- Жесты (тач/мышь) ----------
+// ---------- Жесты ----------
 let lastTouches=[];
 let fingerPanning=false, prevFinger={x:0,y:0};
 
@@ -349,7 +350,6 @@ stage.addEventListener('touchstart', (ev)=>{
   if(ev.touches.length===1){
     const t=ev.touches[0];
 
-    // long-press только в режиме перемещения
     if(mode==='pan'){
       const rect = cv.getBoundingClientRect();
       const w = screenToWorld(t.clientX - rect.left, t.clientY - rect.top);
