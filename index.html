@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — улучшенный зум</title>
+<title>Трассировка труб — пан пальцем</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
   .toolbar{position:fixed;left:12px;right:12px;top:10px;display:flex;gap:10px;justify-content:center;z-index:5;flex-wrap:wrap}
-  .btn{background:var(--ui);color:var(--txt);border:0;border-radius:14px;padding:8px 14px;font-weight:600;box-shadow:0 6px 18px rgba(108,77,252,.25)}
-  .ghost{background:#2b2f3a}
+  .btn{background:#2b2f3a;color:var(--txt);border:0;border-radius:14px;padding:8px 14px;font-weight:600}
+  .btn.active{background:var(--ui);box-shadow:0 6px 18px rgba(108,77,252,.25)}
   .wrap{position:fixed;inset:64px 10px 10px 10px;display:grid;place-items:center}
   .stage{width:95vw;height:calc(95vh - 64px);border:1px solid rgba(255,255,255,.15);border-radius:10px;position:relative;background:#0f1116;overflow:hidden;touch-action:none}
   canvas{position:absolute;inset:0;width:100%;height:100%}
@@ -24,13 +24,14 @@
 </head>
 <body>
   <div class="toolbar">
-    <button id="lineBtn"   class="btn">Линия</button>
-    <button id="undoBtn"   class="btn ghost">Назад</button>
-    <button id="centerBtn" class="btn ghost">Центр</button>
-    <button id="zoomOutBtn" class="btn ghost">–</button>
-    <button id="zoomInBtn"  class="btn ghost">+</button>
-    <button id="saveBtn"   class="btn ghost">Сохранить</button>
-    <button id="settingsBtn" class="btn ghost">Настройки</button>
+    <button id="lineBtn" class="btn">Линия</button>
+    <button id="panBtn"  class="btn active">Перемещение</button>
+    <button id="undoBtn"   class="btn">Назад</button>
+    <button id="centerBtn" class="btn">Центр</button>
+    <button id="zoomOutBtn" class="btn">–</button>
+    <button id="zoomInBtn"  class="btn">+</button>
+    <button id="saveBtn"   class="btn">Сохранить</button>
+    <button id="settingsBtn" class="btn">Настройки</button>
   </div>
 
   <div class="wrap">
@@ -39,7 +40,7 @@
     </div>
   </div>
 
-  <div id="toast" class="toast">Режим: ожидание</div>
+  <div id="toast" class="toast">Режим: перемещение</div>
 
   <dialog id="dlg">
     <div class="dlg-head">Параметры</div>
@@ -48,7 +49,7 @@
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
       <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
     </div>
-    <div class="dlg-actions"><button id="dlgClose" class="btn ghost">Закрыть</button></div>
+    <div class="dlg-actions"><button id="dlgClose" class="btn">Закрыть</button></div>
   </dialog>
 
 <script>
@@ -60,6 +61,7 @@ const ctx = cv.getContext('2d');
 const toast = document.getElementById('toast');
 
 const lineBtn = document.getElementById('lineBtn');
+const panBtn  = document.getElementById('panBtn');
 const undoBtn = document.getElementById('undoBtn');
 const centerBtn = document.getElementById('centerBtn');
 const zoomOutBtn = document.getElementById('zoomOutBtn');
@@ -73,13 +75,13 @@ const grid = document.getElementById('grid'); const gridV = document.getElementB
 const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
 
 // ---------- Сцена ----------
-let scale = 1, minScale=0.05, maxScale=6;    // << зум сильно дальше
+let scale = 1, minScale=0.05, maxScale=6;
 let offX = 0, offY = 0;
 let gridStep = 40;
 let pipeD = 60;
 
-const pipes = []; // {a:{x,y},b:{x,y},d}
-let mode = 'idle'; // idle|pickA|pickB
+const pipes = [];
+let mode = 'pan'; // 'pan' | 'pickA' | 'pickB'
 let tempA = null;
 
 let dpr = window.devicePixelRatio || 1;
@@ -98,20 +100,16 @@ function fit(){
 function center(){
   offX = 0; offY = 0; scale = 1;
   redraw();
-  setToast('Центр');
+  setToast(mode==='pan'?'Режим: перемещение':'Режим: линия');
 }
 
-// --- координаты (работаем в CSS px) ---
-function worldToScreen(wx, wy){
-  return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2};
-}
-function screenToWorld(sx, sy){
-  return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY};
-}
+// координаты
+function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2}; }
+function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY}; }
 
 function setToast(t){ toast.textContent = t; }
 
-// --- рендер ---
+// рендер
 function redraw(){
   ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
@@ -128,7 +126,6 @@ function redraw(){
     const r = 4/scale; ctx.beginPath(); ctx.arc(tempA.x,tempA.y,r,0,Math.PI*2); ctx.fill(); ctx.restore();
   }
 }
-
 function drawGrid(){
   const step = gridStep, extent = 3000;
   ctx.save(); ctx.lineWidth = 1/scale;
@@ -141,7 +138,6 @@ function drawGrid(){
   ctx.strokeStyle='rgba(120,170,255,.35)'; ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
   ctx.restore();
 }
-
 function drawPipe(s){
   const w = Math.max(2, s.d/4);
   ctx.save(); ctx.lineWidth=w/scale; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
@@ -152,18 +148,26 @@ function drawPipe(s){
 }
 
 // ---------- Кнопки ----------
-document.getElementById('centerBtn').onclick = center;
-document.getElementById('lineBtn').onclick = ()=>{ mode='pickA'; tempA=null; setToast('Линия: поставь точку 1'); };
-document.getElementById('undoBtn').onclick = ()=>{ pipes.pop(); redraw(); setToast('Отменено'); };
-document.getElementById('saveBtn').onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
-document.getElementById('settingsBtn').onclick = ()=> dlg.showModal();
+function setMode(newMode){
+  mode = newMode;
+  lineBtn.classList.toggle('active', mode!=='pan'); // линия подсвечена когда рисуем
+  panBtn.classList.toggle('active',  mode==='pan');
+  setToast(mode==='pan'?'Режим: перемещение':'Режим: линия');
+}
+lineBtn.onclick = ()=>{ tempA=null; setMode('pickA'); };
+panBtn.onclick  = ()=>{ tempA=null; setMode('pan'); };
+
+undoBtn.onclick = ()=>{ pipes.pop(); redraw(); setToast('Отменено'); };
+centerBtn.onclick = center;
+saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
+settingsBtn.onclick = ()=> dlg.showModal();
 document.getElementById('dlgClose').onclick = ()=> dlg.close();
 
 diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
 grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
 bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
 
-// --- авто-удержание на –/+ ---
+// –/+ удержание
 let holdTimer=null, holdRAF=null;
 function startHold(fn){ stopHold(); fn(); holdTimer=setTimeout(function loop(){ fn(); holdRAF=requestAnimationFrame(loop); }, 140); }
 function stopHold(){ clearTimeout(holdTimer); cancelAnimationFrame(holdRAF); holdTimer=null; holdRAF=null; }
@@ -178,35 +182,52 @@ zoomInBtn .addEventListener('mousedown',   ()=>startHold(()=>zoomButton(+1)));
 function zoomButton(dir){
   const rect=cv.getBoundingClientRect();
   const cx=rect.width/2, cy=rect.height/2;
-  zoomAt(cx,cy, dir>0 ? 1.15 : 0.85); // << шаг поярче
+  zoomAt(cx,cy, dir>0 ? 1.15 : 0.85);
   redraw();
 }
 
 // ---------- Жесты ----------
 let lastTouches=[];
+let fingerPanning=false, prevFinger={x:0,y:0};
+
 stage.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
   if(ev.touches.length===1){
-    onTap(ev.touches[0]);
+    const t=ev.touches[0];
+    if(mode==='pan'){
+      fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
+    }else{
+      onTap(t);
+    }
   }else if(ev.touches.length===2){
+    fingerPanning=false;
     lastTouches = copyTouches(ev.touches);
   }
 },{passive:false});
 
 stage.addEventListener('touchmove', (ev)=>{
   ev.preventDefault();
-  if(ev.touches.length===2) pinchPan(ev.touches);
+  if(ev.touches.length===1 && fingerPanning && mode==='pan'){
+    const t=ev.touches[0];
+    const dx=t.clientX-prevFinger.x, dy=t.clientY-prevFinger.y;
+    offX -= dx/scale; offY -= dy/scale;
+    prevFinger={x:t.clientX,y:t.clientY};
+    redraw();
+  }else if(ev.touches.length===2){
+    pinchPan(ev.touches);
+  }
 },{passive:false});
 
 stage.addEventListener('touchend', (ev)=>{
   ev.preventDefault();
+  if(ev.touches.length===0) { fingerPanning=false; }
   if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
 
 // Мышь
 let dragging=false, prev={x:0,y:0};
 stage.addEventListener('mousedown', e=>{
-  if(mode==='pickA'||mode==='pickB'){ onTap(e); return; }
+  if(mode!=='pan'){ onTap(e); return; }
   dragging=true; prev={x:e.clientX,y:e.clientY};
 });
 stage.addEventListener('mousemove', e=>{
@@ -216,14 +237,16 @@ stage.addEventListener('mousemove', e=>{
   prev={x:e.clientX,y:e.clientY}; redraw();
 });
 stage.addEventListener('mouseup', ()=> dragging=false);
+stage.addEventListener('mouseleave', ()=> dragging=false);
+
 stage.addEventListener('wheel', e=>{
   const rect=cv.getBoundingClientRect();
   const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
-  zoomAt(cx, cy, e.deltaY>0? 0.85:1.15); // << сильнее
+  zoomAt(cx, cy, e.deltaY>0? 0.85:1.15);
   e.preventDefault();
 },{passive:false});
 
-// Тап — ставим точки только в режиме Линия
+// Тапы для линии
 function onTap(p){
   const rect = cv.getBoundingClientRect();
   const sx = ('clientX' in p ? p.clientX : p.x) - rect.left;
@@ -231,16 +254,17 @@ function onTap(p){
   const wpos = screenToWorld(sx, sy);
 
   if(mode==='pickA'){
-    tempA = wpos; mode='pickB'; setToast('Поставь точку 2');
+    tempA = wpos; mode='pickB'; setMode('pickB'); setToast('Поставь точку 2');
   }else if(mode==='pickB' && tempA){
     pipes.push({a:{...tempA}, b:wpos, d:pipeD});
-    tempA=null; mode='idle'; setToast('Линия готова. Для новой — «Линия».'); redraw();
+    tempA=null; setMode('pickA'); // остаёмся в рисовании для следующей
+    setToast('Линия готова. Для новой — поставь точку 1 или включи «Перемещение».'); redraw();
   }else{
-    setToast('Нажми «Линия», затем поставь 2 точки.');
+    setToast('Включи «Линия» для постановки точек.');
   }
 }
 
-// пинч+пан двумя пальцами
+// пинч-зуум + сдвиг двумя пальцами
 function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
 function pinchPan(ts){
   const now = copyTouches(ts); if(now.length<2||lastTouches.length<2) return;
@@ -252,7 +276,7 @@ function pinchPan(ts){
   const ncx=(now[0].x+now[1].x)/2 - rect.left;
   const ncy=(now[0].y+now[1].y)/2 - rect.top;
 
-  zoomAt(ncx, ncy, Math.pow(currD/prevD, 1)); // без ослабления
+  zoomAt(ncx, ncy, Math.pow(currD/prevD, 1));
   offX -= (ncx-pcx)/scale;
   offY -= (ncy-pcy)/scale;
 
@@ -266,10 +290,9 @@ function zoomAt(sx,sy,zoom){
   offY += before.y - after.y;
 }
 
-// ---------- init ----------
+// init
 new ResizeObserver(()=>{ fit(); }).observe(stage);
 fit();
-setToast('Режим: ожидание');
 })();
 </script>
 </body>
