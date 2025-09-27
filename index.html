@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — магнит + превью + правка концов</title>
+<title>Трассировка труб — магнит + превью + правка концов + редукции</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -22,7 +22,6 @@
   input[type="range"]{width:180px}
   label.switch{display:flex;align-items:center;gap:12px}
 
-  /* мини-панель правки */
   .editbar{
     position:fixed; left:50%; top:56px; transform:translateX(-50%);
     display:none; gap:8px; z-index:6;
@@ -32,7 +31,7 @@
   .editbar .mini:active{transform:translateY(1px)}
 
   /* защита от double-tap zoom на кнопках */
-  .toolbar, .btn, .zbtn { touch-action: manipulation; }
+  .toolbar, .btn { touch-action: manipulation; }
   * { -webkit-tap-highlight-color: transparent; }
 </style>
 </head>
@@ -106,21 +105,24 @@ let offX = 0, offY = 0;
 let gridStep = 40;
 let pipeD = 60;
 
-const pipes = [];
+const pipes = []; // {a:{x,y}, b:{x,y}, d}
+const reducers = []; // редукции: {segIdx, end:'a'|'b', nodeRef, dFrom, dTo}
 let mode = 'pan'; // 'pan' | 'pickA' | 'pickB' | 'edit'
-let tempA = null;       // первая точка
-let hoverW = null;      // превью при второй точке
-let snapTarget = null;  // подсветка цели магнита
+let tempA = null;       // первая точка (world)
+let tempARef = null;    // ссылка на узел, если был снэп
+let hoverW = null;      // превью 2-й точки
+let snapTarget = null;  // ссылка на узел для текущего снэпа (из applySnap)
+let lastSnapRef = null; // внутренняя последняя ссылка из applySnap
 
 // правка конца
 let editing = null;     // {i, end:'a'|'b'}
 let longPressTimer = null;
 let movedForLong = false;
 
-// TAP детектор (чтобы в pickB панорамировать, а точку ставить только "тапом")
+// TAP детектор
 let tapStart = null;    // {x,y,t}
 let tapMoved = false;
-let lastTouchTapTime = 0; // чтобы click не срабатывал следом
+let lastTouchTapTime = 0;
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
@@ -146,10 +148,7 @@ function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - 
 function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY}; }
 
 function setToast(t){ toast.textContent = t; }
-
-function showEditBar(show){
-  editBar.style.display = show ? 'flex' : 'none';
-}
+function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
 // рендер
 function redraw(){
@@ -163,8 +162,9 @@ function redraw(){
   }
   drawGrid();
   for(const s of pipes) drawPipe(s);
+  for(const r of reducers) drawReducer(r);
 
-  // первая точка — заметный маркер
+  // первая точка
   if(mode==='pickB' && tempA){
     ctx.save();
     const r1 = 7/scale, r2 = 12/scale;
@@ -175,7 +175,7 @@ function redraw(){
     ctx.restore();
   }
 
-  // превью-линия ко 2 точке
+  // превью ко 2-й точке
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
     ctx.setLineDash([10/scale, 10/scale]);
@@ -229,9 +229,71 @@ function drawPipe(s){
   ctx.restore();
 }
 
+// ---- Редукции (переход Ø1->Ø2) ----
+function drawReducer(R){
+  const seg = pipes[R.segIdx]; if(!seg) return;
+  const A = seg[R.end];             // узел-стык (по ссылке)
+  const B = (R.end==='a') ? seg.b : seg.a;
+  const vx = B.x - A.x, vy = B.y - A.y;
+  const L = Math.hypot(vx,vy) || 1;
+  const nx = vx/L, ny = vy/L;   // направление вдоль сегмента
+  const tx = -ny, ty = nx;      // перпендикуляр
+
+  // «толщина» в world-координатах (у нас диаметр задан в px, толщина линии = w/scale)
+  const w1px = Math.max(2, R.dFrom/4);
+  const w2px = Math.max(2, R.dTo  /4);
+  const hw1 = (w1px/2)/scale;
+  const hw2 = (w2px/2)/scale;
+
+  // длина перехода в world
+  const len = Math.max(hw1, hw2) * 2.2;
+
+  const P0x = A.x,          P0y = A.y;
+  const P1x = A.x + nx*len, P1y = A.y + ny*len;
+
+  const v1x = tx*hw1, v1y = ty*hw1;
+  const v2x = tx*hw2, v2y = ty*hw2;
+
+  ctx.save();
+  ctx.fillStyle = '#4da1ff';
+  ctx.strokeStyle = '#2b6ecb';
+  ctx.lineWidth = 1/scale;
+
+  ctx.beginPath();
+  ctx.moveTo(P0x - v1x, P0y - v1y);
+  ctx.lineTo(P0x + v1x, P0y + v1y);
+  ctx.lineTo(P1x + v2x, P1y + v2y);
+  ctx.lineTo(P1x - v2x, P1y - v2y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // тонкая линийка на «шве»
+  ctx.strokeStyle='rgba(0,0,0,.25)';
+  ctx.beginPath(); ctx.moveTo(P0x, P0y); ctx.lineTo(P1x, P1y); ctx.stroke();
+  ctx.restore();
+}
+
+function maybeAddReducerAt(nodeRef, segIdx, end){
+  if(!nodeRef) return;
+  // диаметр существующего узла (любой сегмент, где этот объект — endpoint)
+  const dFrom = diameterAtNode(nodeRef);
+  const dTo   = pipes[segIdx]?.d;
+  if(!dFrom || !dTo || Math.abs(dFrom - dTo) < 0.1) return; // одинаковый Ø — редукция не нужна
+  reducers.push({segIdx, end, nodeRef, dFrom, dTo});
+}
+
+function diameterAtNode(nodeRef){
+  for(const s of pipes){
+    if(s.a === nodeRef || s.b === nodeRef) return s.d;
+  }
+  return null;
+}
+
 // ---------- Магнит ----------
 function applySnap(w){
   snapTarget = null;
+  lastSnapRef = null;
   if(!magnet.checked) return w;
   const thresholdWorld = 18/scale; // ~18px
   let best=null, bestDist=Infinity;
@@ -241,7 +303,7 @@ function applySnap(w){
       if(d < bestDist && d <= thresholdWorld){ best = p; bestDist = d; }
     }
   }
-  if(best){ snapTarget = best; return {x:best.x, y:best.y}; }
+  if(best){ snapTarget = best; lastSnapRef = best; return {x:best.x, y:best.y}; }
   return w;
 }
 
@@ -258,11 +320,13 @@ function setMode(newMode){
     : 'Линия: поставь точку 2'
   );
 }
-lineBtn.addEventListener('touchend', e=>{ e.preventDefault(); tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); });
-lineBtn.addEventListener('click',     ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pickA'); });
-panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); setMode('pan'); };
+lineBtn.addEventListener('touchend', e=>{ e.preventDefault(); tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+lineBtn.addEventListener('click',     ()=>{ tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+panBtn.onclick  = ()=>{ tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pan'); };
 
-undoBtn.onclick = ()=>{ pipes.pop(); redraw(); setToast('Отменено'); };
+undoBtn.onclick = ()=>{ pipes.pop(); // уберём и редукции, связанные с последним сегментом
+  for(let i=reducers.length-1;i>=0;i--){ if(reducers[i].segIdx>=pipes.length) reducers.splice(i,1); }
+  redraw(); setToast('Отменено'); };
 centerBtn.onclick = center;
 saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
 settingsBtn.onclick = ()=> dlg.showModal();
@@ -290,16 +354,17 @@ function zoomButton(dir){
   redraw();
 }
 
-// ---------- Жесты ----------
+// ---------- Жесты (тач) ----------
 let lastTouches=[];
 let fingerPanning=false, prevFinger={x:0,y:0};
 
 stage.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
+
   if(ev.touches.length===1){
     const t=ev.touches[0];
 
-    // long-press правки — только в режиме перемещения
+    // long-press только в режиме перемещения
     if(mode==='pan'){
       const rect = cv.getBoundingClientRect();
       const w = screenToWorld(t.clientX - rect.left, t.clientY - rect.top);
@@ -315,7 +380,7 @@ stage.addEventListener('touchstart', (ev)=>{
       clearTimeout(longPressTimer);
     }
 
-    // записываем возможный тап для рисования (в pickA/pickB)
+    // фиксация потенциального тапа
     if(mode==='pickA' || mode==='pickB'){
       const rect = cv.getBoundingClientRect();
       tapStart = { x: t.clientX - rect.left, y: t.clientY - rect.top, t: Date.now() };
@@ -325,8 +390,9 @@ stage.addEventListener('touchstart', (ev)=>{
     if(mode==='pan'){
       fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
     }
-  }else if(ev.touches.length===2){
-    fingerPanning=false;
+  }
+  else if(ev.touches.length===2){
+    fingerPanning = false;
     clearTimeout(longPressTimer);
     tapStart = null;
     lastTouches = copyTouches(ev.touches);
@@ -335,12 +401,12 @@ stage.addEventListener('touchstart', (ev)=>{
 
 stage.addEventListener('touchmove', (ev)=>{
   ev.preventDefault();
+
   if(ev.touches.length===1){
     const t=ev.touches[0];
     const rect=cv.getBoundingClientRect();
     const sx=t.clientX-rect.left, sy=t.clientY-rect.top;
 
-    // если ушли дальше порога — это уже не тап
     if(tapStart && !tapMoved){
       const dx=sx - tapStart.x, dy=sy - tapStart.y;
       if(Math.hypot(dx,dy) > 12) tapMoved = true;
@@ -351,15 +417,16 @@ stage.addEventListener('touchmove', (ev)=>{
       const seg = pipes[editing.i];
       if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
       redraw();
-    }else if(mode==='pan' && fingerPanning){
+    } else if(mode==='pan' && fingerPanning){
       const dx=t.clientX-prevFinger.x, dy=t.clientY-prevFinger.y;
       offX -= dx/scale; offY -= dy/scale;
       prevFinger={x:t.clientX,y:t.clientY};
       redraw();
-    }else if(mode==='pickB' && tempA){
+    } else if(mode==='pickB' && tempA){
       updateHoverFromPointer({clientX:t.clientX, clientY:t.clientY});
     }
-  }else if(ev.touches.length===2){
+  }
+  else if(ev.touches.length===2){
     clearTimeout(longPressTimer);
     tapStart = null;
     pinchPan(ev.touches); // работает даже в pickB
@@ -384,7 +451,7 @@ stage.addEventListener('touchend', (ev)=>{
   if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
 
-// Мышь
+// Мышь + резерв клика
 let dragging=false, prev={x:0,y:0};
 stage.addEventListener('mousedown', e=>{
   const rect = cv.getBoundingClientRect();
@@ -416,7 +483,6 @@ stage.addEventListener('mousemove', e=>{
 stage.addEventListener('mouseup', ()=> dragging=false);
 stage.addEventListener('mouseleave', ()=> dragging=false);
 
-// Резерв: click по сцене ставит точку (если это не дубль после тача)
 stage.addEventListener('click', (e)=>{
   if(!(mode==='pickA' || mode==='pickB')) return;
   const now = Date.now();
@@ -432,21 +498,31 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-// Тапы для линии (3 шага)
+// ----- Логика 3-шаговой линии + редукции -----
 function onTap(p){
+  // applySnap вернёт координаты и зафиксирует ссылку lastSnapRef, если прилипли
   const wpos = applySnap(screenToWorld(p.x, p.y));
   if(mode==='pickA'){
-    tempA = wpos; hoverW=null; setMode('pickB'); redraw();
+    tempA = wpos; tempARef = lastSnapRef; hoverW=null; setMode('pickB'); redraw();
   }else if(mode==='pickB' && tempA){
-    pipes.push({a:{...tempA}, b:wpos, d:pipeD});
-    tempA=null; hoverW=null; snapTarget=null;
-    setMode('pan'); // после сегмента — обратно в перемещение
+    const seg = {a:{...tempA}, b:wpos, d:pipeD};
+    const segIdx = pipes.length;
+    pipes.push(seg);
+
+    // если первая точка была встык к старой трубе — редукция со стороны A
+    if(tempARef) maybeAddReducerAt(tempARef, segIdx, 'a');
+
+    // если вторая точка прилипла к старой трубе — редукция со стороны B
+    if(lastSnapRef) maybeAddReducerAt(lastSnapRef, segIdx, 'b');
+
+    tempA=null; tempARef=null; hoverW=null; snapTarget=null; lastSnapRef=null;
+    setMode('pan');
     setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
     redraw();
   }
 }
 
-// Поиск ближайшего конца трубы (для long-press/редактирования)
+// Поиск ближайшего конца трубы (для правки)
 function hitEndpoint(w){
   const thr = 14/scale;
   for(let i=0;i<pipes.length;i++){
@@ -482,7 +558,6 @@ alignV.onclick = ()=>{
   mov.x = fixed.x; snapTarget=null; redraw();
 };
 editDone.onclick = ()=>{ cancelEdit(); setMode('pan'); redraw(); };
-
 function cancelEdit(){ editing=null; showEditBar(false); }
 
 // пинч-зуум + сдвиг двумя пальцами
@@ -509,11 +584,10 @@ function zoomAt(sx,sy,zoom){
   const after = screenToWorld(sx,sy);
   offX += before.x - after.x;
   offY += before.y - after.y;
-  // если в правке — держим панель
   showEditBar(mode==='edit');
 }
 
-/* отключаем double-tap zoom на ПАНЕЛИ КНОПОК */
+/* отключаем double-tap zoom на панели */
 const toolbar = document.querySelector('.toolbar');
 let lastTouchEndToolbar = 0;
 toolbar.addEventListener('touchend', (e) => {
