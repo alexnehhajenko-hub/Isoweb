@@ -3,116 +3,58 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — холст + фото</title>
+<title>Трассировка труб — фикс координат</title>
 <style>
-  :root{
-    --ui:#6c4dfc;
-    --ui-text:#fff;
-    --bg:#0f0f12;
-    --panel:#1a1b22;
-    --grid:#2a2d36;
-    --grid2:#1f222b;
-  }
-  html,body{height:100%;margin:0;background:#17181d;color:#e9e9f0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
-  /* Панель */
-  .toolbar{
-    position:fixed; inset:12px 12px auto 12px; display:flex; gap:10px; z-index:10;
-    justify-content:center; pointer-events:auto;
-  }
-  .btn{
-    background:var(--ui); color:var(--ui-text); border:none; border-radius:14px;
-    padding:8px 14px; font-weight:600; box-shadow:0 4px 14px rgba(108,77,252,.25);
-  }
-  .btn:active{transform:translateY(1px);opacity:.95}
-  /* Холстовый контейнер (рамка 95%) */
-  .stage-wrap{
-    position:fixed; inset:70px 10px 10px 10px; /* сверху место под панель */
-    display:grid; place-items:center;
-  }
-  .stage{
-    width:95vw; height:calc(95vh - 70px); /* ~95% экрана, минус панель */
-    border:1px solid rgba(255,255,255,.15); border-radius:10px; background:#0f1116;
-    position:relative; overflow:hidden; touch-action:none; /* важн.: сами обрабатываем жесты */
-  }
-  /* Внутренний canvas физически большой, но мы рисуем трансформацией */
-  canvas{position:absolute; inset:0; width:100%; height:100%;}
-  /* Подсказка/статус */
-  .toast{
-    position:fixed; left:12px; bottom:12px; background:rgba(0,0,0,.55); color:#cfe9cd;
-    padding:8px 12px; border-radius:10px; font-size:14px; z-index:20; backdrop-filter:blur(6px)
-  }
-  /* Модал настроек (для фото + диаметр) */
-  dialog{
-    border:none; padding:0; border-radius:16px; background:var(--panel); color:#fff;
-    width:min(92vw,420px);
-  }
-  .dlg-head{padding:14px 16px; font-weight:700}
+  :root{--ui:#6c4dfc;--txt:#fff;--panel:#151821;--grid:#2b2f3a}
+  html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
+  .toolbar{position:fixed;left:12px;right:12px;top:10px;display:flex;gap:10px;justify-content:center;z-index:5}
+  .btn{background:var(--ui);color:var(--txt);border:0;border-radius:14px;padding:8px 14px;font-weight:600;box-shadow:0 6px 18px rgba(108,77,252,.25)}
+  .ghost{background:#2b2f3a}
+  .wrap{position:fixed;inset:64px 10px 10px 10px;display:grid;place-items:center}
+  .stage{width:95vw;height:calc(95vh - 64px);border:1px solid rgba(255,255,255,.15);border-radius:10px;position:relative;background:#0f1116;overflow:hidden;touch-action:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%}
+  .toast{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#cfe9cd;padding:8px 12px;border-radius:10px;font-size:14px}
+  dialog{border:0;border-radius:14px;background:#1b1e27;color:#fff;width:min(92vw,420px)}
+  .dlg-head{padding:14px 16px;font-weight:700}
   .dlg-body{padding:0 16px 16px}
-  .row{display:flex; align-items:center; justify-content:space-between; gap:12px; margin:10px 0}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0}
+  .dlg-actions{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px 16px}
   input[type="range"]{width:180px}
-  .dlg-actions{display:flex; gap:10px; justify-content:flex-end; padding:12px 16px 16px}
-  .ghost{background:#323446}
-  /* Крошечная сетка (рисуется кодом), но запасной фон если фото нет */
-  .stage::before{
-    content:""; position:absolute; inset:0; background:
-      linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-      linear-gradient(var(--grid2) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid2) 1px, transparent 1px);
-    background-size: 40px 40px, 40px 40px, 200px 200px, 200px 200px;
-    pointer-events:none;
-  }
 </style>
 </head>
 <body>
-
-<div class="toolbar">
-  <button id="lineBtn" class="btn">Линия</button>
-  <button id="undoBtn" class="btn ghost">Назад</button>
-  <button id="centerBtn" class="btn ghost">Центр</button>
-  <button id="saveBtn" class="btn ghost">Сохранить</button>
-  <button id="settingsBtn" class="btn ghost">Настройки</button>
-</div>
-
-<div class="stage-wrap">
-  <div id="stage" class="stage">
-    <canvas id="cv" width="3800" height="3800"></canvas>
+  <div class="toolbar">
+    <button id="lineBtn"   class="btn">Линия</button>
+    <button id="undoBtn"   class="btn ghost">Назад</button>
+    <button id="centerBtn" class="btn ghost">Центр</button>
+    <button id="saveBtn"   class="btn ghost">Сохранить</button>
+    <button id="settingsBtn" class="btn ghost">Настройки</button>
   </div>
-</div>
 
-<div id="toast" class="toast">Режим: ожидание</div>
-
-<!-- Настройки -->
-<dialog id="dlg">
-  <div class="dlg-head">Параметры</div>
-  <div class="dlg-body">
-    <div class="row">
-      <label>Ø трубы (мм)</label>
-      <input id="diamRange" type="range" min="10" max="300" step="2" value="60">
-      <span id="diamVal">60</span>
-    </div>
-    <div class="row" style="align-items:flex-start">
-      <label>Фото (фон)</label>
-      <input id="bgInput" type="file" accept="image/*">
-    </div>
-    <div class="row">
-      <label>Толщина сетки</label>
-      <input id="gridRange" type="range" min="24" max="80" step="1" value="40">
-      <span id="gridVal">40</span>
+  <div class="wrap">
+    <div id="stage" class="stage">
+      <canvas id="cv"></canvas>
     </div>
   </div>
-  <div class="dlg-actions">
-    <button id="closeDlg" class="btn ghost">Закрыть</button>
-  </div>
-</dialog>
+
+  <div id="toast" class="toast">Режим: ожидание</div>
+
+  <dialog id="dlg">
+    <div class="dlg-head">Параметры</div>
+    <div class="dlg-body">
+      <div class="row"><label>Ø (мм)</label><input id="diam" type="range" min="10" max="300" step="2" value="60"><span id="diamV">60</span></div>
+      <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
+      <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
+    </div>
+    <div class="dlg-actions"><button id="dlgClose" class="btn ghost">Закрыть</button></div>
+  </dialog>
 
 <script>
 (()=>{
-
-/* ====== DOM ====== */
+// ---------- DOM ----------
+const stage = document.getElementById('stage');
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
-const stage = document.getElementById('stage');
 const toast = document.getElementById('toast');
 
 const lineBtn = document.getElementById('lineBtn');
@@ -122,278 +64,230 @@ const saveBtn = document.getElementById('saveBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 
 const dlg = document.getElementById('dlg');
-const diamRange = document.getElementById('diamRange');
-const diamVal = document.getElementById('diamVal');
-const gridRange = document.getElementById('gridRange');
-const gridVal = document.getElementById('gridVal');
-const bgInput = document.getElementById('bgInput');
-const closeDlg = document.getElementById('closeDlg');
+const diam = document.getElementById('diam'); const diamV = document.getElementById('diamV');
+const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
+const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
 
-/* ====== Сцена (мир) ====== */
-/* Мировые координаты. Мы не двигаем сам canvas по DOM — всё через transform контекста. */
-let scale = 1, minScale = 0.2, maxScale = 4;
-let offsetX = cv.width/2, offsetY = cv.height/2; // центрируем камеру на (0,0)
+// ---------- Сцена ----------
+let scale = 1, minScale=0.2, maxScale=4;
+let offX = 0, offY = 0;            // смещение камеры в МИРОВЫХ координатах (px(css))
 let gridStep = 40;
+let pipeD = 60;
 
-let bgImg = null;            // картинка-фон
-let pipeDiameter = 60;       // мм (визуально = px, 1:1 для эскизов)
-const pipes = [];            // [{a:{x,y}, b:{x,y}, d}]
-let mode = 'idle';           // idle | pickA | pickB
+const pipes = []; // {a:{x,y},b:{x,y},d}
+let mode = 'idle'; // idle|pickA|pickB
 let tempA = null;
 
-/* ====== Утилиты ====== */
-function setToast(t){ toast.textContent = t; }
+let dpr = window.devicePixelRatio || 1;
+let cssW=0, cssH=0; // реальный размер канваса в CSS-пикселях
+let bgImg = null;
+
+// Подгоняем канвас под контейнер с учётом DPR
+function fit(){
+  const r = cv.getBoundingClientRect();
+  cssW = Math.max(1, Math.round(r.width));
+  cssH = Math.max(1, Math.round(r.height));
+  dpr = window.devicePixelRatio || 1;
+
+  cv.width  = Math.round(cssW * dpr);
+  cv.height = Math.round(cssH * dpr);
+  // НЕ ставим здесь transform — будем ставить его в redraw, чтобы учитывать масштаб сцены
+  center(); // при первом заходе — центр
+}
+function center(){
+  offX = 0; offY = 0; scale = 1;
+  redraw();
+  setToast('Центр');
+}
+
+// Преобразования координат: работаем в CSS-пикселях!
 function worldToScreen(wx, wy){
-  return { x: wx * scale + offsetX, y: wy * scale + offsetY };
+  // сначала мировую -> экранную (CSS px, 0,0 в центре экрана)
+  const sx = (wx - offX) * scale + cssW/2;
+  const sy = (wy - offY) * scale + cssH/2;
+  return {x:sx, y:sy};
 }
 function screenToWorld(sx, sy){
-  const rect = cv.getBoundingClientRect();
-  sx -= rect.left; sy -= rect.top;
-  return { x: (sx - offsetX)/scale, y: (sy - offsetY)/scale };
+  // sx,sy в координатах экрана (CSS px, относительно canvas)
+  const wx = (sx - cssW/2)/scale + offX;
+  const wy = (sy - cssH/2)/scale + offY;
+  return {x:wx, y:wy};
 }
+
+function setToast(t){ toast.textContent = t; }
+
+// Рендер
 function redraw(){
+  // Полная матрица: сначала масштабируем на DPR, затем применяем «камеру»
+  ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
+  // Очистка: сброс к 1:1 и клир, затем вернём трансформ
   ctx.save();
-  // очистка
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.restore();
 
-  // применяем камеру
-  ctx.setTransform(scale,0,0,scale,offsetX,offsetY);
-
-  // фон (мир вокруг 0,0)
+  // Фон
   if(bgImg){
-    const w = bgImg.naturalWidth;
-    const h = bgImg.naturalHeight;
+    const w = bgImg.naturalWidth, h = bgImg.naturalHeight;
     ctx.drawImage(bgImg, -w/2, -h/2);
   }
 
-  // сетка вокруг центра (тонкая, чтобы не мешала)
+  // Сетка (в мировых координатах)
   drawGrid();
 
-  // трубы
-  for(const seg of pipes){ drawPipe(seg); }
+  // Трубы
+  for(const s of pipes) drawPipe(s);
 
-  // предварительная точка
+  // Точку A показываем
   if(mode==='pickB' && tempA){
-    // рисуем маленький маркер
-    ctx.save();
-    ctx.fillStyle = '#7cf';
-    ctx.beginPath(); ctx.arc(tempA.x, tempA.y, 4/scale, 0, Math.PI*2); ctx.fill();
-    ctx.restore();
+    ctx.save(); ctx.fillStyle='#7cf';
+    const r = 4/scale;
+    ctx.beginPath(); ctx.arc(tempA.x, tempA.y, r, 0, Math.PI*2); ctx.fill(); ctx.restore();
   }
-
-  ctx.restore();
 }
 
 function drawGrid(){
   const step = gridStep;
-  const extent = 1800; // половина квадрата
+  const extent = 3000;
   ctx.save();
   ctx.lineWidth = 1/scale;
-  // крупная
   ctx.strokeStyle = 'rgba(255,255,255,.08)';
   ctx.beginPath();
-  for(let x=-extent; x<=extent; x+=step){
-    ctx.moveTo(x,-extent); ctx.lineTo(x,extent);
-  }
-  for(let y=-extent; y<=extent; y+=step){
-    ctx.moveTo(-extent,y); ctx.lineTo(extent,y);
-  }
+  for(let x=-extent;x<=extent;x+=step){ ctx.moveTo(x,-extent); ctx.lineTo(x,extent); }
+  for(let y=-extent;y<=extent;y+=step){ ctx.moveTo(-extent,y); ctx.lineTo(extent,y); }
   ctx.stroke();
-  // оси
-  ctx.strokeStyle = 'rgba(255,100,100,.35)';
+  ctx.strokeStyle = 'rgba(255,120,120,.35)';
   ctx.beginPath(); ctx.moveTo(-extent,0); ctx.lineTo(extent,0); ctx.stroke();
   ctx.strokeStyle = 'rgba(120,170,255,.35)';
   ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
   ctx.restore();
 }
 
-function drawPipe(seg){
-  const w = Math.max(2, seg.d / 4); // визуальная толщина (не реальный диаметр, просто «жирность»)
+function drawPipe(s){
+  const w = Math.max(2, s.d/4); // визуальная толщина
   ctx.save();
   ctx.lineWidth = w/scale;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.lineCap='round'; ctx.lineJoin='round';
   ctx.strokeStyle = '#4da1ff';
-  ctx.beginPath();
-  ctx.moveTo(seg.a.x, seg.a.y);
-  ctx.lineTo(seg.b.x, seg.b.y);
-  ctx.stroke();
-
-  // торцы «полукругом»
-  ctx.fillStyle = '#4da1ff';
-  const r = (w/2)/scale;
-  for(const p of [seg.a, seg.b]){
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill();
-  }
+  ctx.beginPath(); ctx.moveTo(s.a.x, s.a.y); ctx.lineTo(s.b.x, s.b.y); ctx.stroke();
+  // торцы
+  const r = (w/2)/scale; ctx.fillStyle='#4da1ff';
+  for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill(); }
   ctx.restore();
 }
 
-/* ====== Ввод: кнопки ====== */
-lineBtn.addEventListener('click', ()=>{
-  mode = 'pickA';
-  tempA = null;
-  setToast('Линия: поставь точку 1');
-});
-undoBtn.addEventListener('click', ()=>{
-  pipes.pop();
-  setToast('Отменено');
-  redraw();
-});
-centerBtn.addEventListener('click', ()=>{
-  scale = 1; offsetX = cv.width/2; offsetY = cv.height/2;
-  setToast('Центр');
-  redraw();
-});
-saveBtn.addEventListener('click', ()=>{
-  // сохранить текущий вид
-  const data = cv.toDataURL('image/png');
-  const a = document.createElement('a');
-  a.href = data; a.download = 'pipes.png';
-  document.body.appendChild(a); a.click(); a.remove();
-});
-settingsBtn.addEventListener('click', ()=> dlg.showModal());
+// ---------- Кнопки ----------
+document.getElementById('centerBtn').onclick = center;
+document.getElementById('lineBtn').onclick = ()=>{
+  mode='pickA'; tempA=null; setToast('Линия: поставь точку 1');
+};
+document.getElementById('undoBtn').onclick = ()=>{ pipes.pop(); redraw(); setToast('Отменено'); };
+document.getElementById('saveBtn').onclick = ()=>{
+  // сохранить вид
+  const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click();
+};
+document.getElementById('settingsBtn').onclick = ()=> dlg.showModal();
+document.getElementById('dlgClose').onclick = ()=> dlg.close();
 
-closeDlg.addEventListener('click', ()=> dlg.close());
-diamRange.addEventListener('input', ()=>{
-  pipeDiameter = +diamRange.value;
-  diamVal.textContent = pipeDiameter;
-  redraw();
-});
-gridRange.addEventListener('input', ()=>{
-  gridStep = +gridRange.value;
-  gridVal.textContent = gridStep;
-  redraw();
-});
-bgInput.addEventListener('change', (e)=>{
-  const file = e.target.files && e.target.files[0];
-  if(!file) return;
-  const img = new Image();
-  img.onload = ()=>{ bgImg = img; redraw(); };
-  img.src = URL.createObjectURL(file);
-});
+diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
+grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
+bg.onchange = e=>{
+  const f = e.target.files?.[0]; if(!f) return;
+  const img = new Image(); img.onload=()=>{ bgImg=img; redraw(); };
+  img.src = URL.createObjectURL(f);
+};
 
-/* ====== Ввод: касания/мышь ====== */
-/* Политика: 
-   - ОДНИМ пальцем: ставим точки ТОЛЬКО когда активен режим pickA/pickB.
-   - ДВУМЯ пальцами: пан/зум сцены.
-   - Двойной тап браузера отключён тегом <meta ... user-scalable=no>.
-*/
-let dragging = false;
-let lastTouches = [];
-
+// ---------- Жесты ----------
+let lastTouches=[];
 stage.addEventListener('touchstart', (ev)=>{
-  ev.preventDefault(); // обязательн., чтобы не срабатывал браузерный даблтап/скролл
-  const t = ev.touches;
-  if(t.length===1){
-    handleTap(t[0]);
-  }else if(t.length===2){
-    lastTouches = copyTouches(t);
+  ev.preventDefault();
+  if(ev.touches.length===1){
+    onTap(ev.touches[0]);
+  }else if(ev.touches.length===2){
+    lastTouches = copyTouches(ev.touches);
   }
 },{passive:false});
 
 stage.addEventListener('touchmove', (ev)=>{
   ev.preventDefault();
-  const t = ev.touches;
-  if(t.length===2){
-    // панорамирование/зум
-    pinchMove(t);
-  }
+  if(ev.touches.length===2) pinchPan(ev.touches);
 },{passive:false});
 
 stage.addEventListener('touchend', (ev)=>{
   ev.preventDefault();
-  if(ev.touches.length<2) lastTouches = [];
+  if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
 
-// Мышь (для ПК)
-stage.addEventListener('mousedown', (e)=>{
-  if(mode==='pickA' || mode==='pickB'){ handleTap(e); return; }
-  dragging = true; lastMouse.x = e.clientX; lastMouse.y = e.clientY;
+// Мышь (ПК)
+let dragging=false, prev={x:0,y:0};
+stage.addEventListener('mousedown', e=>{
+  if(mode==='pickA'||mode==='pickB'){ onTap(e); return; }
+  dragging=true; prev={x:e.clientX,y:e.clientY};
 });
-const lastMouse = {x:0,y:0};
-stage.addEventListener('mousemove', (e)=>{
+stage.addEventListener('mousemove', e=>{
   if(!dragging) return;
-  offsetX += (e.clientX - lastMouse.x);
-  offsetY += (e.clientY - lastMouse.y);
-  lastMouse.x = e.clientX; lastMouse.y = e.clientY;
-  redraw();
+  const dx = e.clientX-prev.x, dy=e.clientY-prev.y;
+  offX -= dx/scale; offY -= dy/scale;
+  prev={x:e.clientX,y:e.clientY}; redraw();
 });
 stage.addEventListener('mouseup', ()=> dragging=false);
-stage.addEventListener('wheel', (e)=>{
-  // зум колесом
-  const delta = Math.sign(e.deltaY);
-  const zoom = (delta>0)? 0.9 : 1.1;
-  zoomAt(e.clientX, e.clientY, zoom);
+stage.addEventListener('wheel', e=>{
+  const rect = cv.getBoundingClientRect();
+  const cx = e.clientX-rect.left, cy = e.clientY-rect.top;
+  zoomAt(cx, cy, e.deltaY>0? 0.9:1.1);
   e.preventDefault();
 },{passive:false});
 
-/* ====== Жесты ====== */
-function handleTap(touchOrMouse){
-  // позиция касания в мировых координатах
-  const sx = ('clientX' in touchOrMouse)? touchOrMouse.clientX : touchOrMouse.x;
-  const sy = ('clientY' in touchOrMouse)? touchOrMouse.clientY : touchOrMouse.y;
-  const rect = stage.getBoundingClientRect();
-  const clampedX = Math.max(rect.left, Math.min(rect.right, sx));
-  const clampedY = Math.max(rect.top , Math.min(rect.bottom, sy));
-  const {x,y} = screenToWorld(clampedX, clampedY);
+// Тап по сцене — ставим точки только в режиме Линия
+function onTap(p){
+  const rect = cv.getBoundingClientRect();
+  const sx = ('clientX' in p ? p.clientX : p.x) - rect.left;
+  const sy = ('clientY' in p ? p.clientY : p.y) - rect.top;
+  const wpos = screenToWorld(sx, sy);
 
   if(mode==='pickA'){
-    tempA = {x,y};
-    mode='pickB';
-    setToast('Линия: поставь точку 2');
+    tempA = wpos; mode='pickB'; setToast('Поставь точку 2');
   }else if(mode==='pickB' && tempA){
-    const seg = {a:{...tempA}, b:{x,y}, d:pipeDiameter};
-    pipes.push(seg);
-    mode='idle'; tempA = null;
-    setToast('Линия готова. Чтобы начать новую — «Линия».');
-    redraw();
+    pipes.push({a:{...tempA}, b:wpos, d:pipeD});
+    tempA=null; mode='idle'; setToast('Линия готова. Для новой — «Линия».'); redraw();
   }else{
     setToast('Нажми «Линия», затем поставь 2 точки.');
   }
 }
 
-function copyTouches(tl){
-  return [...tl].map(t=>({id:t.identifier, x:t.clientX, y:t.clientY}));
+// пинч+пан двумя пальцами
+function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
+function pinchPan(ts){
+  const now = copyTouches(ts); if(now.length<2||lastTouches.length<2) return;
+  const prevD = Math.hypot(lastTouches[0].x-lastTouches[1].x, lastTouches[0].y-lastTouches[1].y);
+  const currD = Math.hypot(now[0].x-now[1].x, now[0].y-now[1].y);
+  const rect = cv.getBoundingClientRect();
+  const pcx=(lastTouches[0].x+lastTouches[1].x)/2 - rect.left;
+  const pcy=(lastTouches[0].y+lastTouches[1].y)/2 - rect.top;
+  const ncx=(now[0].x+now[1].x)/2 - rect.left;
+  const ncy=(now[0].y+now[1].y)/2 - rect.top;
+
+  // масштаб вокруг центра жеста
+  zoomAt(ncx, ncy, currD/prevD);
+  // пан — переносим камеру по разнице центров
+  offX -= (ncx-pcx)/scale;
+  offY -= (ncy-pcy)/scale;
+
+  lastTouches = now; redraw();
 }
-function pinchMove(tl){
-  const now = copyTouches(tl);
-  if(now.length<2 || lastTouches.length<2) return;
-
-  const prevD = dist(lastTouches[0], lastTouches[1]);
-  const currD = dist(now[0], now[1]);
-  const zoom = (currD/prevD);
-  // Центральная точка жеста
-  const cx = (now[0].x + now[1].x)/2;
-  const cy = (now[0].y + now[1].y)/2;
-
-  zoomAt(cx, cy, zoom);
-
-  // Панорамирование — среднее смещение центра жеста
-  const prevC = { x:(lastTouches[0].x + lastTouches[1].x)/2, y:(lastTouches[0].y + lastTouches[1].y)/2 };
-  offsetX += (cx - prevC.x);
-  offsetY += (cy - prevC.y);
-
-  lastTouches = now;
-  redraw();
+function zoomAt(sx,sy,zoom){
+  const before = screenToWorld(sx,sy);
+  scale = Math.min(maxScale, Math.max(minScale, scale*zoom));
+  const after = screenToWorld(sx,sy);
+  // фиксируем точку под пальцем
+  offX += before.x - after.x;
+  offY += before.y - after.y;
 }
-function zoomAt(screenX, screenY, zoom){
-  const before = screenToWorld(screenX, screenY);
-  scale = clamp(scale * zoom, minScale, maxScale);
-  const after = screenToWorld(screenX, screenY);
-  // держим под курсором/пальцами ту же мировую точку
-  offsetX += ( (after.x - before.x) * scale );
-  offsetY += ( (after.y - before.y) * scale );
-}
-const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
-const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 
-/* ====== Инициализация ====== */
-diamVal.textContent = pipeDiameter;
-gridVal.textContent = gridStep;
+// ---------- init ----------
+new ResizeObserver(()=>{ fit(); }).observe(stage);
+fit();
 setToast('Режим: ожидание');
-redraw();
-
 })();
 </script>
 </body>
