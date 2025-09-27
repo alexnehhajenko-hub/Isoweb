@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — пан пальцем</title>
+<title>Трассировка труб — 3 шага</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -147,12 +147,14 @@ function drawPipe(s){
   ctx.restore();
 }
 
-// ---------- Кнопки ----------
+// ---------- Кнопки / режим ----------
 function setMode(newMode){
   mode = newMode;
-  lineBtn.classList.toggle('active', mode!=='pan'); // линия подсвечена когда рисуем
+  lineBtn.classList.toggle('active', mode==='pickA' || mode==='pickB');
   panBtn.classList.toggle('active',  mode==='pan');
-  setToast(mode==='pan'?'Режим: перемещение':'Режим: линия');
+  setToast(mode==='pan'?'Режим: перемещение'
+          :mode==='pickA'?'Линия: поставь точку 1'
+          :'Линия: поставь точку 2');
 }
 lineBtn.onclick = ()=>{ tempA=null; setMode('pickA'); };
 panBtn.onclick  = ()=>{ tempA=null; setMode('pan'); };
@@ -171,7 +173,6 @@ bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Ima
 let holdTimer=null, holdRAF=null;
 function startHold(fn){ stopHold(); fn(); holdTimer=setTimeout(function loop(){ fn(); holdRAF=requestAnimationFrame(loop); }, 140); }
 function stopHold(){ clearTimeout(holdTimer); cancelAnimationFrame(holdRAF); holdTimer=null; holdRAF=null; }
-
 zoomOutBtn.addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomButton(-1));},{passive:false});
 zoomOutBtn.addEventListener('mousedown',   ()=>startHold(()=>zoomButton(-1)));
 zoomInBtn .addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomButton(+1));},{passive:false});
@@ -246,7 +247,7 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-// Тапы для линии
+// Тапы для линии в 3 шага
 function onTap(p){
   const rect = cv.getBoundingClientRect();
   const sx = ('clientX' in p ? p.clientX : p.x) - rect.left;
@@ -254,13 +255,14 @@ function onTap(p){
   const wpos = screenToWorld(sx, sy);
 
   if(mode==='pickA'){
-    tempA = wpos; mode='pickB'; setMode('pickB'); setToast('Поставь точку 2');
+    tempA = wpos; setMode('pickB'); // ждём вторую точку
   }else if(mode==='pickB' && tempA){
     pipes.push({a:{...tempA}, b:wpos, d:pipeD});
-    tempA=null; setMode('pickA'); // остаёмся в рисовании для следующей
-    setToast('Линия готова. Для новой — поставь точку 1 или включи «Перемещение».'); redraw();
-  }else{
-    setToast('Включи «Линия» для постановки точек.');
+    tempA=null;
+    // ВАЖНО: возвращаемся в перемещение — для следующей линии нужно снова нажать «Линия»
+    setMode('pan');
+    setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
+    redraw();
   }
 }
 
