@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Трассировка труб — фикс рисования</title>
+<style>
+  :root{--ui:#6c4dfc;--txt:#fff}
+  html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
+  .toolbar{position:fixed;left:12px;right:12px;top:10px;display:flex;gap:10px;justify-content:center;z-index:5;flex-wrap:wrap}
+  .btn{background:#2b2f3a;color:var(--txt);border:0;border-radius:14px;padding:8px 14px;font-weight:600}
+  .btn.active{background:var(--ui);box-shadow:0 6px 18px rgba(108,77,252,.25)}
+  .wrap{position:fixed;inset:64px 10px 10px 10px;display:grid;place-items:center}
+  .stage{width:95vw;height:calc(95vh - 64px);border:1px solid rgba(255,255,255,.15);border-radius:10px;position:relative;background:#0f1116;overflow:hidden;touch-action:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%}
+  .toast{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#cfe9cd;padding:8px 12px;border-radius:10px;font-size:14px}
+  dialog{border:0;border-radius:14px;background:#1b1e27;color:#fff;width:min(92vw,420px)}
+  .dlg-head{padding:14px 16px;font-weight:700}
+  .dlg-body{padding:0 16px 16px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0}
+  .dlg-actions{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px 16px}
+  input[type="range"]{width:180px}
+  label.switch{display:flex;align-items:center;gap:12px}
+  .editbar{
+    position:fixed; left:50%; top:56px; transform:translateX(-50%);
+    display:none; gap:8px; z-index:6;
+    background:#1b1e27; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,.15);
+  }
+  .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
+  .editbar .mini:active{transform:translateY(1px)}
+  .toolbar, .btn { touch-action: manipulation; }
+  * { -webkit-tap-highlight-color: transparent; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="lineBtn" class="btn">Линия</button>
+    <button id="panBtn"  class="btn active">Перемещение</button>
+    <button id="undoBtn"   class="btn">Назад</button>
+    <button id="centerBtn" class="btn">Центр</button>
+    <button id="zoomOutBtn" class="btn">–</button>
+    <button id="zoomInBtn"  class="btn">+</button>
+    <button id="saveBtn"   class="btn">Сохранить</button>
+    <button id="settingsBtn" class="btn">Настройки</button>
+  </div>
+
+  <div id="editBar" class="editbar">
+    <button id="alignH" class="mini">H</button>
+    <button id="alignV" class="mini">V</button>
+    <button id="editDone" class="mini">Готово</button>
+  </div>
+
+  <div class="wrap">
+    <div id="stage" class="stage"><canvas id="cv"></canvas></div>
+  </div>
+
+  <div id="toast" class="toast">Режим: перемещение</div>
+
+  <dialog id="dlg">
+    <div class="dlg-head">Параметры</div>
+    <div class="dlg-body">
+      <div class="row"><label>Ø (мм)</label><input id="diam" type="range" min="10" max="300" step="2" value="60"><span id="diamV">60</span></div>
+      <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
+      <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
+      <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
+    </div>
+    <div class="dlg-actions"><button id="dlgClose" class="btn">Закрыть</button></div>
+  </dialog>
+
+<script>
+(()=>{
+// ---------- DOM ----------
+const stage = document.getElementById('stage');
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const toast = document.getElementById('toast');
+
+const lineBtn = document.getElementById('lineBtn');
+const panBtn  = document.getElementById('panBtn');
+const undoBtn = document.getElementById('undoBtn');
+const centerBtn = document.getElementById('centerBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
+const zoomInBtn  = document.getElementById('zoomInBtn');
+const saveBtn = document.getElementById('saveBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+
+const diam = document.getElementById('diam'); const diamV = document.getElementById('diamV');
+const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
+const magnet = document.getElementById('magnet');
+const bg = document.getElementById('bg');
+
+const editBar = document.getElementById('editBar');
+const alignH = document.getElementById('alignH');
+const alignV = document.getElementById('alignV');
+const editDone = document.getElementById('editDone');
+
+// ---------- Сцена ----------
+let scale = 1, minScale=0.03, maxScale=8;
+let offX = 0, offY = 0;
+let gridStep = 40;
+let pipeD = 60;
+
+const pipes = [];
+const reducers = [];
+let mode = 'pan';               // 'pan' | 'pickA' | 'pickB' | 'edit'
+let tempA = null, tempARef = null;
+let hoverW = null, snapTarget = null, lastSnapRef = null;
+
+let editing = null;             // {i, end:'a'|'b'}
+let longPressTimer = null, movedForLong = false;
+
+let tapStart = null, tapMoved = false;
+let lastTouchTapTime = 0, lastPointMs = 0;
+
+let dpr = window.devicePixelRatio || 1;
+let cssW=0, cssH=0;
+let bgImg = null;
+
+function fit(){
+  const r = cv.getBoundingClientRect();
+  cssW = Math.max(1, Math.round(r.width));
+  cssH = Math.max(1, Math.round(r.height));
+  dpr = window.devicePixelRatio || 1;
+  cv.width  = Math.round(cssW * dpr);
+  cv.height = Math.round(cssH * dpr);
+  center();
+}
+function center(){ offX = 0; offY = 0; scale = 1; redraw(); setToast(mode==='pan'?'Режим: перемещение':mode==='edit'?'Правка конца':'Режим: линия'); }
+
+function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2}; }
+function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY}; }
+function setToast(t){ toast.textContent = t; }
+function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
+
+// «реалистичная» толщина
+const gamma = 1.45, minScreen = 0.7, maxScreen = 16;
+function pipeWidthWorld(d){
+  const base = Math.max(2, d/4);
+  let screenW = base * Math.pow(scale, gamma);
+  screenW = Math.max(minScreen, Math.min(maxScreen, screenW));
+  return screenW / scale;
+}
+
+// ---------- Рендер ----------
+function redraw(){
+  ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
+  ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
+
+  if(bgImg){ const w = bgImg.naturalWidth, h = bgImg.naturalHeight; ctx.drawImage(bgImg, -w/2, -h/2); }
+  drawGrid();
+  for(const s of pipes) drawPipe(s);
+  for(const r of reducers) drawReducer(r);
+
+  if(mode==='pickB' && tempA){
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    const p = worldToScreen(tempA.x,tempA.y);
+    ctx.fillStyle = '#00d8ff';
+    ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,7*dpr,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,216,255,.6)'; ctx.lineWidth = 2*dpr;
+    ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,12*dpr,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+
+  if(mode==='pickB' && tempA && hoverW){
+    ctx.save(); ctx.setLineDash([10,10]);
+    ctx.lineWidth = pipeWidthWorld(pipeD);
+    ctx.strokeStyle = '#7cf';
+    ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
+  }
+
+  if(snapTarget){
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    const p = worldToScreen(snapTarget.x,snapTarget.y);
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2*dpr;
+    ctx.beginPath(); ctx.arc(p.x*dpr,p.y*dpr,10*dpr,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+
+  if(mode==='edit' && editing){
+    const seg = pipes[editing.i]; const pt = editing.end==='a' ? seg.a : seg.b;
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    const p = worldToScreen(pt.x,pt.y);
+    ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 3*dpr;
+    ctx.beginPath(); ctx.arc(p.x*dpr, p.y*dpr, 12*dpr, 0, Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawGrid(){
+  const step = gridStep, extent = 3000;
+  ctx.save(); ctx.lineWidth = 1/scale; ctx.strokeStyle = 'rgba(255,255,255,.08)';
+  ctx.beginPath();
+  for(let x=-extent;x<=extent;x+=step){ ctx.moveTo(x,-extent); ctx.lineTo(x,extent); }
+  for(let y=-extent;y<=extent;y+=step){ ctx.moveTo(-extent,y); ctx.lineTo(extent,y); }
+  ctx.stroke();
+  ctx.strokeStyle='rgba(255,120,120,.35)'; ctx.beginPath(); ctx.moveTo(-extent,0); ctx.lineTo(extent,0); ctx.stroke();
+  ctx.strokeStyle='rgba(120,170,255,.35)'; ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
+  ctx.restore();
+}
+function drawPipe(s){
+  const wWorld = pipeWidthWorld(s.d);
+  ctx.save();
+  ctx.lineWidth = wWorld; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
+  ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+  const rWorld = wWorld/2; ctx.fillStyle='#4da1ff';
+  for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,rWorld,0,Math.PI*2); ctx.fill(); }
+  ctx.restore();
+}
+function drawReducer(R){
+  const seg = pipes[R.segIdx]; if(!seg) return;
+  const A = seg[R.end]; const B = (R.end==='a') ? seg.b : seg.a;
+  const vx = B.x - A.x, vy = B.y - A.y;
+  const L = Math.hypot(vx,vy) || 1, nx = vx/L, ny = vy/L, tx = -ny, ty = nx;
+  const w1 = pipeWidthWorld(R.dFrom), w2 = pipeWidthWorld(R.dTo);
+  const hw1 = w1/2, hw2 = w2/2, len = Math.max(hw1, hw2) * 2.2;
+  const P0x=A.x, P0y=A.y, P1x=A.x+nx*len, P1y=A.y+ny*len, v1x=tx*hw1, v1y=ty*hw1, v2x=tx*hw2, v2y=ty*hw2;
+
+  ctx.save(); ctx.fillStyle = '#4da1ff'; ctx.strokeStyle = '#2b6ecb'; ctx.lineWidth = Math.max(1/scale, 0.75/scale);
+  ctx.beginPath();
+  ctx.moveTo(P0x - v1x, P0y - v1y); ctx.lineTo(P0x + v1x, P0y + v1y);
+  ctx.lineTo(P1x + v2x, P1y + v2y); ctx.lineTo(P1x - v2x, P1y - v2y);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.moveTo(P0x, P0y); ctx.lineTo(P1x, P1y); ctx.stroke();
+  ctx.restore();
+}
+function maybeAddReducerAt(nodeRef, segIdx, end){
+  if(!nodeRef) return;
+  const dFrom = diameterAtNode(nodeRef);
+  const dTo   = pipes[segIdx]?.d;
+  if(!dFrom || !dTo || Math.abs(dFrom - dTo) < 0.1) return;
+  reducers.push({segIdx, end, nodeRef, dFrom, dTo});
+}
+function diameterAtNode(nodeRef){
+  for(const s of pipes){ if(s.a === nodeRef || s.b === nodeRef) return s.d; }
+  return null;
+}
+
+// ---------- Магнит ----------
+function applySnap(w){
+  snapTarget = null; lastSnapRef = null;
+  if(!magnet.checked) return w;
+  const thresholdWorld = 18/scale;
+  let best=null, bestDist=Infinity;
+  for(const seg of pipes){
+    for(const p of [seg.a, seg.b]){
+      const d = Math.hypot(w.x-p.x, w.y-p.y);
+      if(d < bestDist && d <= thresholdWorld){ best = p; bestDist = d; }
+    }
+  }
+  if(best){ snapTarget = best; lastSnapRef = best; return {x:best.x, y:best.y}; }
+  return w;
+}
+
+// ---------- Режимы ----------
+function setMode(newMode){
+  mode = newMode;
+  lineBtn.classList.toggle('active', mode==='pickA' || mode==='pickB');
+  panBtn.classList.toggle('active',  mode==='pan');
+  showEditBar(mode==='edit');
+  setToast(
+    mode==='pan' ? 'Режим: перемещение'
+    : mode==='edit'? 'Правка конца (двигай пальцем, либо H/V)'
+    : mode==='pickA'? 'Линия: поставь точку 1'
+    : 'Линия: поставь точку 2'
+  );
+}
+lineBtn.addEventListener('touchend', e=>{ e.preventDefault(); tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+lineBtn.addEventListener('click',     ()=>{ tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pickA'); });
+panBtn.onclick  = ()=>{ tempA=null; tempARef=null; hoverW=null; cancelEdit(); setMode('pan'); };
+
+undoBtn.onclick = ()=>{ pipes.pop(); for(let i=reducers.length-1;i>=0;i--){ if(reducers[i].segIdx>=pipes.length) reducers.splice(i,1); } redraw(); setToast('Отменено'); };
+centerBtn.onclick = center;
+saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
+settingsBtn.onclick = ()=> dlg.showModal();
+document.getElementById('dlgClose').onclick = ()=> dlg.close();
+
+diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
+grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
+bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
+
+// –/+ удержание
+let holdTimer=null, holdRAF=null;
+function startHold(fn){ stopHold(); fn(); holdTimer=setTimeout(function loop(){ fn(); holdRAF=requestAnimationFrame(loop); }, 140); }
+function stopHold(){ clearTimeout(holdTimer); cancelAnimationFrame(holdRAF); holdTimer=null; holdRAF=null; }
+zoomOutBtn.addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomButton(-1));},{passive:false});
+zoomOutBtn.addEventListener('mousedown',   ()=>startHold(()=>zoomButton(-1)));
+zoomInBtn .addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomButton(+1));},{passive:false});
+zoomInBtn .addEventListener('mousedown',   ()=>startHold(()=>zoomButton(+1)));
+['mouseleave','mouseup','touchend','touchcancel'].forEach(ev=>{
+  zoomOutBtn.addEventListener(ev, stopHold); zoomInBtn.addEventListener(ev, stopHold);
+});
+function zoomButton(dir){
+  const rect=cv.getBoundingClientRect();
+  const cx=rect.width/2, cy=rect.height/2;
+  zoomAt(cx,cy, dir>0 ? 1.15 : 0.85);
+  redraw();
+}
+
+// ---------- Жесты ----------
+let lastTouches=[];
+let fingerPanning=false, prevFinger={x:0,y:0};
+
+stage.addEventListener('touchstart', (ev)=>{
+  ev.preventDefault();
+  if(ev.touches.length===1){
+    const t=ev.touches[0];
+    const rect = cv.getBoundingClientRect();
+
+    // СНАЧАЛА ЛИНИЯ, потом PAN
+    if(mode==='pickA' || mode==='pickB'){
+      tapStart = { x: t.clientX - rect.left, y: t.clientY - rect.top, t: Date.now() };
+      tapMoved = false;
+    } else if(mode==='pan'){
+      const w = screenToWorld(t.clientX - rect.left, t.clientY - rect.top);
+      const hit = hitEndpoint(w);
+      movedForLong = false;
+      clearTimeout(longPressTimer);
+      if(hit){ longPressTimer = setTimeout(()=>{ editing = hit; setMode('edit'); redraw(); }, 600); }
+      fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
+    }
+  } else if(ev.touches.length===2){
+    fingerPanning=false; clearTimeout(longPressTimer); tapStart=null; lastTouches = copyTouches(ev.touches);
+  }
+},{passive:false});
+
+stage.addEventListener('touchmove', (ev)=>{
+  ev.preventDefault();
+  if(ev.touches.length===1){
+    const t=ev.touches[0];
+    const rect=cv.getBoundingClientRect();
+    const sx=t.clientX-rect.left, sy=t.clientY-rect.top;
+
+    if(tapStart && !tapMoved){
+      const dx=sx - tapStart.x, dy=sy - tapStart.y;
+      if(Math.hypot(dx,dy) > 18) tapMoved = true;
+    }
+
+    if(mode==='edit' && editing){
+      const w = applySnap(screenToWorld(sx,sy));
+      const seg = pipes[editing.i];
+      if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
+      redraw();
+    } else if(mode==='pan' && fingerPanning){
+      const dx=t.clientX-prevFinger.x, dy=t.clientY-prevFinger.y;
+      offX -= dx/scale; offY -= dy/scale;
+      prevFinger={x:t.clientX,y:t.clientY};
+      redraw();
+    } else if(mode==='pickB' && tempA){
+      updateHoverFromPointer({clientX:t.clientX, clientY:t.clientY});
+    }
+  } else if(ev.touches.length===2){
+    clearTimeout(longPressTimer); tapStart=null; pinchPan(ev.touches);
+  }
+},{passive:false});
+
+function commitTapFromStored(){
+  if(!tapStart) return;
+  const now = Date.now();
+  if(!tapMoved && (now - tapStart.t) < 450){
+    placeTapAt(tapStart.x, tapStart.y);
+    lastTouchTapTime = now;
+  }
+  tapStart = null; tapMoved = false;
+}
+stage.addEventListener('touchend', (ev)=>{ ev.preventDefault(); clearTimeout(longPressTimer); commitTapFromStored();
+  if(ev.touches.length===0) { fingerPanning=false; } if(ev.touches.length<2) lastTouches=[]; },{passive:false});
+stage.addEventListener('touchcancel', (ev)=>{ ev.preventDefault(); clearTimeout(longPressTimer); commitTapFromStored();
+  fingerPanning=false; lastTouches=[]; },{passive:false});
+
+// дублёр для iOS
+stage.addEventListener('pointerup', (e)=>{
+  if(!(mode==='pickA' || mode==='pickB')) return;
+  const now = performance.now();
+  if (now - lastPointMs < 120) return;
+  lastPointMs = now;
+  const rect = cv.getBoundingClientRect();
+  placeTapAt(e.clientX - rect.left, e.clientY - rect.top);
+}, {passive:false});
+
+// Мышь
+let dragging=false, prev={x:0,y:0};
+stage.addEventListener('mousedown', e=>{
+  const rect = cv.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+
+  // СНАЧАЛА линия, потом pan
+  if(mode==='pickA' || mode==='pickB'){ placeTapAt(sx, sy); return; }
+
+  const w = screenToWorld(sx, sy);
+  const hit = hitEndpoint(w);
+  if(hit && mode==='pan'){ editing = hit; setMode('edit'); redraw(); return; }
+  if(mode!=='pan'){ return; }
+  dragging=true; prev={x:e.clientX,y:e.clientY};
+});
+stage.addEventListener('mousemove', e=>{
+  if(mode==='edit' && editing){
+    const rect=cv.getBoundingClientRect();
+    const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+    const w=applySnap(screenToWorld(sx,sy));
+    const seg=pipes[editing.i];
+    if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
+    redraw(); return;
+  }
+  if(mode==='pickB' && tempA){ updateHoverFromPointer(e); return; }
+  if(!dragging) return;
+  const dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  offX -= dx/scale; offY -= dy/scale;
+  prev={x:e.clientX,y:e.clientY}; redraw();
+});
+stage.addEventListener('mouseup', ()=> dragging=false);
+stage.addEventListener('mouseleave', ()=> dragging=false);
+
+stage.addEventListener('click', (e)=>{
+  if(!(mode==='pickA' || mode==='pickB')) return;
+  const now = Date.now(); if(now - lastTouchTapTime < 350) return;
+  const rect = cv.getBoundingClientRect();
+  placeTapAt(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+stage.addEventListener('wheel', e=>{
+  const rect=cv.getBoundingClientRect();
+  const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
+  zoomAt(cx, cy, e.deltaY>0? 0.85:1.15);
+  e.preventDefault();
+},{passive:false});
+
+// ----- Линия и редукции -----
+function placeTapAt(sx,sy){
+  const wpos = applySnap(screenToWorld(sx, sy));
+  if(mode==='pickA'){
+    tempA = wpos; tempARef = lastSnapRef; hoverW=null; setMode('pickB'); redraw();
+  }else if(mode==='pickB' && tempA){
+    const segIdx = pipes.length;
+    const seg = {a:{...tempA}, b:wpos, d:pipeD};
+    pipes.push(seg);
+    if(tempARef)    maybeAddReducerAt(tempARef, segIdx, 'a');
+    if(lastSnapRef) maybeAddReducerAt(lastSnapRef, segIdx, 'b');
+    tempA=null; tempARef=null; hoverW=null; snapTarget=null; lastSnapRef=null;
+    setMode('pan'); setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».'); redraw();
+  }
+}
+function hitEndpoint(w){
+  const thr = 14/scale;
+  for(let i=0;i<pipes.length;i++){
+    const s=pipes[i];
+    if(Math.hypot(w.x-s.a.x, w.y-s.a.y)<=thr) return {i, end:'a'};
+    if(Math.hypot(w.x-s.b.x, w.y-s.b.y)<=thr) return {i, end:'b'};
+  }
+  return null;
+}
+function updateHoverFromPointer(pt){
+  const rect=cv.getBoundingClientRect();
+  const sx=('clientX' in pt?pt.clientX:pt.x)-rect.left;
+  const sy=('clientY' in pt?pt.clientY:pt.y)-rect.top;
+  hoverW = applySnap(screenToWorld(sx,sy));
+  redraw();
+}
+
+// выравнивания
+alignH.onclick = ()=>{
+  if(!(mode==='edit' && editing)) return;
+  const seg = pipes[editing.i];
+  const fixed = editing.end==='a'? seg.b : seg.a;
+  const mov   = editing.end==='a'? seg.a : seg.b;
+  mov.y = fixed.y; snapTarget=null; redraw();
+};
+alignV.onclick = ()=>{
+  if(!(mode==='edit' && editing)) return;
+  const seg = pipes[editing.i];
+  const fixed = editing.end==='a'? seg.b : seg.a;
+  const mov   = editing.end==='a'? seg.a : seg.b;
+  mov.x = fixed.x; snapTarget=null; redraw();
+};
+editDone.onclick = ()=>{ editing=null; showEditBar(false); setMode('pan'); redraw(); };
+
+// пинч-зуум + сдвиг
+function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
+function pinchPan(ts){
+  const now = copyTouches(ts); if(now.length<2||lastTouches.length<2) return;
+  const prevD = Math.hypot(lastTouches[0].x-lastTouches[1].x, lastTouches[0].y-lastTouches[1].y);
+  const currD = Math.hypot(now[0].x-now[1].x, now[0].y-now[1].y);
+  const rect = cv.getBoundingClientRect();
+  const pcx=(lastTouches[0].x+lastTouches[1].x)/2 - rect.left;
+  const pcy=(lastTouches[0].y+lastTouches[1].y)/2 - rect.top;
+  const ncx=(now[0].x+now[1].x)/2 - rect.left;
+  const ncy=(now[0].y+now[1].y)/2 - rect.top;
+
+  zoomAt(ncx, ncy, Math.pow(currD/prevD, 1));
+  offX -= (ncx-pcx)/scale;
+  offY -= (ncy-pcy)/scale;
+
+  lastTouches = now; redraw();
+}
+function zoomAt(sx,sy,zoom){
+  const before = screenToWorld(sx,sy);
+  scale = Math.min(maxScale, Math.max(minScale, scale*zoom));
+  const after = screenToWorld(sx,sy);
+  offX += before.x - after.x;
+  offY += before.y - after.y;
+  showEditBar(mode==='edit');
+}
+
+/* блок двойного тапа на панели */
+const toolbar = document.querySelector('.toolbar');
+let lastTouchEndToolbar = 0;
+toolbar.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEndToolbar <= 300) e.preventDefault();
+  lastTouchEndToolbar = now;
+}, { passive: false });
+toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+
+new ResizeObserver(()=>{ fit(); }).observe(stage);
+fit();
+})();
+</script>
+</body>
+</html>
