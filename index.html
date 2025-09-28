@@ -157,7 +157,7 @@ function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cs
 function setToast(t){ toast.textContent = t; }
 function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
-// ---------- SVG иконки → Image ----------
+// ---------- SVG → Image ----------
 function svgToImg(svg){ const img=new Image(); img.decoding='async'; img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg); return img; }
 const ICONS_SVG = {
   BALL:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
@@ -287,8 +287,8 @@ function nearestOnPipe(w){
     const d=Math.hypot(w.x-px,w.y-py);
     if(d<bestD){ bestD=d; bestP={x:px,y:py}; bestAng=Math.atan2(by-ay,bx-ax); }
   }
-  const allowDist = 24/scale; // ставим только если достаточно близко к трубе
-  return (bestP && bestD<=allowDist) ? {ok:true, x:bestP.x, y:bestP.y, ang:bestAng, d:bestD} : {ok:false};
+  const allowDist = 24/scale; // ставим только если близко к трубе
+  return (bestP && bestD<=allowDist) ? {ok:true, x:bestP.x, y:bestP.y, ang:bestAng} : {ok:false};
 }
 
 // ---------- Кнопки / режим ----------
@@ -319,9 +319,9 @@ grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw();
 bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
 
 // выбор арматуры (штамп)
-[...document.querySelectorAll('.chip[data-comp]')].forEach(b=>{
+compButtons.forEach(b=>{
   b.addEventListener('click', ()=>{
-    [...document.querySelectorAll('.chip[data-comp]')].forEach(x=>x.classList.remove('active'));
+    compButtons.forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     stampType = b.dataset.comp;
     setMode('stamp');
@@ -358,7 +358,6 @@ stage.addEventListener('touchstart', (ev)=>{
     const sx = t.clientX - rect.left;
     const sy = t.clientY - rect.top;
 
-    // long-press для правки концов
     const wForHit = screenToWorld(sx, sy);
     const hit = hitEndpoint(wForHit);
     movedForLong = false;
@@ -372,7 +371,7 @@ stage.addEventListener('touchstart', (ev)=>{
     if(mode==='pan'){
       fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
     }else if(mode==='stamp'){
-      placeStampAt(sx,sy); // только на трубу и только один раз
+      placeStampAt(sx,sy); // только на трубу и один раз
     }else if(mode==='pickA' || mode==='pickB'){
       onTap({clientX:t.clientX, clientY:t.clientY});
     }
@@ -441,4 +440,129 @@ stage.addEventListener('mousemove', e=>{
     redraw();
     return;
   }
-  if(mode==='pickB
+  if(mode==='pickB' && tempA){ updateHoverFromPointer(e); return; }
+  if(!dragging) return;
+  const dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  offX -= dx/scale; offY -= dy/scale;
+  prev={x:e.clientX,y:e.clientY}; redraw();
+});
+stage.addEventListener('mouseup', ()=> dragging=false);
+stage.addEventListener('mouseleave', ()=> dragging=false);
+
+stage.addEventListener('wheel', e=>{
+  const rect=cv.getBoundingClientRect();
+  const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
+  zoomAt(cx, cy, e.deltaY>0? 0.85:1.15);
+  e.preventDefault();
+},{passive:false});
+
+// Постановка штампа (ТОЛЬКО НА ТРУБУ и ОДИН РАЗ)
+function placeStampAt(sx,sy){
+  if(!stampType) return;
+  const w = screenToWorld(sx,sy);
+  const near = nearestOnPipe(w);
+  if(!near.ok){ setToast('Поставьте по трубе'); return; }
+  stamps.push({type:stampType, x:near.x, y:near.y, s:1, ang:near.ang});
+  // Сразу выключаем штамп, как просил
+  stampType = null;
+  compButtons.forEach(x=>x.classList.remove('active'));
+  setMode('pan');
+  redraw();
+}
+
+// Линия (3 шага)
+function onTap(e){
+  const rect = cv.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const wpos = applySnap(screenToWorld(sx, sy));
+
+  if(mode==='pickA'){
+    tempA = wpos; hoverW=null; setMode('pickB'); redraw();
+  }else if(mode==='pickB' && tempA){
+    pipes.push({a:{...tempA}, b:wpos, d:pipeD});
+    tempA=null; hoverW=null; snapTarget=null;
+    setMode('pan');
+    setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
+    redraw();
+  }
+}
+
+function hitEndpoint(w){
+  const thr = 14/scale;
+  for(let i=0;i<pipes.length;i++){
+    const s=pipes[i];
+    if(Math.hypot(w.x-s.a.x, w.y-s.a.y)<=thr) return {i, end:'a'};
+    if(Math.hypot(w.x-s.b.x, w.y-s.b.y)<=thr) return {i, end:'b'};
+  }
+  return null;
+}
+function updateHoverFromPointer(pt){
+  const rect=cv.getBoundingClientRect();
+  const sx=pt.clientX-rect.left, sy=pt.clientY-rect.top;
+  hoverW = applySnap(screenToWorld(sx,sy));
+  redraw();
+}
+
+// Выравнивание концов
+alignH.onclick = ()=>{
+  if(!(mode==='edit' && editing)) return;
+  const seg = pipes[editing.i];
+  const fixed = editing.end==='a'? seg.b : seg.a;
+  const mov   = editing.end==='a'? seg.a : seg.b;
+  mov.y = fixed.y; snapTarget=null; redraw();
+};
+alignV.onclick = ()=>{
+  if(!(mode==='edit' && editing)) return;
+  const seg = pipes[editing.i];
+  const fixed = editing.end==='a'? seg.b : seg.a;
+  const mov   = editing.end==='a'? seg.a : seg.b;
+  mov.x = fixed.x; snapTarget=null; redraw();
+};
+editDone.onclick = ()=>{ cancelEdit(); setMode('pan'); redraw(); };
+function cancelEdit(){ editing=null; showEditBar(false); }
+
+// Пинч/пан
+function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
+function pinchPan(ts){
+  const now = copyTouches(ts); if(now.length<2||lastTouches.length<2) return;
+  const prevD = Math.hypot(lastTouches[0].x-lastTouches[1].x, lastTouches[0].y-lastTouches[1].y);
+  const currD = Math.hypot(now[0].x-now[1].x, now[0].y-now[1].y);
+  const rect = cv.getBoundingClientRect();
+  const pcx=(lastTouches[0].x+lastTouches[1].x)/2 - rect.left;
+  const pcy=(lastTouches[0].y+lastTouches[1].y)/2 - rect.top;
+  const ncx=(now[0].x+now[1].x)/2 - rect.left;
+  const ncy=(now[0].y+now[1].y)/2 - rect.top;
+
+  zoomAt(ncx, ncy, Math.pow(currD/prevD, 1));
+  offX -= (ncx-pcx)/scale;
+  offY -= (ncy-pcy)/scale;
+
+  lastTouches = now; redraw();
+}
+function zoomAt(sx,sy,zoom){
+  const before = screenToWorld(sx,sy);
+  scale = Math.min(maxScale, Math.max(minScale, scale*zoom));
+  const after = screenToWorld(sx,sy);
+  offX += before.x - after.x;
+  offY += before.y - after.y;
+  showEditBar(mode==='edit');
+}
+
+// Блок double-tap zoom по кнопкам
+const toolbar = document.querySelector('.toolbar');
+let lastTouchEnd = 0;
+toolbar.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive:false });
+
+// init
+new ResizeObserver(()=>{ fit(); }).observe(stage);
+fit();
+})();
+</script>
+</body>
+</html>
