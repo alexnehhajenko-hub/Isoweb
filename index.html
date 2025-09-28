@@ -45,7 +45,6 @@
     <button id="settingsBtn" class="btn">Настройки</button>
   </div>
 
-  <!-- мини-панель правки конца -->
   <div id="editBar" class="editbar">
     <button id="alignH" class="mini">H</button>
     <button id="alignV" class="mini">V</button>
@@ -176,10 +175,41 @@ const ICONS_SVG = {
       <path d="M0,0 L0,8 L12,4 Z" fill="#fff"/></marker></defs>
     <line x1="40" y1="50" x2="98" y2="50" stroke="#fff" stroke-width="7" marker-end="url(#a)"/>
   </svg>`,
-  PUMP:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120">
-    <circle cx="70" cy="60" r="35" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
-    <rect x="20" y="35" width="30" height="50" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
-    <line x1="70" y1="60" x2="105" y2="60" stroke="#000" stroke-width="4"/>
+  /* ==== ПЕРЕДЕЛАННЫЙ НАСОС ==== */
+  PUMP:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 140">
+    <!-- улитка/корпус -->
+    <defs>
+      <radialGradient id="g1" cx="60%" cy="45%">
+        <stop offset="0" stop-color="#7b66ff"/><stop offset="1" stop-color="#5c44e6"/>
+      </radialGradient>
+    </defs>
+    <g stroke="#111" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <!-- фланцы слева/справа -->
+      <rect x="5"  y="58" width="26" height="24" rx="4" fill="#6c4dfc"/>
+      <rect x="149" y="58" width="26" height="24" rx="4" fill="#6c4dfc"/>
+      <!-- корпус улитки -->
+      <circle cx="90" cy="70" r="40" fill="url(#g1)"/>
+      <path d="M90,30
+               a40,40 0 1,0 0,80
+               a20,20 0 1,1 0,-40
+               a10,10 0 1,0 0,-20" fill="url(#g1)"/>
+      <!-- выход/вход к фланцам -->
+      <rect x="28" y="64" width="28" height="12" rx="3" fill="#6c4dfc"/>
+      <rect x="124" y="64" width="28" height="12" rx="3" fill="#6c4dfc"/>
+      <!-- мотор сверху -->
+      <rect x="70" y="6" width="40" height="26" rx="5" fill="#6c4dfc"/>
+      <!-- рёбра охлаждения -->
+      <g stroke="#222">
+        <line x1="76" x2="104" y1="12" y2="12"/>
+        <line x1="76" x2="104" y1="18" y2="18"/>
+        <line x1="76" x2="104" y1="24" y2="24"/>
+      </g>
+      <!-- вал -->
+      <line x1="90" y1="32" x2="90" y2="6" />
+      <!-- крепёж -->
+      <circle cx="18"  cy="70" r="2" fill="#111"/>
+      <circle cx="162" cy="70" r="2" fill="#111"/>
+    </g>
   </svg>`,
   VALVE:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180">
     <rect x="40" y="40" width="40" height="100" rx="10" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
@@ -487,7 +517,7 @@ function placeStampAt(sx,sy){
   const near = nearestOnPipe(w);
   if(!near.ok){ setToast('Поставьте по трубе'); return; }
   stamps.push({type:stampType, x:near.x, y:near.y, s:1, ang:near.ang});
-  // Сразу выключаем штамп, как просили
+  // Сразу выключаем штамп
   stampType = null;
   compButtons.forEach(x=>x.classList.remove('active'));
   setMode('pan');
