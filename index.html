@@ -85,7 +85,16 @@
           <button class="chip" data-comp="CHECK">Обратный клапан</button>
           <button class="chip" data-comp="PUMP">Насос</button>
           <button class="chip" data-comp="VALVE">Вентиль</button>
-        </div>
+        </div>/* кнопки/панели не должны зумиться от double-tap */
+.toolbar, .toolbar .btn, .editbar, .editbar .mini, dialog, dialog .btn {
+  touch-action: manipulation;
+}
+
+/* убираем синий/серый подсвет при тапе в iOS */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* лайфхак против авто-зума текста в iOS при <16px */
+html { -webkit-text-size-adjust: 100%; }
         <small style="opacity:.8">Выбери элемент, закрой окно и тапни по трубе. После установки режим «штамп» выключится. Штамп можно перетаскивать вдоль трубы и менять размер (A−/A+ или пинч).</small>
       </div>
 
