@@ -796,7 +796,41 @@ toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive:false 
 new ResizeObserver(()=>{ fit(); }).observe(stage);
 fit();
 center();
-})();
+/* === БЛОК: гасим double-tap zoom на кнопках/панелях (iOS) === */
+(function preventDoubleTapZoomOnUI(){
+  // выбираем только UI, холст/сцену НЕ трогаем
+  const uiTargets = document.querySelectorAll(
+    '.toolbar, .toolbar .btn, .editbar, .editbar .mini, dialog, dialog .btn'
+  );
+
+  // подстраховка: сообщаем браузеру, что это манипуляции, а не жесты зума
+  uiTargets.forEach(el => { el.style.touchAction = 'manipulation'; });
+
+  let lastTouchEnd = 0;
+  function onTouchEnd(e){
+    const now = Date.now();
+    // второй тап в пределах 300–350 мс — считаем double-tap и блокируем zoom
+    if (now - lastTouchEnd < 350) {
+      e.preventDefault();
+      // также "съедим" событие, чтобы не сработали лишние клики
+      e.stopPropagation();
+    }
+    lastTouchEnd = now;
+  }
+
+  uiTargets.forEach(el => {
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    // Safari может пытаться зумить по dblclick — погасим
+    el.addEventListener('dblclick', (e)=> { e.preventDefault(); e.stopPropagation(); }, { passive: false });
+  });
+
+  // Доп. защита: блокируем "жесты зума" (gesturestart) ТОЛЬКО на UI, не на сцене
+  uiTargets.forEach(el=>{
+    el.addEventListener('gesturestart', (e)=>{ e.preventDefault(); e.stopPropagation(); }, { passive:false });
+    el.addEventListener('gesturechange', (e)=>{ e.preventDefault(); e.stopPropagation(); }, { passive:false });
+    el.addEventListener('gestureend', (e)=>{ e.preventDefault(); e.stopPropagation(); }, { passive:false });
+  });
+})();})();
 </script>
 </body>
 </html>
