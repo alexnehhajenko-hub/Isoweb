@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — линии + арматура (привязка к трубе, один раз)</title>
+<title>Трассировка труб — линии + арматура (масштаб труб + крупнее вентиль)</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -175,40 +175,22 @@ const ICONS_SVG = {
       <path d="M0,0 L0,8 L12,4 Z" fill="#fff"/></marker></defs>
     <line x1="40" y1="50" x2="98" y2="50" stroke="#fff" stroke-width="7" marker-end="url(#a)"/>
   </svg>`,
-  /* ==== ПЕРЕДЕЛАННЫЙ НАСОС ==== */
+  /* Улучшенный насос */
   PUMP:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 140">
-    <!-- улитка/корпус -->
     <defs>
-      <radialGradient id="g1" cx="60%" cy="45%">
-        <stop offset="0" stop-color="#7b66ff"/><stop offset="1" stop-color="#5c44e6"/>
-      </radialGradient>
+      <radialGradient id="g1" cx="60%" cy="45%"><stop offset="0" stop-color="#7b66ff"/><stop offset="1" stop-color="#5c44e6"/></radialGradient>
     </defs>
     <g stroke="#111" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-      <!-- фланцы слева/справа -->
       <rect x="5"  y="58" width="26" height="24" rx="4" fill="#6c4dfc"/>
       <rect x="149" y="58" width="26" height="24" rx="4" fill="#6c4dfc"/>
-      <!-- корпус улитки -->
       <circle cx="90" cy="70" r="40" fill="url(#g1)"/>
-      <path d="M90,30
-               a40,40 0 1,0 0,80
-               a20,20 0 1,1 0,-40
-               a10,10 0 1,0 0,-20" fill="url(#g1)"/>
-      <!-- выход/вход к фланцам -->
+      <path d="M90,30 a40,40 0 1,0 0,80 a20,20 0 1,1 0,-40 a10,10 0 1,0 0,-20" fill="url(#g1)"/>
       <rect x="28" y="64" width="28" height="12" rx="3" fill="#6c4dfc"/>
       <rect x="124" y="64" width="28" height="12" rx="3" fill="#6c4dfc"/>
-      <!-- мотор сверху -->
       <rect x="70" y="6" width="40" height="26" rx="5" fill="#6c4dfc"/>
-      <!-- рёбра охлаждения -->
-      <g stroke="#222">
-        <line x1="76" x2="104" y1="12" y2="12"/>
-        <line x1="76" x2="104" y1="18" y2="18"/>
-        <line x1="76" x2="104" y1="24" y2="24"/>
-      </g>
-      <!-- вал -->
+      <g stroke="#222"><line x1="76" x2="104" y1="12" y2="12"/><line x1="76" x2="104" y1="18" y2="18"/><line x1="76" x2="104" y1="24" y2="24"/></g>
       <line x1="90" y1="32" x2="90" y2="6" />
-      <!-- крепёж -->
-      <circle cx="18"  cy="70" r="2" fill="#111"/>
-      <circle cx="162" cy="70" r="2" fill="#111"/>
+      <circle cx="18"  cy="70" r="2" fill="#111"/><circle cx="162" cy="70" r="2" fill="#111"/>
     </g>
   </svg>`,
   VALVE:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180">
@@ -242,7 +224,7 @@ function redraw(){
   // арматура
   for(const st of stamps) drawStamp(st);
 
-  // маркер 1-й точки
+  // маркер 1-й точки (экрано-зависимый размер оставил как было, чтобы было видно на любом зуме)
   if(mode==='pickB' && tempA){
     ctx.save();
     const r1 = 7/scale, r2 = 12/scale;
@@ -253,17 +235,17 @@ function redraw(){
     ctx.restore();
   }
 
-  // превью ко 2-й точке
+  // превью ко 2-й точке — теперь масштабируется вместе с полотном (без /scale)
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
-    ctx.setLineDash([10/scale, 10/scale]);
-    ctx.lineWidth = Math.max(2, pipeD/4)/scale;
+    ctx.setLineDash([10, 10]); // штрих масштабируется
+    ctx.lineWidth = Math.max(2, pipeD/4);
     ctx.strokeStyle = '#7cf';
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
     ctx.setLineDash([]); ctx.restore();
   }
 
-  // подсветка магнита
+  // подсветка магнита (экрано-зависимой оставляем)
   if(snapTarget){
     const r = 10/scale;
     ctx.save(); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2/scale;
@@ -287,29 +269,32 @@ function drawGrid(){
   for(let x=-extent;x<=extent;x+=step){ ctx.moveTo(x,-extent); ctx.lineTo(x,extent); }
   for(let y=-extent;y<=extent;y+=step){ ctx.moveTo(-extent,y); ctx.lineTo(extent,y); }
   ctx.stroke();
-  // оси слегка подсветить
+  // оси
   ctx.strokeStyle='rgba(255,120,120,.35)'; ctx.beginPath(); ctx.moveTo(-extent,0); ctx.lineTo(extent,0); ctx.stroke();
   ctx.strokeStyle='rgba(120,170,255,.35)'; ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
   ctx.restore();
 }
 function drawPipe(s){
   const w = Math.max(2, s.d/4);
-  ctx.save(); ctx.lineWidth=w/scale; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
+  ctx.save();
+  ctx.lineWidth = w;                 // ← БЕЗ деления на scale: толщина масштабируется вместе с фото
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-  const r=(w/2)/scale; ctx.fillStyle='#4da1ff';
+  const r = (w/2);                   // ← тоже в мировых единицах, чтобы масштабировалось
+  ctx.fillStyle='#4da1ff';
   for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill(); }
   ctx.restore();
 }
 function drawStamp(st){
   const img = ICONS_IMG[st.type]; if(!img || !img.complete) return;
-  const targetH = Math.max(60, 4*pipeD);
+  // базовая высота и небольшой буст для вентиля
+  const baseH = Math.max(60, 4*pipeD);
+  const typeMul = (st.type==='VALVE') ? 1.25 : 1.0; // вентиль чуть крупнее
+  const targetH = baseH * typeMul;
   const k = targetH / img.naturalHeight * (st.s||1);
   const w = img.naturalWidth * k, h = img.naturalHeight * k;
-  ctx.save();
-  ctx.translate(st.x, st.y);
-  if(st.ang) ctx.rotate(st.ang);
-  ctx.drawImage(img, -w/2, -h/2, w, h);
-  ctx.restore();
+  ctx.save(); ctx.translate(st.x, st.y); if(st.ang) ctx.rotate(st.ang);
+  ctx.drawImage(img, -w/2, -h/2, w, h); ctx.restore();
 }
 
 // ---------- Магнит и геометрия ----------
@@ -327,7 +312,6 @@ function applySnap(w){
   if(best){ snapTarget = best; return {x:best.x, y:best.y}; }
   return w;
 }
-// ближайшая точка на любом сегменте и угол сегмента
 function nearestOnPipe(w){
   let bestP=null, bestAng=0, bestD=Infinity;
   for(const s of pipes){
@@ -339,7 +323,7 @@ function nearestOnPipe(w){
     const d=Math.hypot(w.x-px,w.y-py);
     if(d<bestD){ bestD=d; bestP={x:px,y:py}; bestAng=Math.atan2(by-ay,bx-ax); }
   }
-  const allowDist = 24/scale; // ставим только если близко к трубе
+  const allowDist = 24/scale;
   return (bestP && bestD<=allowDist) ? {ok:true, x:bestP.x, y:bestP.y, ang:bestAng} : {ok:false};
 }
 
@@ -517,7 +501,6 @@ function placeStampAt(sx,sy){
   const near = nearestOnPipe(w);
   if(!near.ok){ setToast('Поставьте по трубе'); return; }
   stamps.push({type:stampType, x:near.x, y:near.y, s:1, ang:near.ang});
-  // Сразу выключаем штамп
   stampType = null;
   compButtons.forEach(x=>x.classList.remove('active'));
   setMode('pan');
@@ -603,10 +586,10 @@ function zoomAt(sx,sy,zoom){
   const after = screenToWorld(sx,sy);
   offX += before.x - after.x;
   offY += before.y - after.y;
-  showEditBar(mode==='edit'); // не прячем панель выравнивания
+  showEditBar(mode==='edit');
 }
 
-// Блок double-tap zoom на ПАНЕЛИ КНОПОК
+// Блок double-tap zoom на панели
 const toolbar = document.querySelector('.toolbar');
 let lastTouchEnd = 0;
 toolbar.addEventListener('touchend', (e) => {
