@@ -37,7 +37,7 @@
   <div class="toolbar">
     <button id="lineBtn" class="btn">Линия</button>
     <button id="panBtn"  class="btn active">Перемещение</button>
-    <button id="undoBtn"   class="btn">Назад</button>
+    <button id="undoBtn" class="btn">Стереть</button>
     <button id="centerBtn" class="btn">Центр</button>
     <button id="zoomOutBtn" class="btn">–</button>
     <button id="zoomInBtn"  class="btn">+</button>
@@ -45,6 +45,7 @@
     <button id="settingsBtn" class="btn">Настройки</button>
   </div>
 
+  <!-- мини-панель правки конца -->
   <div id="editBar" class="editbar">
     <button id="alignH" class="mini">H</button>
     <button id="alignV" class="mini">V</button>
@@ -64,6 +65,7 @@
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
       <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
       <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
+      <div class="row"><label>Масштаб фото</label><input id="bgScale" type="range" min="10" max="200" step="5" value="100"><span id="bgScaleV">100%</span></div>
 
       <div class="row-col">
         <div style="font-weight:700;margin-bottom:4px">Арматура (штамп)</div>
@@ -101,6 +103,7 @@ const diam = document.getElementById('diam'); const diamV = document.getElementB
 const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
 const magnet = document.getElementById('magnet');
 const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
+const bgScale = document.getElementById('bgScale'); const bgScaleV = document.getElementById('bgScaleV');
 
 const editBar = document.getElementById('editBar');
 const alignH = document.getElementById('alignH');
@@ -131,6 +134,7 @@ let stampType = null;
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
 let bgImg = null;
+let bgScaleF = 1; // масштаб фото
 
 function fit(){
   const r = cv.getBoundingClientRect();
@@ -139,7 +143,7 @@ function fit(){
   dpr = window.devicePixelRatio || 1;
   cv.width  = Math.round(cssW * dpr);
   cv.height = Math.round(cssH * dpr);
-  center();
+  redraw();
 }
 function center(){
   offX = 0; offY = 0; scale = 1;
@@ -157,7 +161,7 @@ function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cs
 function setToast(t){ toast.textContent = t; }
 function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
-// ---------- SVG → Image ----------
+// ---------- SVG → Image (иконки арматуры) ----------
 function svgToImg(svg){ const img=new Image(); img.decoding='async'; img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg); return img; }
 const ICONS_SVG = {
   BALL:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
@@ -190,13 +194,25 @@ const ICONS_IMG = {}; for(const k of Object.keys(ICONS_SVG)) ICONS_IMG[k]=svgToI
 // ---------- Рендер ----------
 function redraw(){
   ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
+  // очистка
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
 
-  if(bgImg){ const w = bgImg.naturalWidth, h = bgImg.naturalHeight; ctx.drawImage(bgImg, -w/2, -h/2); }
+  // фон-фото
+  if(bgImg){
+    const w = bgImg.naturalWidth*bgScaleF, h = bgImg.naturalHeight*bgScaleF;
+    ctx.drawImage(bgImg, -w/2, -h/2, w, h);
+  }
+
+  // сетка
   drawGrid();
+
+  // трубы
   for(const s of pipes) drawPipe(s);
+
+  // арматура
   for(const st of stamps) drawStamp(st);
 
+  // маркер 1-й точки
   if(mode==='pickB' && tempA){
     ctx.save();
     const r1 = 7/scale, r2 = 12/scale;
@@ -206,6 +222,8 @@ function redraw(){
     ctx.beginPath(); ctx.arc(tempA.x,tempA.y,r2,0,Math.PI*2); ctx.stroke();
     ctx.restore();
   }
+
+  // превью ко 2-й точке
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
     ctx.setLineDash([10/scale, 10/scale]);
@@ -214,11 +232,15 @@ function redraw(){
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
     ctx.setLineDash([]); ctx.restore();
   }
+
+  // подсветка магнита
   if(snapTarget){
     const r = 10/scale;
     ctx.save(); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2/scale;
     ctx.beginPath(); ctx.arc(snapTarget.x, snapTarget.y, r, 0, Math.PI*2); ctx.stroke(); ctx.restore();
   }
+
+  // подсветка редактируемого конца
   if(mode==='edit' && editing){
     const seg = pipes[editing.i];
     const p = editing.end==='a' ? seg.a : seg.b;
@@ -235,6 +257,7 @@ function drawGrid(){
   for(let x=-extent;x<=extent;x+=step){ ctx.moveTo(x,-extent); ctx.lineTo(x,extent); }
   for(let y=-extent;y<=extent;y+=step){ ctx.moveTo(-extent,y); ctx.lineTo(extent,y); }
   ctx.stroke();
+  // оси слегка подсветить
   ctx.strokeStyle='rgba(255,120,120,.35)'; ctx.beginPath(); ctx.moveTo(-extent,0); ctx.lineTo(extent,0); ctx.stroke();
   ctx.strokeStyle='rgba(120,170,255,.35)'; ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
   ctx.restore();
@@ -259,7 +282,7 @@ function drawStamp(st){
   ctx.restore();
 }
 
-// ---------- Магниты/геометрия ----------
+// ---------- Магнит и геометрия ----------
 function applySnap(w){
   snapTarget = null;
   if(!magnet.checked) return w;
@@ -274,7 +297,6 @@ function applySnap(w){
   if(best){ snapTarget = best; return {x:best.x, y:best.y}; }
   return w;
 }
-
 // ближайшая точка на любом сегменте и угол сегмента
 function nearestOnPipe(w){
   let bestP=null, bestAng=0, bestD=Infinity;
@@ -308,15 +330,16 @@ function setMode(newMode){
 lineBtn.onclick = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; setMode('pickA'); };
 panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; setMode('pan'); };
 
-undoBtn.onclick = ()=>{ if(stamps.length) stamps.pop(); else if(pipes.length) pipes.pop(); redraw(); setToast('Отменено'); };
+undoBtn.onclick = ()=>{ if(stamps.length) stamps.pop(); else if(pipes.length) pipes.pop(); redraw(); setToast('Стерто'); };
 centerBtn.onclick = center;
 saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
 settingsBtn.onclick = ()=> dlg.showModal();
-document.getElementById('dlgClose').onclick = ()=> dlg.close();
+dlgClose.onclick = ()=> dlg.close();
 
 diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
 grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
 bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
+bgScale.oninput = ()=>{ bgScaleF=bgScale.value/100; bgScaleV.textContent=bgScale.value+'%'; redraw(); };
 
 // выбор арматуры (штамп)
 compButtons.forEach(b=>{
@@ -358,6 +381,7 @@ stage.addEventListener('touchstart', (ev)=>{
     const sx = t.clientX - rect.left;
     const sy = t.clientY - rect.top;
 
+    // long-press для правки концов
     const wForHit = screenToWorld(sx, sy);
     const hit = hitEndpoint(wForHit);
     movedForLong = false;
@@ -463,7 +487,7 @@ function placeStampAt(sx,sy){
   const near = nearestOnPipe(w);
   if(!near.ok){ setToast('Поставьте по трубе'); return; }
   stamps.push({type:stampType, x:near.x, y:near.y, s:1, ang:near.ang});
-  // Сразу выключаем штамп, как просил
+  // Сразу выключаем штамп, как просили
   stampType = null;
   compButtons.forEach(x=>x.classList.remove('active'));
   setMode('pan');
@@ -488,6 +512,7 @@ function onTap(e){
   }
 }
 
+// Поиск ближайшего конца (для правки)
 function hitEndpoint(w){
   const thr = 14/scale;
   for(let i=0;i<pipes.length;i++){
@@ -497,6 +522,8 @@ function hitEndpoint(w){
   }
   return null;
 }
+
+// превью второй точки
 function updateHoverFromPointer(pt){
   const rect=cv.getBoundingClientRect();
   const sx=pt.clientX-rect.left, sy=pt.clientY-rect.top;
@@ -504,7 +531,7 @@ function updateHoverFromPointer(pt){
   redraw();
 }
 
-// Выравнивание концов
+// выравнивания при правке
 alignH.onclick = ()=>{
   if(!(mode==='edit' && editing)) return;
   const seg = pipes[editing.i];
@@ -522,7 +549,7 @@ alignV.onclick = ()=>{
 editDone.onclick = ()=>{ cancelEdit(); setMode('pan'); redraw(); };
 function cancelEdit(){ editing=null; showEditBar(false); }
 
-// Пинч/пан
+// пинч-зуум + сдвиг двумя пальцами
 function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
 function pinchPan(ts){
   const now = copyTouches(ts); if(now.length<2||lastTouches.length<2) return;
@@ -546,10 +573,10 @@ function zoomAt(sx,sy,zoom){
   const after = screenToWorld(sx,sy);
   offX += before.x - after.x;
   offY += before.y - after.y;
-  showEditBar(mode==='edit');
+  showEditBar(mode==='edit'); // не прячем панель выравнивания
 }
 
-// Блок double-tap zoom по кнопкам
+// Блок double-tap zoom на ПАНЕЛИ КНОПОК
 const toolbar = document.querySelector('.toolbar');
 let lastTouchEnd = 0;
 toolbar.addEventListener('touchend', (e) => {
@@ -562,6 +589,7 @@ toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive:false 
 // init
 new ResizeObserver(()=>{ fit(); }).observe(stage);
 fit();
+center();
 })();
 </script>
 </body>
