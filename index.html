@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — линии + правка + арматура</title>
+<title>Трассировка труб — линии + арматура</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -14,31 +14,30 @@
   .stage{width:95vw;height:calc(95vh - 64px);border:1px solid rgba(255,255,255,.15);border-radius:10px;position:relative;background:#0f1116;overflow:hidden;touch-action:none}
   canvas{position:absolute;inset:0;width:100%;height:100%}
   .toast{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#cfe9cd;padding:8px 12px;border-radius:10px;font-size:14px}
-  dialog{border:0;border-radius:14px;background:#1b1e27;color:#fff;width:min(92vw,420px)}
+  dialog{border:0;border-radius:14px;background:#1b1e27;color:#fff;width:min(92vw,440px)}
   .dlg-head{padding:14px 16px;font-weight:700}
   .dlg-body{padding:0 16px 16px}
   .row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0}
+  .row-col{display:flex;flex-direction:column;gap:10px;margin:10px 0}
+  .grid-btns{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .chip{background:#2b2f3a;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:10px;text-align:center}
+  .chip.active{background:var(--ui)}
   .dlg-actions{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px 16px}
   input[type="range"]{width:180px}
   label.switch{display:flex;align-items:center;gap:12px}
-  .editbar{
-    position:fixed; left:50%; top:56px; transform:translateX(-50%);
-    display:none; gap:8px; z-index:6;
-    background:#1b1e27; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,.15);
-  }
+  .editbar{position:fixed; left:50%; top:56px; transform:translateX(-50%); display:none; gap:8px; z-index:6;
+    background:#1b1e27; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,.15);}
   .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
   .editbar .mini:active{transform:translateY(1px)}
-  .toolbar,.btn{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  .toolbar, .btn, .zbtn { touch-action: manipulation; }
+  *{ -webkit-tap-highlight-color:transparent; }
 </style>
 </head>
 <body>
   <div class="toolbar">
     <button id="lineBtn" class="btn">Линия</button>
-    <button id="valveBtn" class="btn">Кран</button>
-    <button id="checkBtn" class="btn">Клапан</button>
-    <button id="pumpBtn"  class="btn">Насос</button>
-    <button id="undoBtn" class="btn">Назад</button>
     <button id="panBtn"  class="btn active">Перемещение</button>
+    <button id="undoBtn"   class="btn">Назад</button>
     <button id="centerBtn" class="btn">Центр</button>
     <button id="zoomOutBtn" class="btn">–</button>
     <button id="zoomInBtn"  class="btn">+</button>
@@ -46,6 +45,7 @@
     <button id="settingsBtn" class="btn">Настройки</button>
   </div>
 
+  <!-- мини-панель правки конца -->
   <div id="editBar" class="editbar">
     <button id="alignH" class="mini">H</button>
     <button id="alignV" class="mini">V</button>
@@ -63,9 +63,19 @@
     <div class="dlg-body">
       <div class="row"><label>Ø (мм)</label><input id="diam" type="range" min="10" max="300" step="2" value="60"><span id="diamV">60</span></div>
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
-      <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам линии)</label></div>
-      <div class="row"><label>Масштаб толщины</label><input id="thickAlpha" type="range" min="0" max="100" value="65"><span id="thickAlphaV">65%</span></div>
+      <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
       <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
+
+      <div class="row-col">
+        <div style="font-weight:700;margin-bottom:4px">Арматура (штамп)</div>
+        <div class="grid-btns">
+          <button class="chip" data-comp="BALL">Шаровой кран</button>
+          <button class="chip" data-comp="CHECK">Обратный клапан</button>
+          <button class="chip" data-comp="PUMP">Насос</button>
+          <button class="chip" data-comp="VALVE">Вентиль</button>
+        </div>
+        <small style="opacity:.8">Нажми на элемент, затем закрой окно — и поставь его одним тапом на холст. Для выхода из режима штампа включи «Перемещение» или «Линия».</small>
+      </div>
     </div>
     <div class="dlg-actions"><button id="dlgClose" class="btn">Закрыть</button></div>
   </dialog>
@@ -79,9 +89,6 @@ const ctx = cv.getContext('2d');
 const toast = document.getElementById('toast');
 
 const lineBtn = document.getElementById('lineBtn');
-const valveBtn= document.getElementById('valveBtn');
-const checkBtn= document.getElementById('checkBtn');
-const pumpBtn = document.getElementById('pumpBtn');
 const panBtn  = document.getElementById('panBtn');
 const undoBtn = document.getElementById('undoBtn');
 const centerBtn = document.getElementById('centerBtn');
@@ -94,7 +101,6 @@ const dlg = document.getElementById('dlg');
 const diam = document.getElementById('diam'); const diamV = document.getElementById('diamV');
 const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
 const magnet = document.getElementById('magnet');
-const thickAlpha = document.getElementById('thickAlpha'); const thickAlphaV = document.getElementById('thickAlphaV');
 const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
 
 const editBar = document.getElementById('editBar');
@@ -102,26 +108,28 @@ const alignH = document.getElementById('alignH');
 const alignV = document.getElementById('alignV');
 const editDone = document.getElementById('editDone');
 
+const compButtons = [...document.querySelectorAll('.chip[data-comp]')];
+
 // ---------- Сцена ----------
 let scale = 1, minScale=0.05, maxScale=6;
 let offX = 0, offY = 0;
 let gridStep = 40;
 let pipeD = 60;
-// «умный» коэффициент масштабирования толщины (0..1)
-let thicknessAlpha = 0.65; // 0 = старая модель, 1 = полностью как фото
 
 const pipes = [];
-const parts = [];
-
-let mode = 'pan';
-let placeKind = null;
+const stamps = []; // {type:'BALL'|'CHECK'|'PUMP'|'VALVE', x,y, s}
+let mode = 'pan'; // 'pan' | 'pickA' | 'pickB' | 'edit' | 'stamp'
 let tempA = null;
 let hoverW = null;
 let snapTarget = null;
 
+// правка конца
 let editing = null;
 let longPressTimer = null;
 let movedForLong = false;
+
+// штамп арматуры
+let stampType = null;
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
@@ -134,14 +142,16 @@ function fit(){
   dpr = window.devicePixelRatio || 1;
   cv.width  = Math.round(cssW * dpr);
   cv.height = Math.round(cssH * dpr);
-  redraw();
+  center();
 }
-new ResizeObserver(()=>fit()).observe(stage);
-
 function center(){
   offX = 0; offY = 0; scale = 1;
   redraw();
-  setToast(mode==='pan'?'Режим: перемещение':mode==='edit'?'Правка конца':'Режим: линия');
+  setToast(
+    mode==='pan' ? 'Режим: перемещение'
+    : mode==='stamp'? 'Режим: штамп арматуры'
+    : mode==='edit' ? 'Правка конца' : 'Режим: линия'
+  );
 }
 
 function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2}; }
@@ -150,33 +160,53 @@ function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cs
 function setToast(t){ toast.textContent = t; }
 function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
-function setMode(newMode){
-  mode = newMode;
-  lineBtn.classList.toggle('active', mode==='pickA' || mode==='pickB');
-  panBtn.classList.toggle('active',  mode==='pan');
-  valveBtn.classList.toggle('active', mode==='place' && placeKind==='valve');
-  checkBtn.classList.toggle('active', mode==='place' && placeKind==='check');
-  pumpBtn.classList.toggle('active',  mode==='place' && placeKind==='pump');
-  showEditBar(mode==='edit');
-  setToast(
-    mode==='pan' ? 'Режим: перемещение'
-    : mode==='edit'? 'Правка конца (двигай пальцем, либо H/V)'
-    : mode==='pickA'? 'Линия: поставь точку 1'
-    : mode==='pickB'? 'Линия: поставь точку 2'
-    : 'Поставь арматуру на трубу'
-  );
+// ---------- SVG иконки → Image ----------
+function svgToImg(svg){
+  const img=new Image(); img.decoding='async';
+  img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg);
+  return img;
 }
+const ICONS_SVG = {
+  BALL:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
+    <rect x="20" y="40" width="100" height="20" rx="6" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <circle cx="70" cy="50" r="12" fill="#fff" stroke="#000" stroke-width="3"/>
+    <rect x="60" y="10" width="20" height="20" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <line x1="70" y1="10" x2="70" y2="0" stroke="#000" stroke-width="4"/>
+  </svg>`,
+  CHECK:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
+    <circle cx="70" cy="50" r="30" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <defs><marker id="a" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+      <path d="M0,0 L0,8 L12,4 Z" fill="#fff"/></marker></defs>
+    <line x1="40" y1="50" x2="98" y2="50" stroke="#fff" stroke-width="7" marker-end="url(#a)"/>
+  </svg>`,
+  PUMP:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120">
+    <circle cx="70" cy="60" r="35" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <rect x="20" y="35" width="30" height="50" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <line x1="70" y1="60" x2="105" y2="60" stroke="#000" stroke-width="4"/>
+  </svg>`,
+  VALVE:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180">
+    <rect x="40" y="40" width="40" height="100" rx="10" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <circle cx="60" cy="90" r="18" fill="#fff" stroke="#000" stroke-width="3"/>
+    <circle cx="60" cy="90" r="8" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <rect x="50" y="5" width="20" height="30" rx="3" fill="#6c4dfc" stroke="#000" stroke-width="3"/>
+    <line x1="60" y1="35" x2="60" y2="40" stroke="#000" stroke-width="4"/>
+  </svg>`
+};
+const ICONS_IMG = {};
+for(const k of Object.keys(ICONS_SVG)) ICONS_IMG[k]=svgToImg(ICONS_SVG[k]);
 
 // ---------- Рендер ----------
 function redraw(){
   ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
 
-  if(bgImg){ const w=bgImg.naturalWidth,h=bgImg.naturalHeight; ctx.drawImage(bgImg,-w/2,-h/2); }
+  if(bgImg){
+    const w = bgImg.naturalWidth, h = bgImg.naturalHeight;
+    ctx.drawImage(bgImg, -w/2, -h/2);
+  }
   drawGrid();
-
   for(const s of pipes) drawPipe(s);
-  for(const p of parts) drawPart(p);
+  for(const st of stamps) drawStamp(st);
 
   if(mode==='pickB' && tempA){
     ctx.save();
@@ -190,31 +220,22 @@ function redraw(){
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
     ctx.setLineDash([10/scale, 10/scale]);
-    const wpx = Math.max(2, pipeD/4);
-    const k   = Math.pow(scale, thicknessAlpha);     // << ключ
-    ctx.lineWidth = (wpx/scale)*k;
+    ctx.lineWidth = Math.max(2, pipeD/4)/scale;
     ctx.strokeStyle = '#7cf';
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
+    ctx.setLineDash([]); ctx.restore();
   }
   if(snapTarget){
     const r = 10/scale;
-    ctx.save();
-    ctx.strokeStyle = '#ffd166';
-    ctx.lineWidth = 2/scale;
-    ctx.beginPath(); ctx.arc(snapTarget.x, snapTarget.y, r, 0, Math.PI*2); ctx.stroke();
-    ctx.restore();
+    ctx.save(); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2/scale;
+    ctx.beginPath(); ctx.arc(snapTarget.x, snapTarget.y, r, 0, Math.PI*2); ctx.stroke(); ctx.restore();
   }
   if(mode==='edit' && editing){
     const seg = pipes[editing.i];
     const p = editing.end==='a' ? seg.a : seg.b;
     const r = 12/scale;
-    ctx.save();
-    ctx.strokeStyle = '#ffe08a';
-    ctx.lineWidth = 3/scale;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.stroke();
-    ctx.restore();
+    ctx.save(); ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 3/scale;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.stroke(); ctx.restore();
   }
 }
 function drawGrid(){
@@ -229,100 +250,100 @@ function drawGrid(){
   ctx.strokeStyle='rgba(120,170,255,.35)'; ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
   ctx.restore();
 }
-
-/* ===== КЛЮЧЕВАЯ ПРАВКА ТОЛЩИНЫ ТРУБЫ =====
-   lineWidth на экране = (база/scale) * scale^alpha
-   alpha∈[0..1]: 0 — «почти фиксированная на экране»,
-                 1 — полностью как фото */
 function drawPipe(s){
-  const base = Math.max(2, s.d/4);         // «диаметр-как-раньше» в px
-  const k    = Math.pow(scale, thicknessAlpha);
-  const wScr = (base/scale) * k;            // итоговая толщина на экране
-  const rCap = (wScr/2);                    // радиус заглушек тоже по новой модели
-
-  ctx.save();
-  ctx.lineWidth=wScr; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#2f8cff';
+  const w = Math.max(2, s.d/4);
+  ctx.save(); ctx.lineWidth=w/scale; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-
-  ctx.fillStyle='#2f8cff';
-  const drawCap=(p)=>{ ctx.beginPath(); ctx.arc(p.x,p.y,rCap/scale,0,Math.PI*2); ctx.fill(); };
-  drawCap(s.a); drawCap(s.b);
+  const r=(w/2)/scale; ctx.fillStyle='#4da1ff';
+  for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill(); }
   ctx.restore();
 }
-
-// ---------- Арматура ----------
-function drawPart(p){
+function drawStamp(st){
+  const img = ICONS_IMG[st.type]; if(!img || !img.complete) return;
+  // Базовый размер связал с диаметром трубы: высота ≈ 4*d
+  const targetH = Math.max(60, 4*pipeD);
+  const k = targetH / img.naturalHeight * st.s; // ст.s — индивидуальное масштабирование (1 по умолчанию)
+  const w = img.naturalWidth * k, h = img.naturalHeight * k;
   ctx.save();
-  ctx.translate(p.x,p.y); ctx.rotate(p.ang||0);
-  ctx.lineWidth=2/scale; ctx.strokeStyle='#16181f'; ctx.fillStyle='#6a4cf2';
-
-  if(p.kind==='valve'){
-    poly([[-20,-28],[20,-10],[20,10],[-20,28]]);
-    rect(-10,-38,20,10); rect(-10, 28,20,10);
-    ctx.fillStyle='#eee'; circle(0,0,10); ctx.fillStyle='#6a4cf2';
-    rect(-34,-3,24,6); label('BALL',16,0);
-  } else if(p.kind==='check'){
-    rect(-8,-26,16,12); rect(-8,14,16,12);
-    circle(0,0,22);
-    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(-6,-4); ctx.lineTo(8,0); ctx.lineTo(-6,4); ctx.closePath(); ctx.fill();
-    label('CHECK',18,-10);
-  } else if(p.kind==='pump'){
-    circle(0,0,32); rect(-18,-42,36,18); rect(-12,28,24,14); label('PUMP',22,-8);
-  }
+  ctx.translate(st.x, st.y);
+  ctx.drawImage(img, -w/2, -h/2, w, h);
   ctx.restore();
-  function rect(x,y,w,h){ ctx.beginPath(); ctx.rect(x,y,w,h); ctx.fill(); ctx.stroke(); }
-  function circle(x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
-  function poly(pts){ ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); ctx.fill(); ctx.stroke(); }
-  function label(t,dx,dy){
-    ctx.save(); ctx.translate(dx||0,dy||0); ctx.rotate(-p.ang);
-    const fs=12/scale; ctx.font=`${fs}px system-ui,Arial`; const pad=6/scale;
-    const m=ctx.measureText(t), w=m.width+pad*2, h=18/scale;
-    ctx.fillStyle='#fff'; ctx.strokeStyle='#111'; ctx.lineWidth=1/scale;
-    rr(0,-h/2,w,h,8/scale); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#000'; ctx.textBaseline='middle'; ctx.fillText(t,pad,0);
-    ctx.restore();
-  }
-  function rr(x,y,w,h,r){ ctx.beginPath();
-    ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-    ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-    ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-    ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
-  }
-}
-function snapToSegment(w){
-  if(pipes.length===0) return {p:w, ang:0, found:false};
-  let best=null, bestDist=Infinity, bestAng=0;
-  for(const s of pipes){
-    const ax=s.a.x, ay=s.a.y, bx=s.b.x, by=s.b.y;
-    const ABx=bx-ax, ABy=by-ay, APx=w.x-ax, APy=w.y-ay;
-    const ab2=ABx*ABx+ABy*ABy || 1e-6;
-    let t=(APx*ABx+APy*ABy)/ab2; t=Math.max(0,Math.min(1,t));
-    const px=ax+t*ABx, py=ay+t*ABy;
-    const d=Math.hypot(w.x-px,w.y-py);
-    if(d<bestDist){bestDist=d; best={x:px,y:py}; bestAng=Math.atan2(by-ay,bx-ax);}
-  }
-  const thr=20/scale;
-  return bestDist<=thr ? {p:best, ang:bestAng, found:true} : {p:w, ang:0, found:false};
 }
 
-// ---------- Магнит к концам линий ----------
-function applySnapToEndpoint(w){
-  snapTarget=null;
+// ---------- Магнит ----------
+function applySnap(w){
+  snapTarget = null;
   if(!magnet.checked) return w;
-  const thr = 18/scale;
+  const thresholdWorld = 18/scale; // ~18px
   let best=null, bestDist=Infinity;
   for(const seg of pipes){
     for(const p of [seg.a, seg.b]){
       const d = Math.hypot(w.x-p.x, w.y-p.y);
-      if(d<bestDist && d<=thr){ best=p; bestDist=d; }
+      if(d < bestDist && d <= thresholdWorld){ best = p; bestDist = d; }
     }
   }
-  if(best){ snapTarget=best; return {x:best.x,y:best.y}; }
+  if(best){ snapTarget = best; return {x:best.x, y:best.y}; }
   return w;
 }
 
+// ---------- Кнопки / режим ----------
+function setMode(newMode){
+  mode = newMode;
+  lineBtn.classList.toggle('active', mode==='pickA' || mode==='pickB');
+  panBtn.classList.toggle('active',  mode==='pan');
+  showEditBar(mode==='edit');
+  setToast(
+    mode==='pan'   ? 'Режим: перемещение'
+    : mode==='edit'? 'Правка конца (двигай пальцем, либо H/V)'
+    : mode==='stamp'? 'Режим: штамп арматуры'
+    : mode==='pickA'? 'Линия: поставь точку 1'
+    : 'Линия: поставь точку 2'
+  );
+}
+lineBtn.onclick = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; setMode('pickA'); };
+panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; setMode('pan'); };
+
+undoBtn.onclick = ()=>{ if(stamps.length) stamps.pop(); else pipes.pop(); redraw(); setToast('Отменено'); };
+centerBtn.onclick = center;
+saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
+settingsBtn.onclick = ()=> dlg.showModal();
+document.getElementById('dlgClose').onclick = ()=> dlg.close();
+
+diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
+grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
+bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
+
+// выбор арматуры (штамп)
+compButtons.forEach(b=>{
+  b.addEventListener('click', ()=>{
+    compButtons.forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    stampType = b.dataset.comp;
+    setMode('stamp');
+  });
+});
+
+// –/+ удержание
+let holdTimer=null, holdRAF=null;
+function startHold(fn){ stopHold(); fn(); holdTimer=setTimeout(function loop(){ fn(); holdRAF=requestAnimationFrame(loop); }, 140); }
+function stopHold(){ clearTimeout(holdTimer); cancelAnimationFrame(holdRAF); holdTimer=null; holdRAF=null; }
+zoomOutBtn.addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomButton(-1));},{passive:false});
+zoomOutBtn.addEventListener('mousedown',   ()=>startHold(()=>zoomButton(-1)));
+zoomInBtn .addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomButton(+1));},{passive:false});
+zoomInBtn .addEventListener('mousedown',   ()=>startHold(()=>zoomButton(+1)));
+['mouseleave','mouseup','touchend','touchcancel'].forEach(ev=>{
+  zoomOutBtn.addEventListener(ev, stopHold); zoomInBtn.addEventListener(ev, stopHold);
+});
+function zoomButton(dir){
+  const rect=cv.getBoundingClientRect();
+  const cx=rect.width/2, cy=rect.height/2;
+  zoomAt(cx,cy, dir>0 ? 1.15 : 0.85);
+  redraw();
+}
+
 // ---------- Жесты ----------
-let lastTouches=[]; let fingerPanning=false, prevFinger={x:0,y:0};
+let lastTouches=[];
+let fingerPanning=false, prevFinger={x:0,y:0};
 
 stage.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
@@ -331,16 +352,28 @@ stage.addEventListener('touchstart', (ev)=>{
     const rect = cv.getBoundingClientRect();
     const sx = t.clientX - rect.left;
     const sy = t.clientY - rect.top;
-    const w = screenToWorld(sx, sy);
 
-    const hit = hitEndpoint(w);
-    movedForLong = false; clearTimeout(longPressTimer);
-    if(hit){ longPressTimer = setTimeout(()=>{ editing=hit; setMode('edit'); redraw(); }, 600); }
+    // long-press для правки концов трубы
+    const wForHit = screenToWorld(sx, sy);
+    const hit = hitEndpoint(wForHit);
+    movedForLong = false;
+    clearTimeout(longPressTimer);
+    if(hit){
+      longPressTimer = setTimeout(()=>{
+        editing = hit; setMode('edit'); redraw();
+      }, 600);
+    }
 
-    if(mode==='pan'){ fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY}; }
-    else if(mode==='pickA' || mode==='pickB' || mode==='place'){ onTap(sx,sy); }
+    if(mode==='pan'){
+      fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
+    }else if(mode==='stamp'){
+      placeStampAt(sx,sy);
+    }else if(mode==='pickA' || mode==='pickB'){
+      onTap({clientX:t.clientX, clientY:t.clientY});
+    }
   }else if(ev.touches.length===2){
-    fingerPanning=false; clearTimeout(longPressTimer);
+    fingerPanning=false;
+    clearTimeout(longPressTimer);
     lastTouches = copyTouches(ev.touches);
   }
 },{passive:false});
@@ -355,16 +388,17 @@ stage.addEventListener('touchmove', (ev)=>{
     if(!movedForLong) movedForLong = true, clearTimeout(longPressTimer);
 
     if(mode==='edit' && editing){
-      const w = applySnapToEndpoint(screenToWorld(sx,sy));
+      const w = applySnap(screenToWorld(sx,sy));
       const seg = pipes[editing.i];
       if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
       redraw();
     }else if(mode==='pan' && fingerPanning){
       const dx=t.clientX-prevFinger.x, dy=t.clientY-prevFinger.y;
       offX -= dx/scale; offY -= dy/scale;
-      prevFinger={x:t.clientX,y:t.clientY}; redraw();
+      prevFinger={x:t.clientX,y:t.clientY};
+      redraw();
     }else if(mode==='pickB' && tempA){
-      hoverW = applySnapToEndpoint(screenToWorld(sx,sy)); redraw();
+      updateHoverFromPointer({clientX:t.clientX, clientY:t.clientY});
     }
   }else if(ev.touches.length===2){
     clearTimeout(longPressTimer);
@@ -384,22 +418,25 @@ let dragging=false, prev={x:0,y:0};
 stage.addEventListener('mousedown', e=>{
   const rect = cv.getBoundingClientRect();
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  if(mode==='stamp'){ placeStampAt(sx,sy); return; }
+
   const w = screenToWorld(sx, sy);
   const hit = hitEndpoint(w);
   if(hit){ editing = hit; setMode('edit'); redraw(); return; }
-  if(mode!=='pan'){ onTap(sx,sy); return; }
+  if(mode!=='pan'){ onTap(e); return; }
   dragging=true; prev={x:e.clientX,y:e.clientY};
 });
 stage.addEventListener('mousemove', e=>{
   if(mode==='edit' && editing){
     const rect=cv.getBoundingClientRect();
     const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
-    const w=applySnapToEndpoint(screenToWorld(sx,sy));
+    const w=applySnap(screenToWorld(sx,sy));
     const seg=pipes[editing.i];
     if(editing.end==='a'){ seg.a.x=w.x; seg.a.y=w.y; } else { seg.b.x=w.x; seg.b.y=w.y; }
-    redraw(); return;
+    redraw();
+    return;
   }
-  if(mode==='pickB' && tempA){ const rect=cv.getBoundingClientRect(); const sx=e.clientX-rect.left, sy=e.clientY-rect.top; hoverW=applySnapToEndpoint(screenToWorld(sx,sy)); redraw(); return; }
+  if(mode==='pickB' && tempA){ updateHoverFromPointer(e); return; }
   if(!dragging) return;
   const dx=e.clientX-prev.x, dy=e.clientY-prev.y;
   offX -= dx/scale; offY -= dy/scale;
@@ -415,18 +452,25 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-// Тап (линия/арматура)
-function onTap(sx,sy){
-  const wRaw = screenToWorld(sx, sy);
-  if(mode==='place'){
-    const snap = snapToSegment(wRaw);
-    parts.push({kind:placeKind, x:snap.p.x, y:snap.p.y, ang:snap.ang});
-    placeKind=null; setMode('pan'); redraw(); return;
-  }
-  const w = applySnapToEndpoint(wRaw);
-  if(mode==='pickA'){ tempA=w; hoverW=null; setMode('pickB'); redraw(); }
-  else if(mode==='pickB' && tempA){
-    pipes.push({a:{...tempA}, b:w, d:pipeD});
+// Постановка штампа
+function placeStampAt(sx,sy){
+  const w = screenToWorld(sx,sy);
+  if(!stampType) return;
+  stamps.push({type:stampType, x:w.x, y:w.y, s:1});
+  redraw();
+}
+
+// Линия (3 шага)
+function onTap(e){
+  const rect = cv.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const wpos = applySnap(screenToWorld(sx, sy));
+
+  if(mode==='pickA'){
+    tempA = wpos; hoverW=null; setMode('pickB'); redraw();
+  }else if(mode==='pickB' && tempA){
+    pipes.push({a:{...tempA}, b:wpos, d:pipeD});
     tempA=null; hoverW=null; snapTarget=null;
     setMode('pan');
     setToast('Линия готова. Чтобы нарисовать новую, нажми «Линия».');
@@ -443,7 +487,14 @@ function hitEndpoint(w){
   }
   return null;
 }
+function updateHoverFromPointer(pt){
+  const rect=cv.getBoundingClientRect();
+  const sx=pt.clientX-rect.left, sy=pt.clientY-rect.top;
+  hoverW = applySnap(screenToWorld(sx,sy));
+  redraw();
+}
 
+// Выравнивание концов
 alignH.onclick = ()=>{
   if(!(mode==='edit' && editing)) return;
   const seg = pipes[editing.i];
@@ -458,21 +509,22 @@ alignV.onclick = ()=>{
   const mov   = editing.end==='a'? seg.a : seg.b;
   mov.x = fixed.x; snapTarget=null; redraw();
 };
-editDone.onclick = ()=>{ editing=null; setMode('pan'); redraw(); };
+editDone.onclick = ()=>{ cancelEdit(); setMode('pan'); redraw(); };
+function cancelEdit(){ editing=null; showEditBar(false); }
 
-// пинч-зум/перемещение
+// Пинч/пан
 function copyTouches(ts){ return [...ts].map(t=>({x:t.clientX,y:t.clientY})); }
 function pinchPan(ts){
   const now = copyTouches(ts); if(now.length<2||lastTouches.length<2) return;
-  const pd = Math.hypot(lastTouches[0].x-lastTouches[1].x, lastTouches[0].y-lastTouches[1].y);
-  const cd = Math.hypot(now[0].x-now[1].x, now[0].y-now[1].y);
-  const rect=cv.getBoundingClientRect();
+  const prevD = Math.hypot(lastTouches[0].x-lastTouches[1].x, lastTouches[0].y-lastTouches[1].y);
+  const currD = Math.hypot(now[0].x-now[1].x, now[0].y-now[1].y);
+  const rect = cv.getBoundingClientRect();
   const pcx=(lastTouches[0].x+lastTouches[1].x)/2 - rect.left;
   const pcy=(lastTouches[0].y+lastTouches[1].y)/2 - rect.top;
   const ncx=(now[0].x+now[1].x)/2 - rect.left;
   const ncy=(now[0].y+now[1].y)/2 - rect.top;
 
-  zoomAt(ncx, ncy, Math.pow(cd/pd, 1));
+  zoomAt(ncx, ncy, Math.pow(currD/prevD, 1));
   offX -= (ncx-pcx)/scale;
   offY -= (ncy-pcy)/scale;
 
@@ -487,43 +539,19 @@ function zoomAt(sx,sy,zoom){
   showEditBar(mode==='edit');
 }
 
-// Кнопки
-lineBtn.onclick = ()=>{ placeKind=null; tempA=null; hoverW=null; editing=null; setMode('pickA'); };
-valveBtn.onclick= ()=>{ placeKind='valve'; setMode('place'); };
-checkBtn.onclick= ()=>{ placeKind='check'; setMode('place'); };
-pumpBtn.onclick = ()=>{ placeKind='pump';  setMode('place'); };
-panBtn.onclick  = ()=>{ tempA=null; hoverW=null; editing=null; setMode('pan'); };
-undoBtn.onclick = ()=>{ if(parts.length) parts.pop(); else if(pipes.length) pipes.pop(); redraw(); };
-centerBtn.onclick = center;
-saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
-settingsBtn.onclick = ()=> dlg.showModal();
-dlgClose.onclick = ()=> dlg.close();
-
-diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
-grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
-thickAlpha.oninput = ()=>{ thicknessAlpha = (+thickAlpha.value)/100; thickAlphaV.textContent = thickAlpha.value+'%'; redraw(); };
-bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
-
-// –/+ удержание
-let holdTimer=null, holdRAF=null;
-function startHold(fn){ stopHold(); fn(); holdTimer=setTimeout(function loop(){ fn(); holdRAF=requestAnimationFrame(loop); }, 140); }
-function stopHold(){ clearTimeout(holdTimer); cancelAnimationFrame(holdRAF); holdTimer=null; holdRAF=null; }
-zoomOutBtn.addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomBtn(-1));},{passive:false});
-zoomOutBtn.addEventListener('mousedown',   ()=>startHold(()=>zoomBtn(-1)));
-zoomInBtn .addEventListener('touchstart', e=>{e.preventDefault(); startHold(()=>zoomBtn(+1));},{passive:false});
-zoomInBtn .addEventListener('mousedown',   ()=>startHold(()=>zoomBtn(+1)));
-['mouseleave','mouseup','touchend','touchcancel'].forEach(ev=>{
-  zoomOutBtn.addEventListener(ev, stopHold); zoomInBtn.addEventListener(ev, stopHold);
-});
-function zoomBtn(dir){ const r=cv.getBoundingClientRect(); zoomAt(r.width/2, r.height/2, dir>0?1.15:0.85); redraw(); }
-
-// блок двойного тапа по панели
-const toolbar=document.querySelector('.toolbar'); let lastTouchEnd=0;
-toolbar.addEventListener('touchend',(e)=>{const now=Date.now(); if(now-lastTouchEnd<=300) e.preventDefault(); lastTouchEnd=now;},{passive:false});
-toolbar.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});
+// Блок double-tap zoom по кнопкам
+const toolbar = document.querySelector('.toolbar');
+let lastTouchEnd = 0;
+toolbar.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive:false });
 
 // init
-fit(); center();
+new ResizeObserver(()=>{ fit(); }).observe(stage);
+fit();
 })();
 </script>
 </body>
