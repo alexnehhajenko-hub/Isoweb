@@ -21,7 +21,6 @@
   .dlg-actions{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px 16px}
   input[type="range"]{width:180px}
   label.switch{display:flex;align-items:center;gap:12px}
-  /* мини-панель правки */
   .editbar{
     position:fixed; left:50%; top:56px; transform:translateX(-50%);
     display:none; gap:8px; z-index:6;
@@ -29,7 +28,6 @@
   }
   .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
   .editbar .mini:active{transform:translateY(1px)}
-  /* защита от двойного зума на панели */
   .toolbar,.btn{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 </style>
 </head>
@@ -48,7 +46,6 @@
     <button id="settingsBtn" class="btn">Настройки</button>
   </div>
 
-  <!-- мини-панель правки конца -->
   <div id="editBar" class="editbar">
     <button id="alignH" class="mini">H</button>
     <button id="alignV" class="mini">V</button>
@@ -67,6 +64,7 @@
       <div class="row"><label>Ø (мм)</label><input id="diam" type="range" min="10" max="300" step="2" value="60"><span id="diamV">60</span></div>
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
       <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам линии)</label></div>
+      <div class="row"><label>Масштаб толщины</label><input id="thickAlpha" type="range" min="0" max="100" value="65"><span id="thickAlphaV">65%</span></div>
       <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
     </div>
     <div class="dlg-actions"><button id="dlgClose" class="btn">Закрыть</button></div>
@@ -96,6 +94,7 @@ const dlg = document.getElementById('dlg');
 const diam = document.getElementById('diam'); const diamV = document.getElementById('diamV');
 const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
 const magnet = document.getElementById('magnet');
+const thickAlpha = document.getElementById('thickAlpha'); const thickAlphaV = document.getElementById('thickAlphaV');
 const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
 
 const editBar = document.getElementById('editBar');
@@ -108,18 +107,19 @@ let scale = 1, minScale=0.05, maxScale=6;
 let offX = 0, offY = 0;
 let gridStep = 40;
 let pipeD = 60;
+// «умный» коэффициент масштабирования толщины (0..1)
+let thicknessAlpha = 0.65; // 0 = старая модель, 1 = полностью как фото
 
-const pipes = [];                 // линии
-const parts = [];                 // арматура {kind,x,y,ang}
+const pipes = [];
+const parts = [];
 
-let mode = 'pan';                 // 'pan'|'pickA'|'pickB'|'edit'|'place'
-let placeKind = null;             // 'valve'|'check'|'pump'
-let tempA = null;                 // первая точка
-let hoverW = null;                // превью второй точки
-let snapTarget = null;            // подсветка магнита
+let mode = 'pan';
+let placeKind = null;
+let tempA = null;
+let hoverW = null;
+let snapTarget = null;
 
-// правка конца
-let editing = null;               // {i,end:'a'|'b'}
+let editing = null;
 let longPressTimer = null;
 let movedForLong = false;
 
@@ -144,7 +144,6 @@ function center(){
   setToast(mode==='pan'?'Режим: перемещение':mode==='edit'?'Правка конца':'Режим: линия');
 }
 
-// координаты
 function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2}; }
 function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY}; }
 
@@ -179,7 +178,6 @@ function redraw(){
   for(const s of pipes) drawPipe(s);
   for(const p of parts) drawPart(p);
 
-  // первая точка
   if(mode==='pickB' && tempA){
     ctx.save();
     const r1 = 7/scale, r2 = 12/scale;
@@ -189,17 +187,17 @@ function redraw(){
     ctx.beginPath(); ctx.arc(tempA.x,tempA.y,r2,0,Math.PI*2); ctx.stroke();
     ctx.restore();
   }
-  // превью ко 2-й точке
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
     ctx.setLineDash([10/scale, 10/scale]);
-    ctx.lineWidth = Math.max(2, pipeD/4)/scale;
+    const wpx = Math.max(2, pipeD/4);
+    const k   = Math.pow(scale, thicknessAlpha);     // << ключ
+    ctx.lineWidth = (wpx/scale)*k;
     ctx.strokeStyle = '#7cf';
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
   }
-  // подсветка магнита
   if(snapTarget){
     const r = 10/scale;
     ctx.save();
@@ -208,7 +206,6 @@ function redraw(){
     ctx.beginPath(); ctx.arc(snapTarget.x, snapTarget.y, r, 0, Math.PI*2); ctx.stroke();
     ctx.restore();
   }
-  // подсветка редактируемого конца
   if(mode==='edit' && editing){
     const seg = pipes[editing.i];
     const p = editing.end==='a' ? seg.a : seg.b;
@@ -232,12 +229,24 @@ function drawGrid(){
   ctx.strokeStyle='rgba(120,170,255,.35)'; ctx.beginPath(); ctx.moveTo(0,-extent); ctx.lineTo(0,extent); ctx.stroke();
   ctx.restore();
 }
+
+/* ===== КЛЮЧЕВАЯ ПРАВКА ТОЛЩИНЫ ТРУБЫ =====
+   lineWidth на экране = (база/scale) * scale^alpha
+   alpha∈[0..1]: 0 — «почти фиксированная на экране»,
+                 1 — полностью как фото */
 function drawPipe(s){
-  const w = Math.max(2, s.d/4);
-  ctx.save(); ctx.lineWidth=w/scale; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#2f8cff';
+  const base = Math.max(2, s.d/4);         // «диаметр-как-раньше» в px
+  const k    = Math.pow(scale, thicknessAlpha);
+  const wScr = (base/scale) * k;            // итоговая толщина на экране
+  const rCap = (wScr/2);                    // радиус заглушек тоже по новой модели
+
+  ctx.save();
+  ctx.lineWidth=wScr; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#2f8cff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
-  const r=(w/2)/scale; ctx.fillStyle='#2f8cff';
-  for(const p of [s.a,s.b]){ ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill(); }
+
+  ctx.fillStyle='#2f8cff';
+  const drawCap=(p)=>{ ctx.beginPath(); ctx.arc(p.x,p.y,rCap/scale,0,Math.PI*2); ctx.fill(); };
+  drawCap(s.a); drawCap(s.b);
   ctx.restore();
 }
 
@@ -247,28 +256,20 @@ function drawPart(p){
   ctx.translate(p.x,p.y); ctx.rotate(p.ang||0);
   ctx.lineWidth=2/scale; ctx.strokeStyle='#16181f'; ctx.fillStyle='#6a4cf2';
 
-  if(p.kind==='valve'){         // кран
+  if(p.kind==='valve'){
     poly([[-20,-28],[20,-10],[20,10],[-20,28]]);
-    rect(-10,-38,20,10);
-    rect(-10, 28,20,10);
+    rect(-10,-38,20,10); rect(-10, 28,20,10);
     ctx.fillStyle='#eee'; circle(0,0,10); ctx.fillStyle='#6a4cf2';
-    rect(-34,-3,24,6);
-    label('BALL',16,0);
-  } else if(p.kind==='check'){  // обратный клапан
-    rect(-8,-26,16,12);
-    rect(-8, 14,16,12);
+    rect(-34,-3,24,6); label('BALL',16,0);
+  } else if(p.kind==='check'){
+    rect(-8,-26,16,12); rect(-8,14,16,12);
     circle(0,0,22);
-    ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.moveTo(-6,-4); ctx.lineTo(8,0); ctx.lineTo(-6,4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(-6,-4); ctx.lineTo(8,0); ctx.lineTo(-6,4); ctx.closePath(); ctx.fill();
     label('CHECK',18,-10);
-  } else if(p.kind==='pump'){   // насос
-    circle(0,0,32);
-    rect(-18,-42,36,18);
-    rect(-12, 28,24,14);
-    label('PUMP',22,-8);
+  } else if(p.kind==='pump'){
+    circle(0,0,32); rect(-18,-42,36,18); rect(-12,28,24,14); label('PUMP',22,-8);
   }
   ctx.restore();
-
   function rect(x,y,w,h){ ctx.beginPath(); ctx.rect(x,y,w,h); ctx.fill(); ctx.stroke(); }
   function circle(x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
   function poly(pts){ ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); ctx.fill(); ctx.stroke(); }
@@ -288,8 +289,6 @@ function drawPart(p){
     ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
   }
 }
-
-// привязка арматуры к ближайшему сегменту
 function snapToSegment(w){
   if(pipes.length===0) return {p:w, ang:0, found:false};
   let best=null, bestDist=Infinity, bestAng=0;
@@ -322,9 +321,8 @@ function applySnapToEndpoint(w){
   return w;
 }
 
-// ---------- События / жесты ----------
-let lastTouches=[];
-let fingerPanning=false, prevFinger={x:0,y:0};
+// ---------- Жесты ----------
+let lastTouches=[]; let fingerPanning=false, prevFinger={x:0,y:0};
 
 stage.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
@@ -335,12 +333,9 @@ stage.addEventListener('touchstart', (ev)=>{
     const sy = t.clientY - rect.top;
     const w = screenToWorld(sx, sy);
 
-    // long-press на конце трубы
     const hit = hitEndpoint(w);
     movedForLong = false; clearTimeout(longPressTimer);
-    if(hit){
-      longPressTimer = setTimeout(()=>{ editing=hit; setMode('edit'); redraw(); }, 600);
-    }
+    if(hit){ longPressTimer = setTimeout(()=>{ editing=hit; setMode('edit'); redraw(); }, 600); }
 
     if(mode==='pan'){ fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY}; }
     else if(mode==='pickA' || mode==='pickB' || mode==='place'){ onTap(sx,sy); }
@@ -420,7 +415,7 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-// 3 шага линии + постановка арматуры
+// Тап (линия/арматура)
 function onTap(sx,sy){
   const wRaw = screenToWorld(sx, sy);
   if(mode==='place'){
@@ -439,7 +434,6 @@ function onTap(sx,sy){
   }
 }
 
-// поиск ближайшего конца
 function hitEndpoint(w){
   const thr = 14/scale;
   for(let i=0;i<pipes.length;i++){
@@ -450,7 +444,6 @@ function hitEndpoint(w){
   return null;
 }
 
-// выравнивания при правке
 alignH.onclick = ()=>{
   if(!(mode==='edit' && editing)) return;
   const seg = pipes[editing.i];
@@ -508,6 +501,7 @@ dlgClose.onclick = ()=> dlg.close();
 
 diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
 grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
+thickAlpha.oninput = ()=>{ thicknessAlpha = (+thickAlpha.value)/100; thickAlphaV.textContent = thickAlpha.value+'%'; redraw(); };
 bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
 
 // –/+ удержание
