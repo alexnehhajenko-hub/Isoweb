@@ -1,20 +1,20 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <title>Трассировка труб — линии + арматура + подписи + склад</title>
 <style>
-  :root{--ui:#6c4dfc;--txt:#fff}
-  html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
+  :root{--ui:#6c4dfc;--txt:#fff;--bg:#0f1116}
+  html,body{height:100%;margin:0;background:var(--bg);color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
   .toolbar{position:fixed;left:12px;right:12px;top:10px;display:flex;gap:10px;justify-content:center;z-index:5;flex-wrap:wrap}
   .btn{background:#2b2f3a;color:var(--txt);border:0;border-radius:14px;padding:8px 14px;font-weight:600}
   .btn.active{background:var(--ui);box-shadow:0 6px 18px rgba(108,77,252,.25)}
   .wrap{position:fixed;inset:64px 10px 10px 10px;display:grid;place-items:center}
-  .stage{width:95vw;height:calc(95vh - 64px);border:1px solid rgba(255,255,255,.15);border-radius:10px;position:relative;background:#0f1116;overflow:hidden;touch-action:none}
+  .stage{width:95vw;height:calc(95vh - 64px);border:1px solid rgba(255,255,255,.15);border-radius:10px;position:relative;background:var(--bg);overflow:hidden;touch-action:none}
   canvas{position:absolute;inset:0;width:100%;height:100%}
-  .toast{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#cfe9cd;padding:8px 12px;border-radius:10px;font-size:14px}
-  dialog{border:0;border-radius:14px;background:#1b1e27;color:#fff;width:min(92vw,480px)}
+  .toast{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.6);color:#cfe9cd;padding:8px 12px;border-radius:10px;font-size:14px;z-index:6}
+  dialog{border:0;border-radius:14px;background:#1b1e27;color:#fff;width:min(92vw,520px)}
   .dlg-head{padding:14px 16px;font-weight:700}
   .dlg-body{padding:0 16px 16px}
   .row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0}
@@ -26,11 +26,24 @@
   input[type="range"]{width:180px}
   input[type="text"]{flex:1;min-width:140px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:#11141b;color:#fff;padding:8px 10px}
   label.switch{display:flex;align-items:center;gap:12px}
-  .editbar{position:fixed; left:50%; top:56px; transform:translateX(-50%); display:none; gap:8px; z-index:6;background:#1b1e27; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,.15);}
+  /* мини-панель */
+  .editbar{
+    position:fixed; left:50%; top:56px; transform:translateX(-50%);
+    display:none; gap:8px; z-index:6;
+    background:#1b1e27; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,.15);
+  }
   .editbar .mini{padding:8px 10px; border-radius:10px; background:#2b2f3a; color:#fff; border:0; font-weight:700}
   .editbar .mini:active{transform:translateY(1px)}
-  .toolbar, .btn, .zbtn { touch-action: manipulation; }
+
+  /* склад */
+  .parts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .part{display:flex;align-items:center;gap:10px;background:#202333;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px}
+  .part input[type="number"]{width:80px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:#11141b;color:#fff;padding:6px 8px}
+
+  /* UI: защита от double-tap zoom */
+  .toolbar, .toolbar .btn, .editbar, .editbar .mini, dialog, dialog .btn { touch-action: manipulation; }
   *{ -webkit-tap-highlight-color:transparent; }
+  html{ -webkit-text-size-adjust:100%; }
 </style>
 </head>
 <body>
@@ -43,7 +56,7 @@
     <button id="zoomInBtn"  class="btn">+</button>
     <button id="saveBtn"   class="btn">Сохранить</button>
     <button id="settingsBtn" class="btn">Настройки</button>
-    <button id="storeBtn" class="btn">Склад</button>
+    <button id="stockBtn" class="btn">Склад</button>
   </div>
 
   <div id="editBar" class="editbar">
@@ -68,8 +81,8 @@
     <div class="dlg-body">
       <div class="row"><label>Ø (мм)</label><input id="diam" type="range" min="10" max="300" step="2" value="60"><span id="diamV">60</span></div>
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
-      <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
       <div class="row"><label>Масштаб фото</label><input id="bgScale" type="range" min="10" max="200" step="5" value="100"><span id="bgScaleV">100%</span></div>
+      <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
       <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
 
       <div class="row-col">
@@ -80,13 +93,13 @@
           <button class="chip" data-comp="PUMP">Насос</button>
           <button class="chip" data-comp="VALVE">Вентиль</button>
         </div>
-        <small style="opacity:.8">Выбери элемент, закрой окно и тапни по трубе. После установки режим «штамп» выключится. Штамп можно перетаскивать вдоль трубы и масштабировать.</small>
+        <small style="opacity:.8">Выбери элемент, закрой окно и тапни по трубе. После установки режим «штамп» выключится. Элемент можно перетаскивать вдоль трубы и масштабировать A−/A+ или пинчем.</small>
       </div>
 
       <div class="row-col" style="margin-top:8px">
         <div style="font-weight:700;margin-bottom:4px">Подпись</div>
         <div class="row" style="gap:10px">
-          <input id="labelText" type="text" placeholder="Например: Ø32 ПП-R"/>
+          <input id="labelText" type="text" placeholder="Например: Ø32 ПП-R">
           <button id="labelPlaceBtn" class="btn">Поставить подпись</button>
         </div>
         <div class="row"><label>Размер подписей</label><input id="labelScale" type="range" min="60" max="200" step="5" value="100"><span id="labelScaleV">100%</span></div>
@@ -96,56 +109,44 @@
   </dialog>
 
   <!-- Склад -->
-  <dialog id="storeDlg">
-    <div class="dlg-head">Склад</div>
+  <dialog id="dlgStock">
+    <div class="dlg-head">Склад — выбрать типы соединений</div>
     <div class="dlg-body">
-      <div class="row">
-        <label>Система</label>
-        <div>
-          <button class="chip" data-sys="PRESS">Пресс</button>
-          <button class="chip" data-sys="THREAD">Резьба</button>
-          <button class="chip" data-sys="FLANGE">Фланцы</button>
-        </div>
-      </div>
-
-      <div class="row">
-        <label>Деталь</label>
-        <select id="storeItem"></select>
-      </div>
-
-      <div class="row">
-        <label>Размер</label>
-        <select id="storeSize"></select>
-      </div>
-
-      <div class="row" id="threadOptions" style="display:none">
-        <label>Резьба</label>
-        <select id="threadGender">
-          <option value="F">Внутренняя</option>
-          <option value="M">Наружная</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <button id="storePlace" class="btn">Поставить</button>
-      </div>
-
-      <hr style="opacity:.2;margin:10px 0">
-
       <div class="row-col">
-        <div style="font-weight:700">Итоги</div>
-        <div id="storeSummary" style="font-size:14px;opacity:.9">Пока пусто</div>
-        <div class="row">
-          <button id="storeClear" class="btn">Очистить</button>
-          <button id="storeCsv" class="btn">Экспорт CSV</button>
+        <div class="grid-btns">
+          <button class="chip" data-part="FLANGE">Фланец</button>
+          <button class="chip" data-part="THREAD_IN">Резьба внутр.</button>
+          <button class="chip" data-part="THREAD_OUT">Резьба нар.</button>
+          <button class="chip" data-part="PRESS">Пресс-обжим</button>
+          <button class="chip" data-part="REDUCER">Переход</button>
+          <button class="chip" data-part="ELBOW">Отвод</button>
+          <button class="chip" data-part="TEE">Тройник</button>
+          <button class="chip" data-part="CAP">Заглушка</button>
+        </div>
+        <small style="opacity:.8">Закрой окно, потом тапни по трубе — элемент станет «штампом склада». После установки режим выключится.</small>
+      </div>
+
+      <div class="row-col" style="margin-top:6px">
+        <div style="font-weight:700">Быстрый учет (ввод вручную):</div>
+        <div class="parts">
+          <div class="part"><span>Фланцы</span><input id="cntFlange" type="number" min="0" value="0"></div>
+          <div class="part"><span>Резьбы внутр.</span><input id="cntTin" type="number" min="0" value="0"></div>
+          <div class="part"><span>Резьбы нар.</span><input id="cntTout" type="number" min="0" value="0"></div>
+          <div class="part"><span>Пресс-обжим</span><input id="cntPress" type="number" min="0" value="0"></div>
+          <div class="part"><span>Переходы</span><input id="cntRed" type="number" min="0" value="0"></div>
+          <div class="part"><span>Отводы</span><input id="cntElb" type="number" min="0" value="0"></div>
+          <div class="part"><span>Тройники</span><input id="cntTee" type="number" min="0" value="0"></div>
+          <div class="part"><span>Заглушки</span><input id="cntCap" type="number" min="0" value="0"></div>
         </div>
       </div>
     </div>
-    <div class="dlg-actions"><button id="storeClose" class="btn">Закрыть</button></div>
+    <div class="dlg-actions">
+      <button id="stockClose" class="btn">Закрыть</button>
+    </div>
   </dialog>
 
 <script>
-(()=>{
+(()=>{ 'use strict';
 /* ===== DOM ===== */
 const stage = document.getElementById('stage');
 const cv = document.getElementById('cv');
@@ -160,14 +161,14 @@ const zoomOutBtn = document.getElementById('zoomOutBtn');
 const zoomInBtn  = document.getElementById('zoomInBtn');
 const saveBtn = document.getElementById('saveBtn');
 const settingsBtn = document.getElementById('settingsBtn');
+const stockBtn = document.getElementById('stockBtn');
 
 const dlg = document.getElementById('dlg');
 const diam = document.getElementById('diam'); const diamV = document.getElementById('diamV');
 const grid = document.getElementById('grid'); const gridV = document.getElementById('gridV');
 const magnet = document.getElementById('magnet');
-const bgScale = document.getElementById('bgScale'); const bgScaleV = document.getElementById('bgScaleV');
-const labelScale = document.getElementById('labelScale'); const labelScaleV = document.getElementById('labelScaleV');
 const bg = document.getElementById('bg'); const dlgClose = document.getElementById('dlgClose');
+const bgScale = document.getElementById('bgScale'); const bgScaleV = document.getElementById('bgScaleV');
 
 const editBar = document.getElementById('editBar');
 const alignH = document.getElementById('alignH');
@@ -179,21 +180,13 @@ const labelPlus  = document.getElementById('labelPlus');
 const editDone = document.getElementById('editDone');
 
 const compButtons = [...document.querySelectorAll('.chip[data-comp]')];
+
 const labelText = document.getElementById('labelText');
 const labelPlaceBtn = document.getElementById('labelPlaceBtn');
 
-/* Склад DOM */
-const storeBtn    = document.getElementById('storeBtn');
-const storeDlg    = document.getElementById('storeDlg');
-const storeClose  = document.getElementById('storeClose');
-const storeItem   = document.getElementById('storeItem');
-const storeSizeSel= document.getElementById('storeSize');
-const threadWrap  = document.getElementById('threadOptions');
-const threadGender= document.getElementById('threadGender');
-const storePlace  = document.getElementById('storePlace');
-const storeSummary= document.getElementById('storeSummary');
-const storeClear  = document.getElementById('storeClear');
-const storeCsv    = document.getElementById('storeCsv');
+const dlgStock = document.getElementById('dlgStock');
+const stockChips = [...dlgStock.querySelectorAll('.chip[data-part]')];
+const stockClose = document.getElementById('stockClose');
 
 /* ===== Сцена ===== */
 let scale = 1, minScale=0.05, maxScale=6;
@@ -202,51 +195,32 @@ let gridStep = 40;
 let pipeD = 60;
 
 const pipes = [];           // сегменты труб
-const stamps = [];          // [{type,x,y,s,ang}]
+const stamps = [];          // [{type,x,y,s,ang,kind:'COMP'|'PART'}]
 const labels = [];          // [{text,x,y,s,ang,dx,dy}]
-let mode = 'pan';           // 'pan'|'pickA'|'pickB'|'edit'|'stamp'|'label'|'stockPlace'
+let mode = 'pan';           // 'pan'|'pickA'|'pickB'|'edit'|'stamp'|'label'|'part'
 let tempA = null;
 let hoverW = null;
 let snapTarget = null;
 
-let editing = null;         // редактирование конца трубы
+let editing = null;         // {i,end:'a'|'b'}
 let longPressTimer = null;
 let movedForLong = false;
 
-let stampType = null;
+let stampType = null;       // арматура
+let partType = null;        // со склада
+
 let movingStampIndex = -1;
 let selectedStampIndex = -1;
-
 let movingLabelIndex = -1;
 let selectedLabelIndex = -1;
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
 let bgImg = null;
-let bgScaleF = 1;
+let bgScaleF = 1; // масштаб фото
 let labelScaleF = 1;
 
-/* ===== Склад: данные/состояние/итоги ===== */
-const COMPONENTS = [
-  { id:'pr_elbow90',  name:'Отвод 90°',   system:'PRESS',  sizes:['16','20','25','32','40','50'], icon:'VALVE', price:3.20 },
-  { id:'pr_elbow45',  name:'Отвод 45°',   system:'PRESS',  sizes:['16','20','25','32','40','50'], icon:'VALVE', price:3.10 },
-  { id:'pr_tee',      name:'Тройник',     system:'PRESS',  sizes:['16','20','25','32','40','50'], icon:'CHECK', price:4.80 },
-  { id:'pr_coupling', name:'Муфта',       system:'PRESS',  sizes:['16','20','25','32','40','50'], icon:'BALL',  price:2.10 },
-  { id:'pr_reducer',  name:'Переход',     system:'PRESS',  sizes:['25→20','32→25','40→32','50→40'], icon:'VALVE', price:3.90 },
-
-  { id:'th_nipple',   name:'Ниппель',     system:'THREAD', sizes:['1/2"','3/4"','1"','1 1/4"'], icon:'BALL',  price:1.70, thread:true },
-  { id:'th_coupling', name:'Муфта',       system:'THREAD', sizes:['1/2"','3/4"','1"','1 1/4"'], icon:'VALVE', price:1.60, thread:true },
-  { id:'th_cap',      name:'Заглушка',    system:'THREAD', sizes:['1/2"','3/4"','1"','1 1/4"'], icon:'CHECK', price:1.40, thread:true },
-
-  { id:'fl_plate',    name:'Фланец плоский', system:'FLANGE', sizes:['DN25','DN32','DN40','DN50'], icon:'PUMP', price:9.50 },
-  { id:'fl_weldneck', name:'Фланец воротн.',  system:'FLANGE', sizes:['DN25','DN32','DN40','DN50'], icon:'PUMP', price:12.80 },
-];
-let storeSystem = 'PRESS';
-let storeItemId = null;
-let storeSize = null;
-let stockPlaced = []; // [{id,name,system,size,gender?,price,x,y,ang,icon}]
-
-/* ===== Базовые функции ===== */
+/* ===== Инициализация полотна ===== */
 function fit(){
   const r = cv.getBoundingClientRect();
   cssW = Math.max(1, Math.round(r.width));
@@ -263,17 +237,18 @@ function center(){
     mode==='pan'   ? 'Режим: перемещение'
     : mode==='stamp'? 'Режим: штамп арматуры'
     : mode==='label'? 'Режим: подпись'
+    : mode==='part' ? 'Режим: склад (штамп)'
     : mode==='edit' ? 'Правка конца'
-    : mode==='stockPlace'? 'Склад: постановка'
     : 'Режим: линия'
   );
 }
+
 function worldToScreen(wx, wy){ return {x:(wx - offX) * scale + cssW/2, y:(wy - offY) * scale + cssH/2}; }
 function screenToWorld(sx, sy){ return {x:(sx - cssW/2)/scale + offX, y:(sy - cssH/2)/scale + offY}; }
 function setToast(t){ toast.textContent = t; }
 function showEditBar(show){ editBar.style.display = show ? 'flex' : 'none'; }
 
-/* ===== SVG → Image ===== */
+/* ===== SVG → Image (арматура) ===== */
 function svgToImg(svg){ const img=new Image(); img.decoding='async'; img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg); return img; }
 const ICONS_SVG = {
   BALL:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
@@ -313,17 +288,27 @@ const ICONS_IMG = {}; for(const k of Object.keys(ICONS_SVG)) ICONS_IMG[k]=svgToI
 /* ===== Рендер ===== */
 function redraw(){
   ctx.setTransform(scale*dpr, 0, 0, scale*dpr, (cssW/2 - offX*scale)*dpr, (cssH/2 - offY*scale)*dpr);
+  // очистка
   ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
 
+  // фон-фото
   if(bgImg){
     const w = bgImg.naturalWidth*bgScaleF, h = bgImg.naturalHeight*bgScaleF;
     ctx.drawImage(bgImg, -w/2, -h/2, w, h);
   }
+
   drawGrid();
+
+  // трубы
   for(const s of pipes) drawPipe(s);
+
+  // штампы
   for(const st of stamps) drawStamp(st);
+
+  // подписи
   for(const lb of labels) drawLabel(lb);
 
+  // маркеры/превью
   if(mode==='pickB' && tempA){
     ctx.save();
     const r1 = 7/scale, r2 = 12/scale;
@@ -335,7 +320,7 @@ function redraw(){
   }
   if(mode==='pickB' && tempA && hoverW){
     ctx.save();
-    ctx.setLineDash([10, 10]);
+    ctx.setLineDash([10,10]);
     ctx.lineWidth = Math.max(2, pipeD/4);
     ctx.strokeStyle = '#7cf';
     ctx.beginPath(); ctx.moveTo(tempA.x,tempA.y); ctx.lineTo(hoverW.x,hoverW.y); ctx.stroke();
@@ -369,7 +354,7 @@ function drawGrid(){
 function drawPipe(s){
   const w = Math.max(2, s.d/4);
   ctx.save();
-  ctx.lineWidth = w;                 // толщина масштабируется «реально»
+  ctx.lineWidth = w; // толщина масштабируется с фото/сценой
   ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
   const r = (w/2);
@@ -380,8 +365,8 @@ function drawPipe(s){
 function drawStamp(st){
   const img = ICONS_IMG[st.type]; if(!img || !img.complete) return;
   const baseH = Math.max(60, 4*pipeD);
-  const typeMul = (st.type==='VALVE') ? 1.25 : 1.0; // вентиль чуть крупнее
-  const targetH = baseH * typeMul * (st.s||1);
+  const typeMul = (st.type==='VALVE') ? 1.25 : 1.0;
+  const targetH = baseH * typeMul * (st.s || 1);
   const k = targetH / img.naturalHeight;
   const w = img.naturalWidth * k, h = img.naturalHeight * k;
   ctx.save(); ctx.translate(st.x, st.y); if(st.ang) ctx.rotate(st.ang);
@@ -472,6 +457,7 @@ function hitLabel(w){
 }
 
 /* ===== Режимы / кнопки ===== */
+function deselectAll(){ selectedStampIndex=-1; selectedLabelIndex=-1; showEditBar(mode==='edit'); }
 function setMode(newMode){
   mode = newMode;
   lineBtn.classList.toggle('active', mode==='pickA' || mode==='pickB');
@@ -479,16 +465,16 @@ function setMode(newMode){
   showEditBar(mode==='edit' || selectedStampIndex!==-1 || selectedLabelIndex!==-1);
   setToast(
     mode==='pan'   ? 'Режим: перемещение'
-    : mode==='edit'? 'Правка конца (двигай пальцем, либо H/V)'
+    : mode==='edit'? 'Правка конца'
     : mode==='stamp'? 'Режим: штамп арматуры'
     : mode==='label'? 'Режим: подпись'
-    : mode==='stockPlace'? 'Склад: постановка'
+    : mode==='part' ? 'Режим: склад (штамп)'
     : mode==='pickA'? 'Линия: поставь точку 1'
     : 'Линия: поставь точку 2'
   );
 }
-lineBtn.onclick = ()=>{ tempA=null; hoverW=null; cancelEdit(); deselectAll(); stampType=null; setMode('pickA'); };
-panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); deselectAll(); stampType=null; setMode('pan'); };
+lineBtn.onclick = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; partType=null; deselectAll(); setMode('pickA'); };
+panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; partType=null; deselectAll(); setMode('pan'); };
 
 undoBtn.onclick = ()=>{
   if(selectedLabelIndex!==-1){ labels.splice(selectedLabelIndex,1); selectedLabelIndex=-1; }
@@ -507,95 +493,35 @@ diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
 grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
 bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
 bgScale.oninput = ()=>{ bgScaleF=bgScale.value/100; bgScaleV.textContent=bgScale.value+'%'; redraw(); };
+
+const labelScale = document.getElementById('labelScale'); const labelScaleV = document.getElementById('labelScaleV');
 labelScale.oninput = ()=>{ labelScaleF = labelScale.value/100; labelScaleV.textContent = labelScale.value+'%'; redraw(); };
 
 compButtons.forEach(b=>{
   b.addEventListener('click', ()=>{
     compButtons.forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
-    stampType = b.dataset.comp;
+    stampType = b.dataset.comp; partType=null;
     setMode('stamp');
   });
 });
-labelPlaceBtn.onclick = ()=>{
-  if(!labelText.value.trim()){ setToast('Введи текст подписи'); return; }
-  setMode('label'); dlg.close();
-  setToast('Режим: подпись — тапни по трубе');
-};
 
-/* Склад — UI */
-storeBtn.onclick = ()=>{ storeDlg.showModal(); rebuildStoreLists(); updateStoreSummary(); };
-storeClose.onclick = ()=> storeDlg.close();
-[...storeDlg.querySelectorAll('[data-sys]')].forEach(b=>{
+stockBtn.onclick = ()=> dlgStock.showModal();
+stockChips.forEach(b=>{
   b.addEventListener('click', ()=>{
-    [...storeDlg.querySelectorAll('[data-sys]')].forEach(x=>x.classList.remove('active'));
+    stockChips.forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
-    storeSystem = b.dataset.sys;
-    rebuildStoreLists();
+    partType = b.dataset.part; stampType=null;
+    setMode('part'); dlgStock.close();
+    setToast('Режим: склад — тапни по трубе');
   });
 });
-threadGender.onchange = ()=>{}; // значение читаем при постановке
-function rebuildStoreLists(){
-  const items = COMPONENTS.filter(c=>c.system===storeSystem);
-  storeItem.innerHTML = items.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-  storeItemId = items.length? items[0].id : null;
-  const first = items.find(c=>c.id===storeItemId);
-  const sizes = first? first.sizes : [];
-  storeSizeSel.innerHTML = sizes.map(s=>`<option value="${s}">${s}</option>`).join('');
-  storeSize = sizes[0] || null;
-  threadWrap.style.display = (first && first.thread) ? '' : 'none';
-}
-storeItem.onchange = ()=>{
-  const item = COMPONENTS.find(c=>c.id===storeItem.value);
-  storeItemId = item?.id || null;
-  const sizes = item? item.sizes : [];
-  storeSizeSel.innerHTML = sizes.map(s=>`<option value="${s}">${s}</option>`).join('');
-  storeSize = sizes[0] || null;
-  threadWrap.style.display = item && item.thread ? '' : 'none';
+stockClose.onclick = ()=> dlgStock.close();
+
+labelPlaceBtn.onclick = ()=>{
+  if(!labelText.value.trim()){ setToast('Введи текст подписи'); return; }
+  setMode('label'); dlg.close(); setToast('Режим: подпись — тапни по трубе');
 };
-storeSizeSel.onchange = ()=>{ storeSize = storeSizeSel.value; };
-storePlace.onclick = ()=>{ storeDlg.close(); setMode('stockPlace'); setToast('Склад: тапни по трубе'); };
-storeClear.onclick = ()=>{ stockPlaced.length=0; redraw(); updateStoreSummary(); };
-storeCsv.onclick = ()=>{
-  if(!stockPlaced.length) return;
-  const map = new Map();
-  for(const s of stockPlaced){
-    const key=[s.id,s.size||'',s.gender||''].join('|');
-    const row = map.get(key)||{name:s.name,system:s.system,size:s.size,gender:s.gender,price:s.price,qty:0};
-    row.qty++; map.set(key,row);
-  }
-  const rows=[...map.values()];
-  const header = ['Позиция','Система','Размер','Резьба','Кол-во','Цена','Сумма'];
-  const csv = [header.join(';'), ...rows.map(r=>[
-    r.name,r.system,r.size||'',r.gender||'',r.qty,(r.price).toFixed(2),(r.price*r.qty).toFixed(2)
-  ].join(';'))].join('\n');
-  const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download='store_summary.csv'; a.click();
-};
-function updateStoreSummary(){
-  if(!stockPlaced.length){ storeSummary.textContent='Пока пусто'; return; }
-  const map = new Map();
-  for(const s of stockPlaced){
-    const key=[s.id,s.size||'',s.gender||''].join('|');
-    const row = map.get(key)||{name:s.name,size:s.size,gender:s.gender,price:s.price,qty:0};
-    row.qty++; map.set(key,row);
-  }
-  const rows=[...map.values()];
-  const html=[
-    '<div style="max-height:160px;overflow:auto;border:1px solid rgba(255,255,255,.1);border-radius:10px">',
-    '<table style="width:100%;border-collapse:collapse;font-size:14px">',
-    '<tr><th style="text-align:left;padding:6px">Позиция</th><th>Размер</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr>',
-    ...rows.map(r=>`<tr>
-      <td style="padding:6px">${r.name}${r.gender?` (${r.gender})`:''}</td>
-      <td style="text-align:center">${r.size||''}</td>
-      <td style="text-align:center">${r.qty}</td>
-      <td style="text-align:center">${r.price.toFixed(2)}</td>
-      <td style="text-align:center">${(r.price*r.qty).toFixed(2)}</td>
-    </tr>`),
-    '</table></div>',
-    `<div style="text-align:right;margin-top:6px">Итого: <b>${rows.reduce((s,r)=>s+r.price*r.qty,0).toFixed(2)}</b></div>`
-  ].join('');
-  storeSummary.innerHTML = html;
-}
 
 /* ===== Зажатие –/+ ===== */
 let holdTimer=null, holdRAF=null;
@@ -615,7 +541,7 @@ function zoomButton(dir){
   redraw();
 }
 
-/* ===== Жесты (touch) ===== */
+/* ===== Жесты (тач) ===== */
 let lastTouches=[];
 let fingerPanning=false, prevFinger={x:0,y:0};
 let lastPinchDist = 0;
@@ -629,6 +555,7 @@ stage.addEventListener('touchstart', (ev)=>{
     const sy = t.clientY - rect.top;
     const w = screenToWorld(sx, sy);
 
+    // long-press для концов трубы
     const hitEnd = hitEndpoint(w);
     movedForLong = false;
     clearTimeout(longPressTimer);
@@ -638,35 +565,40 @@ stage.addEventListener('touchstart', (ev)=>{
       }, 600);
     }
 
-    // выбор штампа/подписи для перетаскивания
-    movingStampIndex = -1;
-    movingLabelIndex = -1;
+    // выбор существующих штампов/подписей в режиме pan
+    movingStampIndex=-1; movingLabelIndex=-1;
     if(mode==='pan'){
-      const si = hitStamp(w), li = hitLabel(w);
-      if(si!==-1){ selectedStampIndex=si; selectedLabelIndex=-1; showEditBar(true); movingStampIndex=si; redraw(); return; }
-      if(li!==-1){ selectedLabelIndex=li; selectedStampIndex=-1; showEditBar(true); movingLabelIndex=li; redraw(); return; }
+      const si = hitStamp(w);
+      const li = hitLabel(w);
+      if(si!==-1 || li!==-1){
+        if(si!==-1){ selectedStampIndex=si; selectedLabelIndex=-1; showEditBar(true); movingStampIndex=si; }
+        else       { selectedLabelIndex=li; selectedStampIndex=-1; showEditBar(true); movingLabelIndex=li; }
+        redraw(); return;
+      }
     }
 
     if(mode==='pan'){
       fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
     }else if(mode==='stamp'){
-      placeStampAt(sx,sy);
+      placeStampAt(sx,sy); // арматура
+    }else if(mode==='part'){
+      placePartAt(sx,sy);  // со склада
     }else if(mode==='label'){
       placeLabelAt(sx,sy);
-    }else if(mode==='stockPlace'){
-      placeStockAt(sx,sy);
-    }else if(mode==='pickA' || mode==='pickB'){
+    }
+
+    // ВАЖНО: режимы pickA/pickB всегда обрабатываем onTap — фикс «не рисуются линии»
+    if(mode==='pickA' || mode==='pickB'){
       onTap({clientX:t.clientX, clientY:t.clientY});
+      return;
     }
+
   }else if(ev.touches.length===2){
-    fingerPanning=false; clearTimeout(longPressTimer);
-    movingStampIndex=-1; movingLabelIndex=-1;
+    fingerPanning=false;
+    clearTimeout(longPressTimer);
+    movingStampIndex = -1; movingLabelIndex=-1;
     lastTouches = copyTouches(ev.touches);
-    if(selectedStampIndex !== -1 || selectedLabelIndex !== -1){
-      lastPinchDist = pinchDistance(ev.touches);
-    }else{
-      lastPinchDist = 0;
-    }
+    lastPinchDist = pinchDistance(ev.touches);
   }
 },{passive:false});
 
@@ -681,12 +613,18 @@ stage.addEventListener('touchmove', (ev)=>{
 
     if(movingStampIndex !== -1){
       const near = nearestOnPipe(screenToWorld(sx,sy));
-      if(near.ok){ const st = stamps[movingStampIndex]; st.x=near.x; st.y=near.y; st.ang=near.ang; redraw(); }
+      if(near.ok){
+        const st = stamps[movingStampIndex];
+        st.x = near.x; st.y = near.y; st.ang = near.ang; redraw();
+      }
       return;
     }
     if(movingLabelIndex !== -1){
       const near = nearestOnPipe(screenToWorld(sx,sy));
-      if(near.ok){ const lb = labels[movingLabelIndex]; lb.x=near.x; lb.y=near.y; lb.ang=near.ang; redraw(); }
+      if(near.ok){
+        const lb = labels[movingLabelIndex];
+        lb.x = near.x; lb.y = near.y; lb.ang = near.ang; redraw();
+      }
       return;
     }
 
@@ -704,18 +642,16 @@ stage.addEventListener('touchmove', (ev)=>{
       updateHoverFromPointer({clientX:t.clientX, clientY:t.clientY});
     }
   }else if(ev.touches.length===2){
-    if((selectedStampIndex !== -1 || selectedLabelIndex !== -1) && lastPinchDist>0){
-      const dist = pinchDistance(ev.touches);
-      const ratio = dist / lastPinchDist;
-      lastPinchDist = dist;
-      if(selectedStampIndex !== -1){
-        const st = stamps[selectedStampIndex];
-        st.s = clamp((st.s||1) * Math.pow(ratio, 0.9), 0.5, 2.0);
-      }else if(selectedLabelIndex !== -1){
-        const lb = labels[selectedLabelIndex];
-        lb.s = clamp((lb.s||1) * Math.pow(ratio, 0.9), 0.6, 2.0);
-      }
-      redraw();
+    // масштабируем выбранный штамп/подпись пинчем, иначе — сцену
+    const dist = pinchDistance(ev.touches);
+    const ratio = dist / (lastPinchDist||dist);
+    lastPinchDist = dist;
+    if(selectedStampIndex !== -1){
+      const st = stamps[selectedStampIndex];
+      st.s = clamp((st.s||1) * Math.pow(ratio, 0.9), 0.5, 2.0); redraw();
+    }else if(selectedLabelIndex !== -1){
+      const lb = labels[selectedLabelIndex];
+      lb.s = clamp((lb.s||1) * Math.pow(ratio, 0.9), 0.6, 2.0); redraw();
     }else{
       pinchPan(ev.touches);
     }
@@ -737,18 +673,26 @@ stage.addEventListener('mousedown', e=>{
   const w = screenToWorld(sx, sy);
 
   if(mode==='stamp'){ placeStampAt(sx,sy); return; }
+  if(mode==='part'){ placePartAt(sx,sy); return; }
   if(mode==='label'){ placeLabelAt(sx,sy); return; }
-  if(mode==='stockPlace'){ placeStockAt(sx,sy); return; }
 
   movingStampIndex=-1; movingLabelIndex=-1;
   if(mode==='pan'){
-    const si = hitStamp(w), li = hitLabel(w);
-    if(si!==-1){ selectedStampIndex=si; selectedLabelIndex=-1; showEditBar(true); movingStampIndex=si; return; }
-    if(li!==-1){ selectedLabelIndex=li; selectedStampIndex=-1; showEditBar(true); movingLabelIndex=li; return; }
+    const si = hitStamp(w);
+    const li = hitLabel(w);
+    if(si!==-1 || li!==-1){
+      if(si!==-1){ selectedStampIndex=si; selectedLabelIndex=-1; showEditBar(true); movingStampIndex=si; }
+      else       { selectedLabelIndex=li; selectedStampIndex=-1; showEditBar(true); movingLabelIndex=li; }
+      return;
+    }
   }
 
   const hit = hitEndpoint(w);
   if(hit){ editing = hit; deselectAll(); setMode('edit'); redraw(); return; }
+
+  // ВАЖНО: фикс — при режимах pickA/pickB всегда рисуем линию
+  if(mode==='pickA' || mode==='pickB'){ onTap(e); return; }
+
   if(mode!=='pan'){ onTap(e); return; }
   dragging=true; prev={x:e.clientX,y:e.clientY};
 });
@@ -757,16 +701,23 @@ stage.addEventListener('mousemove', e=>{
     const rect=cv.getBoundingClientRect();
     const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
     const near = nearestOnPipe(screenToWorld(sx,sy));
-    if(near.ok){ const st = stamps[movingStampIndex]; st.x=near.x; st.y=near.y; st.ang=near.ang; redraw(); }
+    if(near.ok){
+      const st = stamps[movingStampIndex];
+      st.x = near.x; st.y = near.y; st.ang = near.ang; redraw();
+    }
     return;
   }
   if(movingLabelIndex !== -1){
     const rect=cv.getBoundingClientRect();
     const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
     const near = nearestOnPipe(screenToWorld(sx,sy));
-    if(near.ok){ const lb = labels[movingLabelIndex]; lb.x=near.x; lb.y=near.y; lb.ang=near.ang; redraw(); }
+    if(near.ok){
+      const lb = labels[movingLabelIndex];
+      lb.x = near.x; lb.y = near.y; lb.ang = near.ang; redraw();
+    }
     return;
   }
+
   if(mode==='edit' && editing){
     const rect=cv.getBoundingClientRect();
     const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
@@ -793,32 +744,40 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-/* ===== Управление размером штампов/подписей через мини-бар ===== */
+/* ===== Управление размером выбранных ===== */
 function adjustSelectedStamp(f){
   if(selectedStampIndex === -1) return;
   const st = stamps[selectedStampIndex];
-  st.s = clamp((st.s||1) * f, 0.5, 2.0);
-  redraw();
+  st.s = clamp((st.s||1) * f, 0.5, 2.0); redraw();
 }
 function adjustSelectedLabel(f){
   if(selectedLabelIndex === -1) return;
   const lb = labels[selectedLabelIndex];
-  lb.s = clamp((lb.s||1) * f, 0.6, 2.0);
-  redraw();
+  lb.s = clamp((lb.s||1) * f, 0.6, 2.0); redraw();
 }
 stampMinus.onclick = ()=>adjustSelectedStamp(0.9);
 stampPlus.onclick  = ()=>adjustSelectedStamp(1.1);
 labelMinus.onclick = ()=>adjustSelectedLabel(0.9);
 labelPlus.onclick  = ()=>adjustSelectedLabel(1.1);
 
-/* ===== Постановка штампа/подписи/склад-детали ===== */
+/* ===== Постановка штампа/подписи/склада ===== */
 function placeStampAt(sx,sy){
   if(!stampType) return;
   const near = nearestOnPipe(screenToWorld(sx,sy));
   if(!near.ok){ setToast('Поставьте по трубе'); return; }
-  stamps.push({type:stampType, x:near.x, y:near.y, s:1, ang:near.ang});
+  stamps.push({type:stampType, x:near.x, y:near.y, s:1, ang:near.ang, kind:'COMP'});
   selectedStampIndex = stamps.length-1; selectedLabelIndex=-1;
   stampType = null; compButtons.forEach(x=>x.classList.remove('active'));
+  setMode('pan'); redraw();
+}
+function placePartAt(sx,sy){
+  if(!partType) return;
+  const near = nearestOnPipe(screenToWorld(sx,sy));
+  if(!near.ok){ setToast('Поставьте по трубе'); return; }
+  // используем VALVE как универсальную пиктограмму склада (можно развести по видам отдельно)
+  stamps.push({type:'VALVE', x:near.x, y:near.y, s:1, ang:near.ang, kind:'PART', code:partType});
+  selectedStampIndex = stamps.length-1; selectedLabelIndex=-1;
+  partType = null; stockChips.forEach(x=>x.classList.remove('active'));
   setMode('pan'); redraw();
 }
 function placeLabelAt(sx,sy){
@@ -830,19 +789,6 @@ function placeLabelAt(sx,sy){
   labels.push({text:t, x:near.x, y:near.y, s:1, ang:near.ang, dx:n.x*offset, dy:n.y*offset});
   selectedLabelIndex = labels.length-1; selectedStampIndex=-1;
   setMode('pan'); redraw();
-}
-function placeStockAt(sx,sy){
-  const near = nearestOnPipe(screenToWorld(sx,sy));
-  if(!near.ok){ setToast('Поставьте по трубе'); return; }
-  const item = COMPONENTS.find(c=>c.id===storeItemId);
-  if(!item) return;
-  stamps.push({type:item.icon, x:near.x, y:near.y, s:1, ang:near.ang});
-  stockPlaced.push({
-    id:item.id, name:item.name, system:item.system,
-    size:storeSize, gender:(item.thread?threadGender.value:null),
-    price:item.price, x:near.x, y:near.y, ang:near.ang, icon:item.icon
-  });
-  mode='pan'; redraw(); updateStoreSummary();
 }
 
 /* ===== Линия (3 шага) ===== */
@@ -898,23 +844,31 @@ function zoomAt(sx,sy,zoom){
 }
 
 /* ===== Вспомогательное ===== */
-function deselectAll(){ selectedStampIndex=-1; selectedLabelIndex=-1; showEditBar(mode==='edit'); }
+function cancelEdit(){ editing=null; showEditBar(selectedStampIndex!==-1 || selectedLabelIndex!==-1); }
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
 
 /* ===== Блокируем double-tap zoom на UI ===== */
-const toolbar = document.querySelector('.toolbar');
-let lastTouchEndUI = 0;
-toolbar.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  if (now - lastTouchEndUI <= 300) { e.preventDefault(); e.stopPropagation(); }
-  lastTouchEndUI = now;
-}, { passive: false });
-toolbar.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); }, { passive:false });
+(function preventDoubleTapZoomOnUI(){
+  const uiTargets = document.querySelectorAll('.toolbar, .toolbar .btn, .editbar, .editbar .mini, dialog, dialog .btn');
+  uiTargets.forEach(el => { el.style.touchAction = 'manipulation'; });
+  let lastTouchEnd = 0;
+  function onTouchEnd(e){
+    const now = Date.now();
+    if (now - lastTouchEnd < 350) { e.preventDefault(); e.stopPropagation(); }
+    lastTouchEnd = now;
+  }
+  uiTargets.forEach(el => {
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    el.addEventListener('dblclick', (e)=> { e.preventDefault(); e.stopPropagation(); }, { passive: false });
+    ['gesturestart','gesturechange','gestureend'].forEach(ev=>{
+      el.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); }, { passive:false });
+    });
+  });
+})();
 
 /* ===== init ===== */
 new ResizeObserver(()=>{ fit(); }).observe(stage);
-fit();
-center();
+fit(); center();
 })();
 </script>
 </body>
