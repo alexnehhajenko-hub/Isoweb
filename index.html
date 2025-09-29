@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Трассировка труб — линии + арматура (масштаб труб + перемещение арматуры)</title>
+<title>Трассировка труб — линии + арматура (масштаб труб + перемещение арматуры + опоры)</title>
 <style>
   :root{--ui:#6c4dfc;--txt:#fff}
   html,body{height:100%;margin:0;background:#0f1116;color:#e9e9f0;font-family:system-ui,-apple-system,Inter,Roboto,Arial}
@@ -76,6 +76,15 @@
         </div>
         <small style="opacity:.8">Выбери элемент, закрой окно и тапни по трубе. Мимо трубы не ставится. После установки режим «штамп» выключится. Арматуру можно перетаскивать вдоль трубы.</small>
       </div>
+
+      <!-- НОВОЕ: автоматические отметки опор -->
+      <div class="row-col" style="margin-top:8px">
+        <div style="font-weight:700;margin-bottom:4px">Отметки опор</div>
+        <label class="switch"><input id="supportsEnable" type="checkbox"> Включить</label>
+        <div class="row"><label>Шаг опор</label><input id="supportsStep" type="range" min="60" max="1200" step="10" value="300"><span id="supportsStepV">300</span></div>
+        <div class="row"><label>Длина черточки</label><input id="supportsLen" type="range" min="6" max="80" step="2" value="18"><span id="supportsLenV">18</span></div>
+        <small style="opacity:.8">Черные перпендикулярные отметки «под трубой» с заданным шагом. Отступ от оси = Ø/2 + 6.</small>
+      </div>
     </div>
     <div class="dlg-actions"><button id="dlgClose" class="btn">Закрыть</button></div>
   </dialog>
@@ -86,6 +95,7 @@
 const stage = document.getElementById('stage');
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = true;
 const toast = document.getElementById('toast');
 
 const lineBtn = document.getElementById('lineBtn');
@@ -111,6 +121,11 @@ const editDone = document.getElementById('editDone');
 
 const compButtons = [...document.querySelectorAll('.chip[data-comp]')];
 
+// НОВОЕ: контролы опор
+const supportsEnable = document.getElementById('supportsEnable');
+const supportsStep = document.getElementById('supportsStep'); const supportsStepV = document.getElementById('supportsStepV');
+const supportsLen = document.getElementById('supportsLen');   const supportsLenV = document.getElementById('supportsLenV');
+
 // ---------- Сцена ----------
 let scale = 1, minScale=0.05, maxScale=6;
 let offX = 0, offY = 0;
@@ -129,14 +144,17 @@ let longPressTimer = null;
 let movedForLong = false;
 
 let stampType = null;
-
-// --- ДОБАВЛЕНО: перетаскивание арматуры ---
-let movingStampIndex = -1; // индекс stamps, если тянем арматуру
+let movingStampIndex = -1;
 
 let dpr = window.devicePixelRatio || 1;
 let cssW=0, cssH=0;
 let bgImg = null;
 let bgScaleF = 1; // масштаб фото
+
+// НОВОЕ: состояние опор (по умолчанию выкл)
+let supportsOn = false;
+let supportsStepVal = 300; // world px
+let supportsLenVal  = 18;  // длина черточки, world px
 
 function fit(){
   const r = cv.getBoundingClientRect();
@@ -178,7 +196,6 @@ const ICONS_SVG = {
       <path d="M0,0 L0,8 L12,4 Z" fill="#fff"/></marker></defs>
     <line x1="40" y1="50" x2="98" y2="50" stroke="#fff" stroke-width="7" marker-end="url(#a)"/>
   </svg>`,
-  /* Улучшенный насос */
   PUMP:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 140">
     <defs>
       <radialGradient id="g1" cx="60%" cy="45%"><stop offset="0" stop-color="#7b66ff"/><stop offset="1" stop-color="#5c44e6"/></radialGradient>
@@ -223,6 +240,9 @@ function redraw(){
 
   // трубы
   for(const s of pipes) drawPipe(s);
+
+  // НОВОЕ: автоматические опоры
+  if(supportsOn) drawSupports();
 
   // арматура
   for(const st of stamps) drawStamp(st);
@@ -280,7 +300,7 @@ function drawGrid(){
 function drawPipe(s){
   const w = Math.max(2, s.d/4);
   ctx.save();
-  ctx.lineWidth = w;  // масштабируется вместе с фото
+  ctx.lineWidth = w;
   ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#4da1ff';
   ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
   const r = (w/2);
@@ -297,6 +317,34 @@ function drawStamp(st){
   const w = img.naturalWidth * k, h = img.naturalHeight * k;
   ctx.save(); ctx.translate(st.x, st.y); if(st.ang) ctx.rotate(st.ang);
   ctx.drawImage(img, -w/2, -h/2, w, h); ctx.restore();
+}
+
+// НОВОЕ: отметки опор
+function drawSupports(){
+  ctx.save();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = Math.max(2/scale, 1/scale);
+  for(const s of pipes){
+    const ax=s.a.x, ay=s.a.y, bx=s.b.x, by=s.b.y;
+    const dx=bx-ax, dy=by-ay;
+    const L = Math.hypot(dx,dy); if(L < 1) continue;
+    const ux = dx/L, uy = dy/L;        // единичный вдоль трубы
+    const nx =  uy,  ny = -ux;         // «вниз» от трубы (поворот по часовой)
+    const offset = (s.d/2) + 6;        // отступ от оси
+    const len = supportsLenVal;        // длина черточки
+    // старт с отступом от конца, чтобы не прилипать к кружкам-концовкам
+    const edgePad = Math.max(s.d*1.2, supportsStepVal*0.2);
+    for(let d=edgePad; d<=L-edgePad; d+=supportsStepVal){
+      const px = ax + ux*d + nx*offset;
+      const py = ay + uy*d + ny*offset;
+      // рисуем перпендикуляр (по нормали)
+      ctx.beginPath();
+      ctx.moveTo(px - nx*len/2, py - ny*len/2);
+      ctx.lineTo(px + nx*len/2, py + ny*len/2);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 // ---------- Магнит и геометрия ----------
@@ -328,11 +376,9 @@ function nearestOnPipe(w){
   const allowDist = 24/scale;
   return (bestP && bestD<=allowDist) ? {ok:true, x:bestP.x, y:bestP.y, ang:bestAng} : {ok:false};
 }
-
-// --- ДОБАВЛЕНО: хит-тест арматуры для захвата ---
 function hitStamp(w){
-  const thr = 26/scale; // радиус захвата на экране ~26px
-  for(let i=stamps.length-1;i>=0;i--){ // сверху вниз
+  const thr = 26/scale;
+  for(let i=stamps.length-1;i>=0;i--){
     const st = stamps[i];
     const d = Math.hypot(w.x - st.x, w.y - st.y);
     if(d <= thr) return i;
@@ -360,13 +406,18 @@ panBtn.onclick  = ()=>{ tempA=null; hoverW=null; cancelEdit(); stampType=null; s
 undoBtn.onclick = ()=>{ if(stamps.length) stamps.pop(); else if(pipes.length) pipes.pop(); redraw(); setToast('Стерто'); };
 centerBtn.onclick = center;
 saveBtn.onclick = ()=>{ const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download='pipes.png'; a.click(); };
-settingsBtn.onclick = ()=> dlg.showModal();
-dlgClose.onclick = ()=> dlg.close();
+settingsBtn.onclick = ()=>{ dlg.showModal(); redraw(); };
+dlgClose.onclick = ()=>{ dlg.close(); redraw(); };
 
 diam.oninput = ()=>{ pipeD=+diam.value; diamV.textContent=pipeD; redraw(); };
 grid.oninput = ()=>{ gridStep=+grid.value; gridV.textContent=gridStep; redraw(); };
 bg.onchange = e=>{ const f=e.target.files?.[0]; if(!f) return; const img=new Image(); img.onload=()=>{ bgImg=img; redraw(); }; img.src=URL.createObjectURL(f); };
 bgScale.oninput = ()=>{ bgScaleF=bgScale.value/100; bgScaleV.textContent=bgScale.value+'%'; redraw(); };
+
+// опоры
+supportsEnable.onchange = ()=>{ supportsOn = supportsEnable.checked; redraw(); };
+supportsStep.oninput = ()=>{ supportsStepVal = +supportsStep.value; supportsStepV.textContent = supportsStep.value; redraw(); };
+supportsLen.oninput  = ()=>{ supportsLenVal  = +supportsLen.value;  supportsLenV.textContent  = supportsLen.value;  redraw(); };
 
 // выбор арматуры (штамп)
 compButtons.forEach(b=>{
@@ -408,7 +459,6 @@ stage.addEventListener('touchstart', (ev)=>{
     const sx = t.clientX - rect.left;
     const sy = t.clientY - rect.top;
 
-    // long-press для правки концов
     const wForHit = screenToWorld(sx, sy);
     const hit = hitEndpoint(wForHit);
     movedForLong = false;
@@ -419,18 +469,16 @@ stage.addEventListener('touchstart', (ev)=>{
       }, 600);
     }
 
-    // --- ДОБАВЛЕНО: если попали по арматуре — начинаем её тянуть ---
     movingStampIndex = -1;
     if(mode==='pan'){
       const si = hitStamp(wForHit);
       if(si !== -1){
         movingStampIndex = si;
-        // не включаем fingerPanning, чтобы жест шёл на перемещение штампа
       }else{
         fingerPanning=true; prevFinger={x:t.clientX,y:t.clientY};
       }
     }else if(mode==='stamp'){
-      placeStampAt(sx,sy); // только на трубу и один раз
+      placeStampAt(sx,sy);
     }else if(mode==='pickA' || mode==='pickB'){
       onTap({clientX:t.clientX, clientY:t.clientY});
     }
@@ -497,13 +545,12 @@ stage.addEventListener('mousedown', e=>{
 
   const w = screenToWorld(sx, sy);
 
-  // --- ДОБАВЛЕНО: захват штампа мышью ---
   movingStampIndex = -1;
   if(mode==='pan'){
     const si = hitStamp(w);
     if(si !== -1){
       movingStampIndex = si;
-      return; // ждём mousemove для перемещения штампа
+      return;
     }
   }
 
@@ -556,7 +603,7 @@ stage.addEventListener('wheel', e=>{
   e.preventDefault();
 },{passive:false});
 
-// Постановка штампа (ТОЛЬКО НА ТРУБУ и ОДИН РАЗ)
+// Постановка штампа
 function placeStampAt(sx,sy){
   if(!stampType) return;
   const w = screenToWorld(sx,sy);
