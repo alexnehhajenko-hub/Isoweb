@@ -76,7 +76,6 @@
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
       <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
 
-      <!-- фото (фон) — было в ранних версиях, вернул чтобы ничего не отваливалось -->
       <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
 
       <div class="row"><label>Масштаб фото</label><input id="bgScale" type="range" min="10" max="200" step="5" value="100"><span id="bgScaleV">100%</span></div>
@@ -467,12 +466,12 @@ function zoomButton(dir){
   redraw();
 }
 
-/* ===== Жесты ===== */
+/* ===== Жесты (ПРИВЯЗАЛИ К CANVAS) ===== */
 let lastTouches=[];
 let fingerPanning=false, prevFinger={x:0,y:0};
 let lastPinchDist = 0;
 
-stage.addEventListener('touchstart', (ev)=>{
+cv.addEventListener('touchstart', (ev)=>{
   ev.preventDefault();
   if(ev.touches.length===1){
     const t=ev.touches[0];
@@ -526,7 +525,7 @@ stage.addEventListener('touchstart', (ev)=>{
   }
 },{passive:false});
 
-stage.addEventListener('touchmove', (ev)=>{
+cv.addEventListener('touchmove', (ev)=>{
   ev.preventDefault();
   if(ev.touches.length===1){
     const t=ev.touches[0];
@@ -586,16 +585,16 @@ stage.addEventListener('touchmove', (ev)=>{
   }
 },{passive:false});
 
-stage.addEventListener('touchend', (ev)=>{
+cv.addEventListener('touchend', (ev)=>{
   ev.preventDefault();
   clearTimeout(longPressTimer);
   if(ev.touches.length===0) { fingerPanning=false; movingStampIndex=-1; movingLabelIndex=-1; lastPinchDist=0; }
   if(ev.touches.length<2) lastTouches=[];
 },{passive:false});
 
-/* ===== Мышь ===== */
+/* ===== Мышь (ПРИВЯЗАЛИ К CANVAS) ===== */
 let dragging=false, prev={x:0,y:0};
-stage.addEventListener('mousedown', e=>{
+cv.addEventListener('mousedown', e=>{
   const rect = cv.getBoundingClientRect();
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
   const w = screenToWorld(sx, sy);
@@ -618,7 +617,7 @@ stage.addEventListener('mousedown', e=>{
   if(mode!=='pan'){ onTap(e); return; }
   dragging=true; prev={x:e.clientX,y:e.clientY};
 });
-stage.addEventListener('mousemove', e=>{
+cv.addEventListener('mousemove', e=>{
   if(movingStampIndex !== -1){
     const rect=cv.getBoundingClientRect();
     const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
@@ -657,11 +656,11 @@ stage.addEventListener('mousemove', e=>{
   offX -= dx/scale; offY -= dy/scale;
   prev={x:e.clientX,y:e.clientY}; redraw();
 });
-stage.addEventListener('mouseup', ()=>{ dragging=false; movingStampIndex=-1; movingLabelIndex=-1; });
-stage.addEventListener('mouseleave', ()=>{ dragging=false; movingStampIndex=-1; movingLabelIndex=-1; });
+cv.addEventListener('mouseup', ()=>{ dragging=false; movingStampIndex=-1; movingLabelIndex=-1; });
+cv.addEventListener('mouseleave', ()=>{ dragging=false; movingStampIndex=-1; movingLabelIndex=-1; });
 
-/* ===== Колесо — зум сцены ===== */
-stage.addEventListener('wheel', e=>{
+/* ===== Колесо — зум сцены (ПРИВЯЗАЛИ К CANVAS) ===== */
+cv.addEventListener('wheel', e=>{
   const rect=cv.getBoundingClientRect();
   const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
   zoomAt(cx, cy, e.deltaY>0? 0.85:1.15);
@@ -700,7 +699,6 @@ function placeLabelAt(sx,sy){
   const t = (labelText.value||'').trim(); if(!t){ setToast('Введи текст подписи'); return; }
   const near = nearestOnPipe(screenToWorld(sx,sy));
   if(!near.ok){ setToast('Поставьте подпись по трубе'); return; }
-  // небольшой вынос от оси трубы вверх по нормали к трубе
   const n = {x: -Math.sin(near.ang), y: Math.cos(near.ang)};
   const offset = 10;
   labels.push({text:t, x:near.x, y:near.y, s:1, ang:near.ang, dx:n.x*offset, dy:n.y*offset});
@@ -774,20 +772,4 @@ function deselectAll(){ selectedStampIndex=-1; selectedLabelIndex=-1; showEditBa
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
 
 /* ===== Блокируем double-tap zoom на панели ===== */
-const toolbar = document.querySelector('.toolbar');
-let lastTouchEnd = 0;
-toolbar.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  if (now - lastTouchEnd <= 300) e.preventDefault();
-  lastTouchEnd = now;
-}, { passive: false });
-toolbar.addEventListener('dblclick', (e) => e.preventDefault(), { passive:false });
-
-/* ===== init ===== */
-new ResizeObserver(()=>{ fit(); }).observe(stage);
-fit();
-center();
-})();
-</script>
-</body>
-</html>
+const toolbar = document
