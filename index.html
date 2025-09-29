@@ -75,6 +75,10 @@
       <div class="row"><label>Ø (мм)</label><input id="diam" type="range" min="10" max="300" step="2" value="60"><span id="diamV">60</span></div>
       <div class="row"><label>Сетка</label><input id="grid" type="range" min="24" max="80" step="1" value="40"><span id="gridV">40</span></div>
       <div class="row"><label class="switch"><input id="magnet" type="checkbox" checked> Магнит (привязка к концам)</label></div>
+
+      <!-- фото (фон) — было в ранних версиях, вернул чтобы ничего не отваливалось -->
+      <div class="row" style="align-items:flex-start"><label>Фото (фон)</label><input id="bg" type="file" accept="image/*"></div>
+
       <div class="row"><label>Масштаб фото</label><input id="bgScale" type="range" min="10" max="200" step="5" value="100"><span id="bgScaleV">100%</span></div>
       <div class="row"><label>Размер арматуры</label><input id="stampScale" type="range" min="50" max="200" step="5" value="100"><span id="stampScaleV">100%</span></div>
 
@@ -150,7 +154,7 @@ let pipeD = 60;
 
 const pipes = [];           // сегменты труб
 const stamps = [];          // [{type,x,y,s,ang}]
-const labels = [];          // [{text,x,y,s,ang,dx,dy}] dx/dy — сдвиг от трубы (чтобы не перекрывалась)
+const labels = [];          // [{text,x,y,s,ang,dx,dy}]
 let mode = 'pan';           // 'pan'|'pickA'|'pickB'|'edit'|'stamp'|'label'
 let tempA = null;
 let hoverW = null;
@@ -325,11 +329,9 @@ function drawLabel(lb){
   ctx.font = `600 ${fontPx}px system-ui,-apple-system,Inter,Roboto`;
   const metrics = ctx.measureText(lb.text);
   const w = metrics.width + pad*2, h = fontPx + pad*2;
-  // плашка
   ctx.fillStyle = 'rgba(0,0,0,.62)';
   roundRectPath(-w/2, -h/2, w, h, r);
   ctx.fill();
-  // текст
   ctx.fillStyle = '#ffffff';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
@@ -386,7 +388,6 @@ function hitStamp(w){
   return -1;
 }
 function hitLabel(w){
-  // грубая проверка кругом
   const thr = 28/scale;
   for(let i=labels.length-1;i>=0;i--){
     const lb = labels[i];
@@ -401,7 +402,6 @@ function setMode(newMode){
   mode = newMode;
   lineBtn.classList.toggle('active', mode==='pickA' || mode==='pickB');
   panBtn.classList.toggle('active',  mode==='pan');
-  // мини-панель показываем, если правка концов/выбран штамп/выбрана подпись
   showEditBar(mode==='edit' || selectedStampIndex!==-1 || selectedLabelIndex!==-1);
   setToast(
     mode==='pan'   ? 'Режим: перемещение'
@@ -491,7 +491,7 @@ stage.addEventListener('touchstart', (ev)=>{
       }, 600);
     }
 
-    // выбор/перетаскивание штампа
+    // выбор/перетаскивание штампа/подписи
     movingStampIndex = -1;
     movingLabelIndex = -1;
 
@@ -700,9 +700,9 @@ function placeLabelAt(sx,sy){
   const t = (labelText.value||'').trim(); if(!t){ setToast('Введи текст подписи'); return; }
   const near = nearestOnPipe(screenToWorld(sx,sy));
   if(!near.ok){ setToast('Поставьте подпись по трубе'); return; }
-  // небольшой вынос от оси трубы наверх
+  // небольшой вынос от оси трубы вверх по нормали к трубе
   const n = {x: -Math.sin(near.ang), y: Math.cos(near.ang)};
-  const offset = 10; // в world (без деления на scale, тк мы в мировых)
+  const offset = 10;
   labels.push({text:t, x:near.x, y:near.y, s:1, ang:near.ang, dx:n.x*offset, dy:n.y*offset});
   selectedLabelIndex = labels.length-1; selectedStampIndex=-1;
   setMode('pan'); redraw();
